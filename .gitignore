@@ -1,0 +1,20 @@
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+*.log
+
+# Local settings and secrets - never commit them (.env.example is the template).
+# These patterns apply in every folder, infra/production and infra/livekit included.
+.env
+.env.*
+!.env.example
+secrets/
+firebase-service-account*.json
+
+# IDE / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db

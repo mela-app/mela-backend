@@ -1,0 +1,37 @@
+# LiveKit for production - deployment steps in docs/features/video-provider.md
+# ("Self-hosting LiveKit"). Options:
+# https://github.com/livekit/livekit/blob/master/config-sample.yaml
+#
+# The API key/secret are not in this file: they come from LIVEKIT_KEYS in
+# .env next to docker-compose.yml.
+port: 7880
+# Signaling is only reached through the TLS reverse proxy on this server.
+bind_addresses:
+  - 127.0.0.1
+
+rtc:
+  # Media ports - open 50000-60000/udp in the firewall.
+  port_range_start: 50000
+  port_range_end: 60000
+  # ICE over TCP for networks that block UDP - open 7881/tcp.
+  tcp_port: 7881
+  # Advertise the server's public IP (found via STUN) to the apps.
+  use_external_ip: true
+
+room:
+  # The backend creates each room when a live starts and deletes it when the
+  # live ends, so a leftover token can't reopen an ended live.
+  auto_create: false
+
+logging:
+  level: info
+
+# Optional TURN/TLS on port 443, for viewers behind firewalls that block
+# everything but HTTPS. It needs its own domain and certificate:
+# https://docs.livekit.io/transport/self-hosting/deployment/#improving-connectivity-with-turn
+# turn:
+#   enabled: true
+#   domain: turn.example.com
+#   tls_port: 5349
+#   cert_file: /certs/turn.crt
+#   key_file: /certs/turn.key

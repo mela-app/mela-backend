@@ -1,0 +1,133 @@
+# Local development. `docker compose up -d` starts what the API needs -
+# Postgres, Redis, LiveKit and S3Mock - and you run the API natively, with
+# hot reload (README.md). To run the API in a container as well, from the
+# image production uses:
+#
+#   docker compose --profile app up -d --build
+#
+# API on http://localhost:<BACKEND_PORT> (stop `npm run start:dev` first, or
+# pick another port). Every setting and secret comes from .env (copy
+# .env.example) - nothing in this file has a built-in value, and compose
+# names what is missing. The admin console and the web player run from their
+# own repositories. Production: infra/production.
+name: mela
+
+# The API image, shared by the backend (which builds it) and its one-shot
+# migrate job.
+x-backend-image: &backend-image
+  image: mela-backend:local
+  profiles: ["app"]
+  env_file:
+    - .env
+  # The Firebase key for push (FIREBASE_SERVICE_ACCOUNT_JSON=./secrets/...);
+  # never baked into the image.
+  volumes:
+    - ./secrets:/app/secrets:ro
+  environment:
+    # Inside the network. The apps still reach LiveKit and S3Mock through
+    # localhost (adb reverse), so LIVEKIT_URL and S3_* stay as in .env -
+    # the backend only presigns storage URLs, it never calls S3Mock itself.
+    DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/gambling_live?schema=public
+    REDIS_URL: redis://redis:6379
+    LIVEKIT_API_URL: http://livekit:7880
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: gambling_live
+    # This machine only, like Redis and S3Mock below.
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Local LiveKit media server (only used when VIDEO_PROVIDER=livekit).
+  # Production runs from infra/livekit instead - see docs/features/video-provider.md.
+  livekit:
+    image: livekit/livekit-server:v1.13.7
+    restart: unless-stopped
+    command: --config /etc/livekit.yaml
+    environment:
+      # The pair the API signs its tokens with, from .env.
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:?set LIVEKIT_API_KEY in .env}: ${LIVEKIT_API_SECRET:?set LIVEKIT_API_SECRET in .env}"
+    volumes:
+      - ./infra/livekit/livekit.dev.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+
+  # S3-compatible object storage for avatars (dev only - production points
+  # S3_ENDPOINT at real S3/R2 instead). MinIO and LocalStack's free container
+  # images are gone/gated (MinIO community is source-build-only now;
+  # LocalStack now requires an auth token even for its free tier) - S3Mock
+  # (Apache-2.0, no account needed) is the replacement. See docs/features/storage.md.
+  s3mock:
+    image: adobe/s3mock:latest
+    restart: unless-stopped
+    environment:
+      COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS: avatars
+      COM_ADOBE_TESTING_S3MOCK_STORE_RETAIN_FILES_ON_EXIT: "true"
+      COM_ADOBE_TESTING_S3MOCK_STORE_ROOT: /s3mockroot
+    # No credentials are checked, so never on the network; phones reach it
+    # through adb reverse.
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - s3mock_data:/s3mockroot
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/favicon.ico"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    <<: *backend-image
+    build: .
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:?set BACKEND_PORT in .env}:${PORT:?set PORT in .env}"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      s3mock:
+        condition: service_healthy
+
+  # Applies pending migrations and makes sure the super admin exists
+  # (SEED_ADMIN_* in .env), then exits; the backend waits for it.
+  migrate:
+    <<: *backend-image
+    # The backend's image, built above - never pulled.
+    pull_policy: never
+    command: ["npm", "run", "db:deploy"]
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  s3mock_data:

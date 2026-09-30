@@ -1,0 +1,18 @@
+# Only what the image build needs: the manifests, sources and Prisma schema.
+node_modules
+dist
+coverage
+scripts
+.env*
+*.log
+firebase-service-account*.json
+secrets
+Dockerfile
+.dockerignore
+# The repository's own tooling and the server stacks (infra/production/.env included).
+infra
+.github
+docker-compose.yml
+README.md
+.editorconfig
+.gitignore

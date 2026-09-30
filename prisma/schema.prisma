@@ -1,0 +1,615 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PlatformRole {
+  USER
+  PLATFORM_MODERATOR
+  SUPER_ADMIN
+}
+
+// Phase 8: what a platform moderator may do in the admin console, area by
+// area, as chosen by a super admin (who can do everything). MANAGE and SEND
+// include the area's VIEW - see src/common/permissions/admin-permissions.ts.
+enum AdminPermission {
+  VIEW_LIVES
+  MANAGE_LIVES
+  VIEW_USERS
+  MANAGE_USERS
+  VIEW_ALERTS
+  SEND_ALERTS
+  SEND_GLOBAL_ALERTS
+  VIEW_PHRASES
+  MANAGE_PHRASES
+  VIEW_AUDIT_LOG
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+// Who sees a profile's details - bio, counts, follow lists; name and picture
+// stay public. See src/social/profile-visibility.ts.
+enum ProfileVisibility {
+  EVERYONE
+  FOLLOWERS
+  FRIENDS
+  ONLY_ME
+}
+
+// Phase 0: users table. Every feature module owns its own models and its
+// own migration - see docs/features/README.md.
+model User {
+  id                     String            @id @default(uuid())
+  username               String            @unique
+  displayName            String
+  email                  String            @unique
+  passwordHash           String
+  avatarUrl              String?
+  // Phase 3: profile bio (plan §6.10).
+  bio                    String?
+  platformRole           PlatformRole      @default(USER)
+  status                 UserStatus        @default(ACTIVE)
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+  // Phase 8: admin console (plan §6.8). A seeded or staff-created account
+  // must set its own password before anything else.
+  passwordChangeRequired Boolean           @default(false)
+  lastLoginAt            DateTime?
+  suspendedAt            DateTime?
+  suspensionReason       String?
+  // Platform moderators only; always empty for everyone else.
+  adminPermissions       AdminPermission[] @default([])
+  profileVisibility      ProfileVisibility @default(EVERYONE)
+
+  streams               Stream[]              @relation("StreamHost")
+  sessions              UserSession[]
+  chatMessages          ChatMessage[]
+  // Rows where this user is the one following someone.
+  following             Follow[]              @relation("Follower")
+  // Rows where this user is the one being followed.
+  followedBy            Follow[]              @relation("Followee")
+  // Phase 4: moderation, block & delegated moderators (plan §6.4, §6.9).
+  moderatorsGranted     Moderator[]           @relation("ModeratorsGranted")
+  moderatingFor         Moderator[]           @relation("ModeratorOf")
+  blocksMade            Block[]               @relation("Blocker")
+  blockedBy             Block[]               @relation("Blocked")
+  roomBansIssued        RoomBan[]             @relation("RoomBansIssued")
+  roomBans              RoomBan[]             @relation("RoomBanned")
+  bannedPhrasesCreated  BannedPhrase[]
+  // Phase 5: notifications & sharing (plan §6.11).
+  notificationsReceived Notification[]        @relation("NotificationsReceived")
+  notificationsActed    Notification[]        @relation("NotificationsActed")
+  notificationSettings  NotificationSettings?
+  // Phase 6: guest management (plan §6.5, §6.6).
+  guestRequestsMade     GuestRequest[]        @relation("GuestRequester")
+  guestSeats            StreamGuest[]         @relation("GuestSeats")
+  // Phase 7: mute suite (plan §6.7).
+  roomChatMutes         RoomChatMute[]        @relation("RoomChatMuted")
+  roomChatMutesIssued   RoomChatMute[]        @relation("RoomChatMutesIssued")
+  personalMutesMade     PersonalChatMute[]    @relation("PersonalMutesMade")
+  personalMutedBy       PersonalChatMute[]    @relation("PersonalMutedBy")
+  // Phase 8: admin console (plan §6.8).
+  streamsLocked         Stream[]              @relation("StreamLockedBy")
+  adminAlertsSent       AdminAlert[]
+  auditLogs             AuditLog[]
+  recordingPermissions  RecordingPermission[] @relation("RecordingAllowed")
+
+  @@map("users")
+}
+
+// Asymmetric follow (plan §6.10); a mutual pair is shown as "Friends" without
+// its own row. PENDING is reserved for a future private-account mode - every
+// follow today is created ACTIVE.
+enum FollowStatus {
+  ACTIVE
+  PENDING
+}
+
+// Phase 3: the follow graph. See docs/features/social.md.
+model Follow {
+  id           String       @id @default(uuid(7)) @db.Uuid
+  followerId   String
+  followeeId   String
+  status       FollowStatus @default(ACTIVE)
+  // The bell on a profile - on by default.
+  notifyOnLive Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+
+  follower User @relation("Follower", fields: [followerId], references: [id], onDelete: Cascade)
+  followee User @relation("Followee", fields: [followeeId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followeeId])
+  @@index([followeeId])
+  @@map("follows")
+}
+
+enum SessionPlatform {
+  ANDROID
+  IOS
+  WEB
+  UNKNOWN
+}
+
+// One row per signed-in device (plan §8), so signing in on a second device
+// doesn't sign the first one out. See docs/features/auth.md.
+model UserSession {
+  id                       String          @id @default(uuid())
+  userId                   String
+  platform                 SessionPlatform @default(UNKNOWN)
+  refreshTokenHash         String
+  // Rotated out by the last refresh; accepted once more for a short grace
+  // window in case that refresh's response never reached the device.
+  previousRefreshTokenHash String?
+  // Phase 5: this device's FCM token (plan §6.11) - null until `PUT /me/push-token`.
+  pushToken                String?
+  rotatedAt                DateTime        @default(now())
+  lastSeenAt               DateTime        @default(now())
+  createdAt                DateTime        @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_sessions")
+}
+
+enum StreamStatus {
+  SCHEDULED
+  LIVE
+  ENDED
+  LOCKED
+}
+
+// Host-chosen composition of the live, mirrored to every viewer.
+enum StreamLayout {
+  FULL
+  FIT
+  SPLIT
+  FLOATING
+  MINIMAL
+}
+
+// Which media vendor carries a live. See docs/features/video-provider.md.
+enum VideoProviderKind {
+  AGORA
+  LIVEKIT
+}
+
+// Why a live ended - viewers are told which (plan §6.1).
+enum StreamEndReason {
+  HOST_ENDED
+  // No heartbeat from the host's app for the grace window (crash, lost signal).
+  HOST_DISCONNECTED
+  // The host went live again (one live per host).
+  REPLACED
+  // Phase 8: an admin locked it (plan §6.8).
+  LOCKED
+}
+
+// Phase 1: go-live/watch. See docs/features/streams.md.
+model Stream {
+  id              String            @id @default(uuid())
+  hostId          String
+  title           String
+  category        String?
+  status          StreamStatus      @default(LIVE)
+  layout          StreamLayout      @default(FULL)
+  // Fixed when the live starts, so switching VIDEO_PROVIDER never strands
+  // a live that's already running on the other vendor.
+  videoProvider   VideoProviderKind @default(AGORA)
+  // Agora channel or LiveKit room name.
+  channelName     String            @unique
+  startedAt       DateTime          @default(now())
+  endedAt         DateTime?
+  endedReason     StreamEndReason?
+  // Most unique viewers at once, saved when the live ends.
+  peakViewerCount Int               @default(0)
+  // Likes collected, saved when the live ends (counted in Redis while live).
+  likeCount       Int               @default(0)
+  // Phase 4: one pinned chat message at a time (plan §6.13).
+  pinnedMessageId String?           @unique @db.Uuid
+  // Phase 8: the admin kill switch (plan §6.8). Kept after an unlock, as history.
+  lockedById      String?
+  lockedReason    String?
+  lockedAt        DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  host                 User                  @relation("StreamHost", fields: [hostId], references: [id])
+  lockedBy             User?                 @relation("StreamLockedBy", fields: [lockedById], references: [id], onDelete: SetNull)
+  chatMessages         ChatMessage[]         @relation("StreamMessages")
+  pinnedMessage        ChatMessage?          @relation("PinnedMessage", fields: [pinnedMessageId], references: [id], onDelete: SetNull)
+  roomBans             RoomBan[]
+  moderators           Moderator[]
+  notifications        Notification[]
+  guestRequests        GuestRequest[]
+  guests               StreamGuest[]
+  chatMutes            RoomChatMute[]
+  adminAlerts          AdminAlert[]
+  recordingPermissions RecordingPermission[]
+
+  @@index([status])
+  @@index([hostId, startedAt])
+  @@map("streams")
+}
+
+enum ChatModerationStatus {
+  VISIBLE
+  // Held back by the automatic filter (Phase 4).
+  HIDDEN
+  // Removed by the host or a moderator (Phase 4).
+  DELETED
+}
+
+// Phase 2: live chat. See docs/features/chat.md.
+model ChatMessage {
+  // UUIDv7 is time-ordered, so history pages by id.
+  id               String               @id @default(uuid(7)) @db.Uuid
+  streamId         String
+  userId           String
+  text             String
+  // The host's photo (docs/features/chat.md); `text` is then its caption, maybe empty.
+  imageUrl         String?
+  moderationStatus ChatModerationStatus @default(VISIBLE)
+  flaggedReason    String?
+  createdAt        DateTime             @default(now())
+
+  stream         Stream  @relation("StreamMessages", fields: [streamId], references: [id], onDelete: Cascade)
+  user           User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pinnedInStream Stream? @relation("PinnedMessage")
+
+  @@index([streamId, id])
+  @@map("chat_messages")
+}
+
+// Phase 4: host-delegated moderators, scoped to that host's own channel (plan §6.9).
+enum ModeratorCapability {
+  DELETE_MESSAGES
+  PIN_MESSAGES
+  MUTE_CHAT
+  BAN_USERS
+  MANAGE_GUEST_REQUESTS
+  REMOVE_GUESTS
+  FORCE_MUTE_GUESTS
+}
+
+enum ModeratorStatus {
+  ACTIVE
+  REVOKED
+}
+
+// A grant is scoped to the one stream it was made for (revised 2026-09-26,
+// plan §6.9): it does not carry over to the host's future streams - the
+// host re-grants per stream if they want the same person moderating again.
+model Moderator {
+  id           String                @id @default(uuid(7)) @db.Uuid
+  hostId       String
+  streamId     String
+  userId       String
+  capabilities ModeratorCapability[]
+  status       ModeratorStatus       @default(ACTIVE)
+  grantedAt    DateTime              @default(now())
+  revokedAt    DateTime?
+
+  host   User   @relation("ModeratorsGranted", fields: [hostId], references: [id], onDelete: Cascade)
+  user   User   @relation("ModeratorOf", fields: [userId], references: [id], onDelete: Cascade)
+  stream Stream @relation(fields: [streamId], references: [id], onDelete: Cascade)
+
+  @@unique([streamId, userId])
+  @@index([userId])
+  @@index([hostId])
+  @@map("moderators")
+}
+
+// Phase 4: personal block (plan §6.4) - hides the blocked user's messages and
+// streams for the blocker; also deletes any follow between them both ways.
+model Block {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+
+  blocker User @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+  @@index([blockedId])
+  @@map("blocks")
+}
+
+// Phase 4: host room ban/kick (plan §6.4) - distinct from a personal Block.
+enum RoomBanScope {
+  SESSION
+  HOST_PERMANENT
+}
+
+model RoomBan {
+  id           String       @id @default(uuid(7)) @db.Uuid
+  hostId       String
+  bannedUserId String
+  // Null when scope is HOST_PERMANENT (applies to every future stream of this host's).
+  streamId     String?
+  scope        RoomBanScope
+  createdAt    DateTime     @default(now())
+
+  host   User    @relation("RoomBansIssued", fields: [hostId], references: [id], onDelete: Cascade)
+  banned User    @relation("RoomBanned", fields: [bannedUserId], references: [id], onDelete: Cascade)
+  stream Stream? @relation(fields: [streamId], references: [id], onDelete: Cascade)
+
+  @@index([hostId, bannedUserId])
+  @@map("room_bans")
+}
+
+// Phase 4: chat moderation word/phrase filter (plan §6.3) - a real table (not
+// static config) so it can be updated without a deploy once Phase 8 adds a CRUD UI.
+enum BannedPhraseSeverity {
+  // The send is rejected outright.
+  REJECT
+  // The matched phrase is replaced with asterisks; the message still sends.
+  MASK
+}
+
+model BannedPhrase {
+  id        String               @id @default(uuid(7)) @db.Uuid
+  phrase    String               @unique
+  severity  BannedPhraseSeverity @default(REJECT)
+  createdBy String?
+  createdAt DateTime             @default(now())
+
+  creator User? @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@map("banned_phrases")
+}
+
+// Phase 5: one in-app notification (plan §6.11) - additive-only enum, like
+// realtime event names (§4.1). GUEST_INVITE is reserved for Phase 6 (guest
+// management isn't built yet, so nothing emits it today).
+enum NotificationType {
+  STREAM_STARTED
+  NEW_FOLLOWER
+  STREAM_INVITE
+  MODERATOR_GRANTED
+  GUEST_INVITE
+}
+
+model Notification {
+  // UUIDv7 is time-ordered, so the inbox pages by id (same trick as ChatMessage).
+  id          String           @id @default(uuid(7)) @db.Uuid
+  recipientId String
+  type        NotificationType
+  // Who caused it (the new follower, the host who went live, who granted
+  // the moderator role, ...) - null for a type with no natural actor.
+  actorId     String?
+  // The stream it's about, for types where that applies - lets a tap deep-link.
+  streamId    String?
+  readAt      DateTime?
+  createdAt   DateTime         @default(now())
+
+  recipient User    @relation("NotificationsReceived", fields: [recipientId], references: [id], onDelete: Cascade)
+  actor     User?   @relation("NotificationsActed", fields: [actorId], references: [id], onDelete: SetNull)
+  stream    Stream? @relation(fields: [streamId], references: [id], onDelete: SetNull)
+
+  @@index([recipientId, createdAt])
+  @@map("notifications")
+}
+
+// Phase 5: per-type push toggle (plan §6.11) - in-app is always on (the row
+// is always written); this only gates the push-queue side. One row per user,
+// created lazily on first read/write with every type defaulted to on.
+model NotificationSettings {
+  userId               String  @id
+  pushStreamStarted    Boolean @default(true)
+  pushNewFollower      Boolean @default(true)
+  pushStreamInvite     Boolean @default(true)
+  pushModeratorGranted Boolean @default(true)
+  pushGuestInvite      Boolean @default(true)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_settings")
+}
+
+// Phase 6: guest management (plan §6.5). A row covers BOTH directions - a
+// viewer raising their hand (initiatedBy=VIEWER, acted on by the host/a
+// MANAGE_GUEST_REQUESTS moderator) and a host inviting someone on stage
+// (initiatedBy=HOST, acted on by that invitee) - both accept through the
+// same path once resolved (plan's own wording), so they share one table and
+// one set of accept/reject/cancel endpoints instead of two parallel ones.
+enum GuestRequestStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELLED
+}
+
+enum GuestRequestInitiator {
+  VIEWER
+  HOST
+}
+
+model GuestRequest {
+  id          String                @id @default(uuid(7)) @db.Uuid
+  streamId    String
+  // The person who would become a guest if this resolves - the requester
+  // (initiatedBy=VIEWER) or the invitee (initiatedBy=HOST).
+  userId      String
+  initiatedBy GuestRequestInitiator
+  status      GuestRequestStatus    @default(PENDING)
+  requestedAt DateTime              @default(now())
+  resolvedAt  DateTime?
+
+  stream Stream @relation(fields: [streamId], references: [id], onDelete: Cascade)
+  user   User   @relation("GuestRequester", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([streamId, status])
+  @@index([userId, status])
+  @@map("guest_requests")
+}
+
+enum StreamGuestStatus {
+  ACTIVE
+  REMOVED
+}
+
+// One row per (stream, user) - re-joining after leaving/being removed flips
+// the same row rather than creating a new one (matches the Moderator
+// upsert-on-unique-key pattern from Phase 4, plan §6.6).
+model StreamGuest {
+  id            String            @id @default(uuid(7)) @db.Uuid
+  streamId      String
+  userId        String
+  status        StreamGuestStatus @default(ACTIVE)
+  joinedAt      DateTime          @default(now())
+  leftAt        DateTime?
+  // Phase 7: the host or a FORCE_MUTE_GUESTS moderator turned this guest's mic off (plan §6.7).
+  micForceMuted Boolean           @default(false)
+
+  stream Stream @relation(fields: [streamId], references: [id], onDelete: Cascade)
+  user   User   @relation("GuestSeats", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([streamId, userId])
+  @@map("stream_guests")
+}
+
+// Phase 7: room chat mute (plan §6.7) - the host or a MUTE_CHAT moderator
+// stops one user's messages being accepted in one live. One row per (stream,
+// user): muting again replaces the expiry, unmuting deletes it.
+model RoomChatMute {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  streamId  String
+  userId    String
+  mutedById String
+  // Null: until the live ends.
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+
+  stream  Stream @relation(fields: [streamId], references: [id], onDelete: Cascade)
+  user    User   @relation("RoomChatMuted", fields: [userId], references: [id], onDelete: Cascade)
+  mutedBy User   @relation("RoomChatMutesIssued", fields: [mutedById], references: [id], onDelete: Cascade)
+
+  @@unique([streamId, userId])
+  @@map("room_chat_mutes")
+}
+
+// The app keeps a live out of screen recordings and screenshots, except for
+// the viewers its host allows (docs/features/streams.md). One row per
+// (stream, user); taking it back deletes the row.
+model RecordingPermission {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  streamId  String
+  userId    String
+  createdAt DateTime @default(now())
+
+  stream Stream @relation(fields: [streamId], references: [id], onDelete: Cascade)
+  user   User   @relation("RecordingAllowed", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([streamId, userId])
+  @@map("recording_permissions")
+}
+
+// Phase 7: personal chat mute (plan §6.7) - hides one person's messages for
+// the muter only, on every device; the muted user is unaffected.
+model PersonalChatMute {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  userId      String
+  mutedUserId String
+  createdAt   DateTime @default(now())
+
+  user      User @relation("PersonalMutesMade", fields: [userId], references: [id], onDelete: Cascade)
+  mutedUser User @relation("PersonalMutedBy", fields: [mutedUserId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, mutedUserId])
+  @@map("personal_chat_mutes")
+}
+
+// Phase 8: an in-app alert from the admin console (plan §6.8) - to every
+// connected app (GLOBAL) or to one live's room (STREAM).
+enum AlertScope {
+  GLOBAL
+  STREAM
+}
+
+enum AlertSeverity {
+  INFO
+  WARNING
+  // Stays up until tapped away.
+  CRITICAL
+}
+
+model AdminAlert {
+  id             String        @id @default(uuid(7)) @db.Uuid
+  scope          AlertScope
+  streamId       String?
+  message        String
+  severity       AlertSeverity @default(INFO)
+  createdById    String?
+  // Connected devices it went out to.
+  recipientCount Int           @default(0)
+  createdAt      DateTime      @default(now())
+
+  stream    Stream? @relation(fields: [streamId], references: [id], onDelete: SetNull)
+  createdBy User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@map("admin_alerts")
+}
+
+// Phase 8: the audit trail (plan §6.8, §11). Append-only; `action` comes from
+// the catalog in src/audit/audit-catalog.ts, so a new one needs no migration.
+// Labels are captured when written, so an entry still reads right after a
+// rename or a deleted account.
+enum AuditCategory {
+  AUTH
+  ACCOUNT
+  STREAM
+  CHAT
+  MODERATION
+  GUEST
+  SOCIAL
+  ALERT
+  SETTINGS
+  ADMIN
+}
+
+enum AuditActorRole {
+  SUPER_ADMIN
+  PLATFORM_MODERATOR
+  HOST
+  MODERATOR
+  USER
+  SYSTEM
+}
+
+model AuditLog {
+  id          String         @id @default(uuid(7)) @db.Uuid
+  category    AuditCategory
+  action      String
+  actorId     String?
+  actorRole   AuditActorRole
+  actorLabel  String?
+  targetType  String?
+  targetId    String?
+  targetLabel String?
+  // The live it happened in, when there is one.
+  streamId    String?
+  reason      String?
+  metadata    Json?
+  ip          String?
+  userAgent   String?
+  createdAt   DateTime       @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([actorId, createdAt])
+  @@index([category, createdAt])
+  @@index([targetType, targetId])
+  @@index([streamId, createdAt])
+  @@map("audit_logs")
+}

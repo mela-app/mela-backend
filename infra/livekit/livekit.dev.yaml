@@ -1,0 +1,29 @@
+# LiveKit for local development only - started by `docker compose up -d`
+# from the repo root. Production uses infra/livekit/livekit.yaml instead.
+# Options: https://github.com/livekit/livekit/blob/master/config-sample.yaml
+port: 7880
+bind_addresses:
+  - 0.0.0.0
+
+rtc:
+  # ICE/TCP. A phone on USB reaches it through `adb reverse tcp:7881 tcp:7881`
+  # (adb forwards TCP only), so this is the path real devices use locally.
+  tcp_port: 7881
+  # ICE/UDP, one port for every connection - used by the iOS Simulator and
+  # anything else on this machine.
+  udp_port: 7882
+  # Candidates must be addresses the app can reach: 127.0.0.1 is this PC for
+  # the iOS Simulator, and for a phone once `adb reverse` is running.
+  node_ip: 127.0.0.1
+  use_external_ip: false
+
+room:
+  # Same as production: the backend creates each room when a live starts,
+  # so a leftover token can't reopen an ended live.
+  auto_create: false
+
+# No keys here: docker-compose.yml passes LIVEKIT_KEYS, built from
+# LIVEKIT_API_KEY / LIVEKIT_API_SECRET in .env - the pair the API signs with.
+
+logging:
+  level: info

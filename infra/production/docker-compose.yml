@@ -1,0 +1,150 @@
+# Mela in production, on one Linux server with Docker, from a clone of this
+# (the backend's) repository - see docs/deployment.md in mela-admin-web.
+#
+#   cp .env.example .env                    # then fill it in
+#   docker compose pull                     # the images CI pushed to GHCR
+#   docker compose up -d                    # API, admin console, web player, Postgres, Redis, HTTPS
+#                                           # (plus LiveKit, with COMPOSE_PROFILES=livekit)
+#
+# BACKEND_IMAGE / ADMIN_IMAGE / WEB_IMAGE in .env point at GHCR, where each
+# repository's cd.yml pushes its own app's image on main, then pulls and
+# restarts only that service here, over SSH - the others keep serving.
+# Leave BACKEND_IMAGE unset to build the API on the server instead
+# (`docker compose up -d --build`); the console and the player are always
+# images (build one with `docker build -t <name> .` in its repository).
+#
+# Caddy terminates TLS (certificates are automatic) for API_DOMAIN,
+# ADMIN_DOMAIN and LIVEKIT_DOMAIN. Nothing else is reachable from outside:
+# the backend, the console and the web player listen on loopback only, and
+# Postgres and Redis only on the internal network.
+name: mela
+
+# The API image, shared by the backend (which pulls or builds it) and its
+# one-shot migrate job.
+x-backend: &backend
+  image: ${BACKEND_IMAGE:-mela-backend}:${BACKEND_TAG:-latest}
+  env_file:
+    - .env
+  # The Firebase key for push (FIREBASE_SERVICE_ACCOUNT_JSON=./secrets/...).
+  volumes:
+    - ./secrets:/app/secrets:ro
+  environment:
+    NODE_ENV: production
+    PORT: "3000"
+    DATABASE_URL: postgresql://mela:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/mela?schema=public
+    REDIS_URL: redis://redis:6379
+    # The console calls the API through its own origin, so this is only a
+    # guard for browsers.
+    CORS_ORIGIN: https://${ADMIN_DOMAIN:?set ADMIN_DOMAIN in .env}
+    # One hop: Caddy. (The console's nginx passes Caddy's headers through.)
+    TRUST_PROXY: "1"
+
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    # Host networking: Caddy reaches LiveKit (which binds 127.0.0.1 on the
+    # host) and the loopback ports below alike, and sees real client IPs.
+    network_mode: host
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN in .env}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN}
+      # Without LiveKit, a local-only placeholder that never gets a public certificate.
+      LIVEKIT_DOMAIN: ${LIVEKIT_DOMAIN:-livekit.localhost}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mela
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: mela
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mela -d mela"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Queued jobs survive a restart.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Applies pending migrations and makes sure the super admin exists
+  # (SEED_ADMIN_*), then exits; the backend waits for it on every deploy.
+  migrate:
+    <<: *backend
+    # The backend's image, pulled (or built) with it.
+    pull_policy: never
+    command: ["npm", "run", "db:deploy"]
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  backend:
+    <<: *backend
+    build: ../..
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  admin:
+    image: ${ADMIN_IMAGE:?set ADMIN_IMAGE in .env}:${ADMIN_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      API_UPSTREAM: http://backend:3000
+      CSP_IMG_SRC: ${ADMIN_CSP_IMG_SRC:?set ADMIN_CSP_IMG_SRC in .env}
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # The share page's web player: static files, which Caddy serves at /web/*
+  # on API_DOMAIN, next to the page that loads them (/live/:id).
+  web:
+    image: ${WEB_IMAGE:?set WEB_IMAGE in .env}:${WEB_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:8080"
+
+  livekit:
+    image: livekit/livekit-server:v1.13.7
+    profiles: ["livekit"]
+    restart: unless-stopped
+    command: --config /etc/livekit.yaml
+    # WebRTC needs the host's real UDP ports and public IP; signaling binds
+    # 127.0.0.1:7880, behind Caddy (infra/livekit/livekit.yaml).
+    network_mode: host
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-}: ${LIVEKIT_API_SECRET:-}"
+    volumes:
+      - ../livekit/livekit.yaml:/etc/livekit.yaml:ro
+
+volumes:
+  postgres_data:
+  redis_data:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,5 @@
+-- CreateEnum
+CREATE TYPE "AdminPermission" AS ENUM ('VIEW_LIVES', 'MANAGE_LIVES', 'VIEW_USERS', 'MANAGE_USERS', 'VIEW_REPORTS', 'MANAGE_REPORTS', 'VIEW_ALERTS', 'SEND_ALERTS', 'SEND_GLOBAL_ALERTS', 'VIEW_PHRASES', 'MANAGE_PHRASES', 'VIEW_AUDIT_LOG');
+
+-- AlterTable
+ALTER TABLE "users" ADD COLUMN     "adminPermissions" "AdminPermission"[] DEFAULT ARRAY[]::"AdminPermission"[];
