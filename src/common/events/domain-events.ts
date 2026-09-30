@@ -75,6 +75,9 @@ export const DomainEvents = {
   BannedPhraseDeleted: 'banned_phrase.deleted',
   UserUnfollowed: 'user.unfollowed',
   UserProfileModerated: 'user.profile_moderated',
+  // Direct messages between friends (docs/features/messages.md).
+  DirectMessageSent: 'direct_message.sent',
+  DirectMessagesRead: 'direct_message.read',
 } as const;
 
 
@@ -427,6 +430,51 @@ export interface UserProfileModeratedPayload {
   actorId: string;
   reason: string;
   changes: Record<string, { from: string | null; to: string | null }>;
+}
+
+// Direct messages between friends (docs/features/messages.md). What the API
+// answers with, and what `message:new` carries.
+export interface DirectMessageSnapshot {
+  id: string;
+  senderId: string;
+  recipientId: string;
+  text: string;
+  // The sending app's own id for it, so that app can match its pending bubble.
+  clientId: string | null;
+  createdAt: Date;
+  // When the recipient read it; null while unread.
+  readAt: Date | null;
+}
+
+/** The brief profile shown beside a conversation. */
+export interface DirectMessagePerson {
+  id: string;
+  username: string;
+  displayName: string;
+  avatarUrl: string | null;
+}
+
+// After the message is stored. RealtimeGateway relays it as `message:new` to
+// both people's own rooms - the recipient's inbox, and the sender's other
+// devices - and `message:unread_count` to the recipient: a total, so a missed
+// update never leaves the badge wrong.
+export interface DirectMessageSentPayload {
+  message: DirectMessageSnapshot;
+  // Both people, so either app can put a new conversation in its inbox without a fetch.
+  sender: DirectMessagePerson;
+  recipient: DirectMessagePerson;
+  recipientUnreadCount: number;
+}
+
+// Only when something was unread. Relayed as `message:read` to both people's
+// own rooms - the partner's app shows "Seen", the reader's other devices clear
+// the conversation - and `message:unread_count` (the reader's total) to the reader.
+export interface DirectMessagesReadPayload {
+  readerId: string;
+  // Whose messages were read.
+  partnerId: string;
+  readAt: Date;
+  readerUnreadCount: number;
 }
 
 

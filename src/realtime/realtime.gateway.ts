@@ -28,6 +28,8 @@ import {
   ChatMessageDeletedPayload,
   ChatMessagePinnedPayload,
   ChatMessageUnpinnedPayload,
+  DirectMessageSentPayload,
+  DirectMessagesReadPayload,
   GuestJoinedPayload,
   GuestMicForceMuteChangedPayload,
   GuestRemovedPayload,
@@ -612,6 +614,31 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     this.server
       .to(userRoom(payload.userId))
       .emit('recording:permission', { streamId: payload.streamId, allowed: payload.allowed });
+  }
+
+  // Private to the two people (docs/features/messages.md): the recipient's
+  // inbox and badge, and the sender's other devices.
+  @OnEvent(DomainEvents.DirectMessageSent)
+  handleDirectMessageSent(payload: DirectMessageSentPayload) {
+    const { message, sender, recipient } = payload;
+    const event = { message, sender, recipient };
+    this.server.to(userRoom(message.recipientId)).emit('message:new', event);
+    this.server.to(userRoom(message.senderId)).emit('message:new', event);
+    this.server
+      .to(userRoom(message.recipientId))
+      .emit('message:unread_count', { count: payload.recipientUnreadCount });
+  }
+
+  // The partner's app shows "Seen"; the reader's other devices clear the conversation and the badge.
+  @OnEvent(DomainEvents.DirectMessagesRead)
+  handleDirectMessagesRead(payload: DirectMessagesReadPayload) {
+    const { readerId, partnerId, readAt } = payload;
+    const event = { readerId, partnerId, readAt };
+    this.server.to(userRoom(partnerId)).emit('message:read', event);
+    this.server.to(userRoom(readerId)).emit('message:read', event);
+    this.server
+      .to(userRoom(readerId))
+      .emit('message:unread_count', { count: payload.readerUnreadCount });
   }
 
   private async authenticate(socket: AuthedSocket): Promise<void> {

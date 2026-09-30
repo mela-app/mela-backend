@@ -881,6 +881,61 @@ describe('RealtimeGateway', () => {
     });
   });
 
+  describe('direct messages', () => {
+    const ana = { id: 'ana-1', username: 'ana', displayName: 'Ana', avatarUrl: null };
+    const ben = { id: 'ben-1', username: 'ben', displayName: 'Ben', avatarUrl: null };
+    // Which room each event went to - every relay calls to() once per emit().
+    const sent = () =>
+      (server.to.mock.calls as unknown[][]).map((call, i) => [
+        call[0],
+        ...(roomEmit.mock.calls[i] as unknown[]),
+      ]);
+
+    it("relays a new message to both people's own rooms, and the recipient's new unread total", () => {
+      const message = {
+        id: 'm1',
+        senderId: 'ben-1',
+        recipientId: 'ana-1',
+        text: 'hello',
+        clientId: 'c1',
+        createdAt: new Date('2026-10-01T09:00:00Z'),
+        readAt: null,
+      };
+
+      makeGateway().handleDirectMessageSent({
+        message,
+        sender: ben,
+        recipient: ana,
+        recipientUnreadCount: 3,
+      });
+
+      const event = { message, sender: ben, recipient: ana };
+      expect(sent()).toEqual([
+        ['user:ana-1', 'message:new', event],
+        ['user:ben-1', 'message:new', event],
+        ['user:ana-1', 'message:unread_count', { count: 3 }],
+      ]);
+    });
+
+    it('tells the partner their messages were seen, and the reader their new unread total', () => {
+      const readAt = new Date('2026-10-01T09:05:00Z');
+
+      makeGateway().handleDirectMessagesRead({
+        readerId: 'ana-1',
+        partnerId: 'ben-1',
+        readAt,
+        readerUnreadCount: 0,
+      });
+
+      const event = { readerId: 'ana-1', partnerId: 'ben-1', readAt };
+      expect(sent()).toEqual([
+        ['user:ben-1', 'message:read', event],
+        ['user:ana-1', 'message:read', event],
+        ['user:ana-1', 'message:unread_count', { count: 0 }],
+      ]);
+    });
+  });
+
   describe('guest management', () => {
     const user = { id: 'g1', username: 'guest', displayName: 'Guest', avatarUrl: null };
 

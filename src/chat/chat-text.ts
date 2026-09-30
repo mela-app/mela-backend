@@ -10,8 +10,14 @@ const FLOODS = /(.)\1{5,}/gu;
 
 export type ChatTextError = 'MESSAGE_EMPTY' | 'MESSAGE_TOO_LONG';
 
-/** The first step of the chat pipeline (plan §6.3): one tidy line of text, or why there's none. */
-export function cleanChatText(raw: string): { text: string } | { error: ChatTextError } {
+/**
+ * The first step of the chat pipeline (plan §6.3): one tidy line of text, or
+ * why there's none. Direct messages allow longer ones than live chat.
+ */
+export function cleanChatText(
+  raw: string,
+  maxLength = CHAT_MAX_LENGTH,
+): { text: string } | { error: ChatTextError } {
   const text = raw
     .normalize('NFC')
     .replace(HIDDEN_CONTROLS, '')
@@ -20,6 +26,6 @@ export function cleanChatText(raw: string): { text: string } | { error: ChatText
     .trim();
   if (text.length === 0) return { error: 'MESSAGE_EMPTY' };
   // Code points, so an emoji counts once, not as two UTF-16 halves.
-  if ([...text].length > CHAT_MAX_LENGTH) return { error: 'MESSAGE_TOO_LONG' };
+  if ([...text].length > maxLength) return { error: 'MESSAGE_TOO_LONG' };
   return { text };
 }

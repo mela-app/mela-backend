@@ -100,6 +100,11 @@ model User {
   adminAlertsSent       AdminAlert[]
   auditLogs             AuditLog[]
   recordingPermissions  RecordingPermission[] @relation("RecordingAllowed")
+  // Direct messages between friends (docs/features/messages.md).
+  conversationsAsA      Conversation[]        @relation("ConversationUserA")
+  conversationsAsB      Conversation[]        @relation("ConversationUserB")
+  directMessagesSent    DirectMessage[]       @relation("DirectMessagesSent")
+  directMessagesInbox   DirectMessage[]       @relation("DirectMessagesReceived")
 
   @@map("users")
 }
@@ -612,4 +617,49 @@ model AuditLog {
   @@index([targetType, targetId])
   @@index([streamId, createdAt])
   @@map("audit_logs")
+}
+
+// Direct messages between friends (docs/features/messages.md): one row per
+// pair of people, the smaller user id always in userAId, so whoever writes
+// first finds the same row.
+model Conversation {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  userAId       String
+  userBId       String
+  // The newest message's time - orders the inbox.
+  lastMessageAt DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  userA    User            @relation("ConversationUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB    User            @relation("ConversationUserB", fields: [userBId], references: [id], onDelete: Cascade)
+  messages DirectMessage[]
+
+  @@unique([userAId, userBId])
+  @@index([userAId, lastMessageAt])
+  @@index([userBId, lastMessageAt])
+  @@map("conversations")
+}
+
+// Kept after an unfollow or a block - the history stays readable, only
+// sending needs the two to follow each other.
+model DirectMessage {
+  id             String    @id @default(uuid(7)) @db.Uuid
+  conversationId String    @db.Uuid
+  senderId       String
+  recipientId    String
+  text           String
+  // The sending app's own id for it, so a resend after a lost answer isn't stored twice.
+  clientId       String?
+  // When the recipient opened the conversation; null while unread.
+  readAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation("DirectMessagesSent", fields: [senderId], references: [id], onDelete: Cascade)
+  recipient    User         @relation("DirectMessagesReceived", fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@unique([senderId, clientId])
+  @@index([conversationId, id])
+  @@index([recipientId, readAt])
+  @@map("direct_messages")
 }
