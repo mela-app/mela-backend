@@ -14,11 +14,6 @@ on:
       - main   # Trigger Production deploy
   workflow_dispatch:  # Manual run from Actions tab
 
-# One deploy at a time.
-concurrency:
-  group: cd-production-backend
-  cancel-in-progress: false
-
 jobs:
   build-and-deploy-production:
     runs-on: ubuntu-latest
@@ -48,8 +43,6 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          cache-from: type=gha,scope=mela-backend
-          cache-to: type=gha,mode=max,scope=mela-backend
           tags: |
             ghcr.io/${{ env.REPO_OWNER_LOWER }}/mela-backend:latest
             ghcr.io/${{ env.REPO_OWNER_LOWER }}/mela-backend:${{ github.sha }}
@@ -67,9 +60,10 @@ jobs:
 
             # The server pulls with its own read-only registry login
             # (docs/deployment.md): no token of this job is left behind there.
+             # Login to GHCR
+            echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            
             cd "${{ secrets.DEPLOY_PATH }}"
-            test -f docker-compose.yml || { echo "No docker-compose.yml in $PWD - check DEPLOY_PATH"; exit 1; }
             docker compose down
             docker compose pull
             docker compose up -d
-            docker compose ps
