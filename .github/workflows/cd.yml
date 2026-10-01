@@ -62,11 +62,13 @@ jobs:
           password: ${{ secrets.SERVER_PASSWORD }}
           script_stop: true
           script: |
+            set -euo pipefail
             echo "🚀 Deploying to Production..."
 
             # The server pulls with its own read-only registry login
             # (docs/deployment.md): no token of this job is left behind there.
             cd "${{ secrets.DEPLOY_PATH }}"
+            test -f docker-compose.yml || { echo "No docker-compose.yml in $PWD - check DEPLOY_PATH"; exit 1; }
             docker compose down
             docker compose pull
             docker compose up -d
