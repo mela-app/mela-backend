@@ -25,6 +25,7 @@ export const AUDIT_ACTIONS = {
   'admin.staff_created': { category: 'ADMIN', label: 'Created a staff account' },
   'admin.seeded': { category: 'ADMIN', label: 'Created the default super admin' },
   'admin.audit_exported': { category: 'ADMIN', label: 'Exported the audit log' },
+  'admin.private_messages_viewed': { category: 'ADMIN', label: 'Read private messages' },
 
   'stream.started': { category: 'STREAM', label: 'Went live' },
   'stream.ended': { category: 'STREAM', label: 'Live ended' },
@@ -80,7 +81,7 @@ export const AUDIT_CATEGORY_LABELS: Record<AuditCategory, string> = {
   SETTINGS: 'Settings',
 };
 
-export type AuditTargetType = 'USER' | 'STREAM' | 'MESSAGE' | 'ALERT' | 'PHRASE';
+export type AuditTargetType = 'USER' | 'STREAM' | 'MESSAGE' | 'ALERT' | 'PHRASE' | 'CONVERSATION';
 
 export function isAuditAction(value: string): value is AuditAction {
   return Object.prototype.hasOwnProperty.call(AUDIT_ACTIONS, value);

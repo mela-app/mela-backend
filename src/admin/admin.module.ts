@@ -12,6 +12,8 @@ import { AdminAccountController, AdminAuthController } from './auth/admin-auth.c
 import { AdminAuthService } from './auth/admin-auth.service';
 import { AdminAlertsController, AdminBannedPhrasesController } from './content/admin-content.controller';
 import { AdminContentService } from './content/admin-content.service';
+import { AdminMessagesController } from './messages/admin-messages.controller';
+import { AdminMessagesService } from './messages/admin-messages.service';
 import { AdminOverviewController } from './overview/admin-overview.controller';
 import { AdminOverviewService } from './overview/admin-overview.service';
 import { AdminStreamsController } from './streams/admin-streams.controller';
@@ -44,6 +46,7 @@ import { AdminUsersService } from './users/admin-users.service';
     AdminAlertsController,
     AdminBannedPhrasesController,
     AdminAuditController,
+    AdminMessagesController,
   ],
   providers: [
     AdminGuard,
@@ -52,6 +55,7 @@ import { AdminUsersService } from './users/admin-users.service';
     AdminStreamsService,
     AdminUsersService,
     AdminContentService,
+    AdminMessagesService,
   ],
 })
 export class AdminModule {}

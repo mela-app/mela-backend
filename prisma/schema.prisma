@@ -27,6 +27,8 @@ enum AdminPermission {
   VIEW_PHRASES
   MANAGE_PHRASES
   VIEW_AUDIT_LOG
+  // Reading direct messages between users - every conversation opened is audited.
+  VIEW_PRIVATE_MESSAGES
 }
 
 enum UserStatus {
