@@ -1,38 +1,26 @@
-name: backend-cd
+name: CD
 
-# Builds the API image, pushes it to GHCR, then applies the migrations and
-# restarts just the API on the production server (infra/production). The
-# admin console, the web player, Caddy, Postgres and Redis keep running - see
-# docs/deployment.md in mela-admin-web.
+# Builds the API image, pushes it to GHCR, then pulls and restarts the
+# production stack. `docker compose up -d` runs the one-shot `migrate`
+# service first (the backend depends on it), so pending migrations and the
+# super-admin seed are applied on the new image before it serves anything.
 #
 # Secrets (repository or organization): SERVER_HOST, SERVER_USER,
-# SERVER_SSH_KEY (or SERVER_PASSWORD), SERVER_SSH_FINGERPRINT, DEPLOY_PATH.
+# SERVER_PASSWORD, DEPLOY_PATH.
 
 on:
   push:
     branches:
-      - main
-    # What goes into the image - not docs, infra or the dev compose file.
-    paths:
-      - 'src/**'
-      - 'prisma/**'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'tsconfig*.json'
-      - 'nest-cli.json'
-      - 'Dockerfile'
-      - '.dockerignore'
-      - '.github/workflows/cd.yml'
-  workflow_dispatch:  # Redeploy the API unchanged, from the Actions tab
+      - main   # Trigger Production deploy
+  workflow_dispatch:  # Manual run from Actions tab
 
-# One deploy of the API at a time.
+# One deploy at a time.
 concurrency:
   group: cd-production-backend
   cancel-in-progress: false
 
 jobs:
   build-and-deploy-production:
-    name: Build and deploy the API
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -71,22 +59,15 @@ jobs:
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
-          # A deploy key; the password is only a fallback while there is none.
-          key: ${{ secrets.SERVER_SSH_KEY }}
           password: ${{ secrets.SERVER_PASSWORD }}
-          # The server's host key, so nothing else can pose as it.
-          fingerprint: ${{ secrets.SERVER_SSH_FINGERPRINT }}
           script_stop: true
           script: |
-            echo "Deploying the API..."
+            echo "🚀 Deploying to Production..."
 
             # The server pulls with its own read-only registry login
             # (docs/deployment.md): no token of this job is left behind there.
             cd "${{ secrets.DEPLOY_PATH }}"
-            docker compose pull backend
-            # Migrations and the super-admin seed run on the new image, before
-            # it serves anything; the migrate service shares that image.
-            docker compose run --rm -T migrate
-            # Only the API: --no-deps leaves everything else alone.
-            docker compose up -d --no-deps backend
-            docker compose ps backend
+            docker compose down
+            docker compose pull
+            docker compose up -d
+            docker compose ps

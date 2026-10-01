@@ -114,8 +114,8 @@ and optionally LiveKit run on one server from
 missing, sample or short secret.
 
 CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) lints, type-checks
-and tests every push. CD ([.github/workflows/cd.yml](.github/workflows/cd.yml))
+and tests every pull request. CD ([.github/workflows/cd.yml](.github/workflows/cd.yml))
 builds `ghcr.io/<owner>/mela-backend` on `main`, then, over SSH, applies the
 migrations and restarts just the API. Its secrets (repository or
-organization): `SERVER_HOST`, `SERVER_USER`, `SERVER_SSH_KEY` (or
-`SERVER_PASSWORD`), `SERVER_SSH_FINGERPRINT`, `DEPLOY_PATH`.
+organization): `SERVER_HOST`, `SERVER_USER`, `SERVER_PASSWORD`,
+`DEPLOY_PATH`.

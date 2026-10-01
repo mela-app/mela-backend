@@ -103,7 +103,9 @@ services:
 
   backend:
     <<: *backend-image
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     restart: unless-stopped
     ports:
       - "${BACKEND_PORT:?set BACKEND_PORT in .env}:${PORT:?set PORT in .env}"
