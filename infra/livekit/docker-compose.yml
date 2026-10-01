@@ -1,16 +1,22 @@
-# Production LiveKit on a server of its own. On that server, from this
-# folder: `docker compose up -d`. (On the same server as the API, set
-# COMPOSE_PROFILES=livekit in infra/production instead.) See
-# docs/features/video-provider.md ("Self-hosting LiveKit").
+# LiveKit on the VPS: /usr/src/apps/infra/livekit - shared infrastructure,
+# like Postgres and Redis, not part of any one app.
+#
+#   cp .env.example .env     # then fill it in
+#   docker compose up -d
+#
+# Only used when the API runs with VIDEO_PROVIDER=livekit. See
+# docs/features/video-provider.md in mela-admin-web.
 services:
   livekit:
-    image: livekit/livekit-server:v1.13.7
+    image: ${LIVEKIT_IMAGE}
+    container_name: ${LIVEKIT_CONTAINER_NAME}
     restart: unless-stopped
     command: --config /etc/livekit.yaml
     # WebRTC needs the host's real UDP ports and public IP (LiveKit's
-    # recommended setup), so no Docker port mapping.
+    # recommended setup), so there is no port mapping and no system-net
+    # either - the API reaches it through host.docker.internal.
     network_mode: host
-    # LIVEKIT_KEYS (see .env.example).
-    env_file: .env
+    env_file:
+      - .env
     volumes:
       - ./livekit.yaml:/etc/livekit.yaml:ro

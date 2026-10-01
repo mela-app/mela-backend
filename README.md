@@ -5,12 +5,13 @@ serves the mobile app, the admin console, and the share pages (`/live/:id`)
 that load the web player.
 
 This repository also holds the local development stack
-([docker-compose.yml](docker-compose.yml)) and the production one
-([infra/production](infra/production)).
+([docker-compose.yml](docker-compose.yml)) and the server's deploy files
+([infra/](infra)): `infra/api` for the API itself, `infra/livekit` and
+`infra/postgres` for the shared infrastructure it uses.
 
 | Repository | What it is |
 | --- | --- |
-| **mela-backend** (this one) | The API, the dev stack, the production stack |
+| **mela-backend** (this one) | The API, the dev stack, the server's deploy files |
 | mela-mobile | The Flutter app (viewers, hosts, guests) |
 | mela-web | The web player that share links open in a browser |
 | mela-admin-web | The staff admin console, plus the project docs (`docs/`) and the brand source (`branding/`) |
@@ -38,7 +39,7 @@ cp .env.example .env        # Windows: copy .env.example .env
 | Dev scripts | `API_ORIGIN` | Where `scripts/*.js` reach this API |
 | Docker | `POSTGRES_PASSWORD`, `BACKEND_PORT` | Read by `docker-compose.yml` |
 
-The server has its own template, `infra/production/.env.example`.
+The server has its own template, `infra/api/.env.example`.
 
 ## Getting started
 
@@ -107,11 +108,13 @@ Pushes need the Firebase service-account key at
 
 ## Deploying
 
-The API, the admin console, the web player, Postgres, Redis, Caddy (HTTPS)
-and optionally LiveKit run on one server from
-[infra/production](infra/production), in a clone of this repository - see
-`docs/deployment.md`. The backend refuses to start in production with a
-missing, sample or short secret.
+The API runs on the shared VPS in `/usr/src/apps/mela/api`, from
+[infra/api](infra/api) - its own compose project, alongside the shared
+Postgres, Redis and LiveKit in `/usr/src/apps/infra`. A one-shot `migrate`
+container applies the migrations and seeds the first super admin before the
+new API serves anything. See `docs/deployment.md` in mela-admin-web. The
+backend refuses to start in production with a missing, sample or short
+secret.
 
 CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) lints, type-checks
 and tests every pull request. CD ([.github/workflows/cd.yml](.github/workflows/cd.yml))

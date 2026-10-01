@@ -1,0 +1,57 @@
+# The Mela API on the VPS: /usr/src/apps/mela/api.
+#
+#   cp .env.example .env     # then fill it in
+#   docker compose pull
+#   docker compose up -d
+#
+# Postgres and Redis are the shared ones in /usr/src/apps/infra; LiveKit is
+# its own infra folder (infra/livekit). Everything meets on the external
+# system-net network, so only API_PORT is published on the host - the
+# reverse proxy in front of it is what the internet reaches.
+services:
+  # Applies pending migrations and makes sure the super admin exists
+  # (SEED_ADMIN_* in .env), then exits. The API waits for it to succeed, so
+  # a deploy never serves on a schema it doesn't have.
+  migrate:
+    image: ${API_IMAGE}
+    container_name: ${API_MIGRATE_CONTAINER_NAME}
+    command: ["npm", "run", "db:deploy"]
+    env_file:
+      - .env
+    restart: "no"
+    networks:
+      - system-net
+
+  mela-api:
+    image: ${API_IMAGE}
+    container_name: ${API_CONTAINER_NAME}
+    ports:
+      - "${API_PORT}:${API_PORT}"
+    env_file:
+      - .env
+    # The Firebase service-account key for push, when PUSH_PROVIDER=fcm
+    # (FIREBASE_SERVICE_ACCOUNT_JSON=/app/secrets/firebase.json). Never
+    # baked into the image; create the folder even when push is off.
+    volumes:
+      - ./secrets:/app/secrets:ro
+    # LiveKit uses host networking, so the API reaches it through the host.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # The image is Alpine-based: wget, not curl. /health checks Postgres
+      # and Redis too.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:${API_PORT}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - system-net
+
+networks:
+  system-net:
+    external: true
