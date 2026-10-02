@@ -51,4 +51,18 @@ describe('S3StorageProvider', () => {
     );
     expect(getSignedUrl).not.toHaveBeenCalled();
   });
+
+  it('signs an Amazon S3 upload without pinning a body checksum', async () => {
+    const actual = jest.requireActual<{ getSignedUrl: typeof getSignedUrl }>('@aws-sdk/s3-request-presigner');
+    (getSignedUrl as jest.Mock).mockImplementationOnce(actual.getSignedUrl);
+
+    const { uploadUrl } = await new S3StorageProvider(config({ S3_ENDPOINT: '' })).createUploadUrl(
+      'avatars/u1/abc.jpg',
+      'image/jpeg',
+    );
+
+    const params = [...new URL(uploadUrl).searchParams.keys()];
+    expect(params).toContain('X-Amz-Signature');
+    expect(params.filter((key) => key.toLowerCase().includes('checksum'))).toEqual([]);
+  });
 });

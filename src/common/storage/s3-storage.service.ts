@@ -36,6 +36,8 @@ export class S3StorageProvider implements StorageProvider {
       endpoint,
       // S3Mock/MinIO address buckets by path, not by subdomain; real S3/R2 ignore this when unset.
       forcePathStyle: Boolean(endpoint),
+      // By default an upload URL carries the empty body's checksum, so S3 would reject every real file.
+      requestChecksumCalculation: 'WHEN_REQUIRED',
       credentials: { accessKeyId, secretAccessKey },
     });
   }
