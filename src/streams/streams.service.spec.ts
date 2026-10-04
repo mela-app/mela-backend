@@ -117,6 +117,7 @@ describe('StreamsService', () => {
     remove: jest.fn(),
     removeAllForEndedStream: jest.fn().mockResolvedValue(undefined),
     setMicForceMuted: jest.fn(),
+    setPlacement: jest.fn(),
   };
   const roomChatMutes = {
     mute: jest.fn(),
@@ -1339,6 +1340,56 @@ describe('StreamsService', () => {
         ForbiddenException,
       );
       expect(guests.setMicForceMuted).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('arranging guests on the stage', () => {
+    const spot = { x: 0.2, y: 1, size: 0.35 };
+
+    beforeEach(() => {
+      prisma.stream.findUnique.mockResolvedValue({
+        id: 's1',
+        hostId: 'host-1',
+        status: StreamStatus.LIVE,
+      });
+      moderators.findActiveGrant.mockReset().mockResolvedValue(null);
+    });
+
+    it('lets the host, or an ARRANGE_GUESTS moderator, move a tile or put it back in line', async () => {
+      await makeService().setGuestPlacement('s1', 'host-1', 'g1', spot);
+      expect(guests.setPlacement).toHaveBeenCalledWith('s1', 'g1', 'host-1', spot);
+
+      moderators.findActiveGrant.mockResolvedValueOnce({
+        capabilities: [ModeratorCapability.ARRANGE_GUESTS],
+      });
+      await makeService().setGuestPlacement('s1', 'mod-1', 'g1', null);
+      expect(guests.setPlacement).toHaveBeenCalledWith('s1', 'g1', 'mod-1', null);
+    });
+
+    it('refuses a viewer, and a moderator without the ability', async () => {
+      await expect(makeService().setGuestPlacement('s1', 'viewer-1', 'g1', spot)).rejects.toThrow(
+        ForbiddenException,
+      );
+      moderators.findActiveGrant.mockResolvedValueOnce({
+        capabilities: [ModeratorCapability.REMOVE_GUESTS],
+      });
+      await expect(makeService().setGuestPlacement('s1', 'mod-1', 'g1', spot)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(guests.setPlacement).not.toHaveBeenCalled();
+    });
+
+    it('only while live', async () => {
+      prisma.stream.findUnique.mockResolvedValue({
+        id: 's1',
+        hostId: 'host-1',
+        status: StreamStatus.ENDED,
+      });
+
+      await expect(makeService().setGuestPlacement('s1', 'host-1', 'g1', spot)).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(guests.setPlacement).not.toHaveBeenCalled();
     });
   });
 

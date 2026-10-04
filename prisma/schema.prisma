@@ -284,6 +284,8 @@ enum ModeratorCapability {
   MANAGE_GUEST_REQUESTS
   REMOVE_GUESTS
   FORCE_MUTE_GUESTS
+  // Move and resize guests' tiles on everyone's stage.
+  ARRANGE_GUESTS
 }
 
 enum ModeratorStatus {
@@ -476,6 +478,12 @@ model StreamGuest {
   leftAt        DateTime?
   // Phase 7: the host or a FORCE_MUTE_GUESTS moderator turned this guest's mic off (plan §6.7).
   micForceMuted Boolean           @default(false)
+  // Where the host or an ARRANGE_GUESTS moderator put this guest's tile, as
+  // fractions of the stage's guest area (docs/features/guests.md); null: the
+  // automatic column. A new seat starts there.
+  stageX        Float?
+  stageY        Float?
+  stageSize     Float?
 
   stream Stream @relation(fields: [streamId], references: [id], onDelete: Cascade)
   user   User   @relation("GuestSeats", fields: [userId], references: [id], onDelete: Cascade)

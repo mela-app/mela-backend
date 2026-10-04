@@ -9,6 +9,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -20,6 +21,7 @@ import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard';
 import { BanUserDto } from './dto/ban-user.dto';
 import { CreateStreamDto } from './dto/create-stream.dto';
 import { GrantModeratorDto } from './dto/grant-moderator.dto';
+import { GuestPlacementDto } from './dto/guest-placement.dto';
 import { InviteGuestDto } from './dto/invite-guest.dto';
 import { ListStreamsQueryDto } from './dto/list-streams.dto';
 import { MentionSuggestionsQueryDto } from './dto/mention-suggestions-query.dto';
@@ -273,6 +275,31 @@ export class StreamsController {
     @Param('userId', ParseUUIDPipe) userId: string,
   ) {
     return this.streamsService.setGuestMicForceMuted(id, user.id, userId, false);
+  }
+
+  @Put(':id/guests/:userId/placement')
+  @UseGuards(JwtAuthGuard)
+  placeGuest(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Body() dto: GuestPlacementDto,
+  ) {
+    return this.streamsService.setGuestPlacement(id, user.id, userId, {
+      x: dto.x,
+      y: dto.y,
+      size: dto.size,
+    });
+  }
+
+  @Delete(':id/guests/:userId/placement')
+  @UseGuards(JwtAuthGuard)
+  unplaceGuest(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ) {
+    return this.streamsService.setGuestPlacement(id, user.id, userId, null);
   }
 
   @Get(':id/guest-requests')

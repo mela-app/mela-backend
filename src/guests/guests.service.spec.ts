@@ -164,7 +164,7 @@ describe('GuestsService', () => {
     it('lists seats oldest first, each with the Agora uid their publisher token uses and its mic lock', async () => {
       const joinedAt = new Date();
       prisma.streamGuest.findMany.mockResolvedValue([
-        { joinedAt, micForceMuted: true, user: USER },
+        { joinedAt, micForceMuted: true, stageX: null, stageY: null, stageSize: null, user: USER },
       ]);
 
       const result = await service().activeGuests(STREAM);
@@ -176,8 +176,67 @@ describe('GuestsService', () => {
         }),
       );
       expect(result).toEqual([
-        { ...USER, joinedAt, agoraUid: agoraUidFor(USER.id), micForceMuted: true },
+        { ...USER, joinedAt, agoraUid: agoraUidFor(USER.id), micForceMuted: true, placement: null },
       ]);
+    });
+
+    it('says where the host put a tile', async () => {
+      prisma.streamGuest.findMany.mockResolvedValue([
+        {
+          joinedAt: new Date(),
+          micForceMuted: false,
+          stageX: 0.1,
+          stageY: 0.9,
+          stageSize: 0.4,
+          user: USER,
+        },
+      ]);
+
+      const [guest] = await service().activeGuests(STREAM);
+
+      expect(guest.placement).toEqual({ x: 0.1, y: 0.9, size: 0.4 });
+    });
+  });
+
+  describe('setPlacement', () => {
+    it("moves an active guest's tile and tells everyone", async () => {
+      prisma.streamGuest.updateMany.mockResolvedValue({ count: 1 });
+
+      await service().setPlacement(STREAM, USER.id, 'mod-1', { x: 0, y: 0.5, size: 0.3 });
+
+      expect(prisma.streamGuest.updateMany).toHaveBeenCalledWith({
+        where: { streamId: STREAM, userId: USER.id, status: StreamGuestStatus.ACTIVE },
+        data: { stageX: 0, stageY: 0.5, stageSize: 0.3 },
+      });
+      expect(events.emit).toHaveBeenCalledWith(DomainEvents.GuestPlacementChanged, {
+        streamId: STREAM,
+        userId: USER.id,
+        actorId: 'mod-1',
+        placement: { x: 0, y: 0.5, size: 0.3 },
+      });
+    });
+
+    it('puts the tile back in the automatic column', async () => {
+      prisma.streamGuest.updateMany.mockResolvedValue({ count: 1 });
+
+      await service().setPlacement(STREAM, USER.id, HOST, null);
+
+      expect(prisma.streamGuest.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { stageX: null, stageY: null, stageSize: null } }),
+      );
+      expect(events.emit).toHaveBeenCalledWith(
+        DomainEvents.GuestPlacementChanged,
+        expect.objectContaining({ placement: null }),
+      );
+    });
+
+    it('404s for someone who is not on stage', async () => {
+      prisma.streamGuest.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service().setPlacement(STREAM, USER.id, HOST, null)).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(events.emit).not.toHaveBeenCalled();
     });
   });
 
@@ -274,10 +333,13 @@ describe('GuestsService', () => {
       expect(prisma.streamGuest.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { streamId_userId: { streamId: STREAM, userId: USER.id } },
-          // A returning guest starts with their mic allowed again.
+          // A returning guest starts with their mic allowed again, back in line.
           update: expect.objectContaining({
             status: StreamGuestStatus.ACTIVE,
             micForceMuted: false,
+            stageX: null,
+            stageY: null,
+            stageSize: null,
           }),
         }),
       );

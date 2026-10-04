@@ -32,6 +32,7 @@ import {
   DirectMessagesReadPayload,
   GuestJoinedPayload,
   GuestMicForceMuteChangedPayload,
+  GuestPlacementChangedPayload,
   GuestRemovedPayload,
   GuestRequestAcceptedPayload,
   GuestRequestCancelledPayload,
@@ -645,6 +646,13 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     this.server
       .to(streamRoom(streamId))
       .emit('presence:audio_state', { streamId, userId, forceMuted });
+  }
+
+  // Every stage moves the tile; null puts it back in the automatic column.
+  @OnEvent(DomainEvents.GuestPlacementChanged)
+  handleGuestPlacementChanged(payload: GuestPlacementChangedPayload) {
+    const { streamId, userId, placement } = payload;
+    this.server.to(streamRoom(streamId)).emit('guest:placed', { streamId, userId, placement });
   }
 
   // Private to that viewer: their app lets recording through for this live, or blocks it again.
