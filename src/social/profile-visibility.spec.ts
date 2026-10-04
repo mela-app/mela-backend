@@ -2,7 +2,12 @@ import { ProfileVisibility } from '@prisma/client';
 import { canViewProfileDetails, ProfileViewer, visibilityShownTo } from './profile-visibility';
 
 describe('profile visibility', () => {
-  const stranger: ProfileViewer = { isSelf: false, isFollower: false, isFriend: false, blockedByOwner: false };
+  const stranger: ProfileViewer = {
+    isSelf: false,
+    isFollower: false,
+    isFriend: false,
+    blockedByOwner: false,
+  };
   const follower: ProfileViewer = { ...stranger, isFollower: true };
   const friend: ProfileViewer = { ...stranger, isFollower: true, isFriend: true };
   const self: ProfileViewer = { ...stranger, isSelf: true };
@@ -14,7 +19,9 @@ describe('profile visibility', () => {
     [ProfileVisibility.FRIENDS, [false, false, true]],
     [ProfileVisibility.ONLY_ME, [false, false, false]],
   ])('%s: a stranger, a follower and a friend see the details %j', (visibility, expected) => {
-    expect([stranger, follower, friend].map((viewer) => canViewProfileDetails(visibility, viewer))).toEqual(expected);
+    expect(
+      [stranger, follower, friend].map((viewer) => canViewProfileDetails(visibility, viewer)),
+    ).toEqual(expected);
   });
 
   it('always shows people their own profile', () => {

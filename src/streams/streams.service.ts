@@ -8,7 +8,7 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import {
   GuestRequestInitiator,
   ModeratorCapability,
@@ -24,11 +24,13 @@ import { PermissionsService } from '../common/permissions/permissions.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import {
   DomainEvents,
+  LiveAccessRevokedPayload,
   StreamEndedPayload,
   StreamLayoutChangedPayload,
   StreamLockedPayload,
   StreamStartedPayload,
   StreamUnlockedPayload,
+  UserBlockedPayload,
 } from '../common/events/domain-events';
 import {
   HOST_HEARTBEAT_TTL_SECONDS,
@@ -48,7 +50,12 @@ import { CreateStreamDto } from './dto/create-stream.dto';
 import { ListStreamsQueryDto } from './dto/list-streams.dto';
 
 // Who someone is in a live: the host, a viewer, a guest.
-const PARTICIPANT_SELECT = { id: true, username: true, displayName: true, avatarUrl: true } as const;
+const PARTICIPANT_SELECT = {
+  id: true,
+  username: true,
+  displayName: true,
+  avatarUrl: true,
+} as const;
 
 const HOST_PUBLIC_SELECT = { select: PARTICIPANT_SELECT } as const;
 
@@ -172,7 +179,9 @@ export class StreamsService {
       followedHostIds = follows.map((follow) => follow.followeeId);
     }
     // Blocked either way (plan §6.4): hides their lives from discovery/feeds.
-    const blockedHostIds = requesterId ? await this.social.blockedEitherWayUserIds(requesterId) : [];
+    const blockedHostIds = requesterId
+      ? await this.social.blockedEitherWayUserIds(requesterId)
+      : [];
     // Both conditions key on `hostId` - they must merge into one filter object,
     // or spreading two separate `{ hostId: ... }` objects would let the second
     // silently overwrite the first.
@@ -251,6 +260,7 @@ export class StreamsService {
 
   async join(streamId: string, viewerId: string) {
     const stream = await this.getLiveOrThrow(streamId);
+    await this.assertNotBlocked(stream.hostId, viewerId);
     if (await this.roomBans.isBanned(stream.hostId, viewerId, streamId)) {
       throw new ForbiddenException('You are banned from this stream');
     }
@@ -258,20 +268,27 @@ export class StreamsService {
     // (app killed while on stage) would otherwise be a frozen tile for everyone.
     await this.vacateGuestSeat(stream, viewerId, false, viewerId);
     // A live keeps the vendor it started on, whatever VIDEO_PROVIDER is now.
-    const [rtcToken, isFollowingHost, grant, pinnedMessage, activeGuests, selfGuestRequest, canRecord] =
-      await Promise.all([
-        this.videoProviders.get(stream.videoProvider).mintToken({
-          channelName: stream.channelName,
-          userId: viewerId,
-          role: 'audience',
-        }),
-        this.social.isFollowing(viewerId, stream.hostId),
-        this.moderators.findActiveGrant(streamId, viewerId),
-        this.findPinnedMessage(stream.pinnedMessageId),
-        this.guests.activeGuests(streamId),
-        this.guests.findOwnPending(streamId, viewerId),
-        this.recordingPermissions.isAllowed(streamId, viewerId),
-      ]);
+    const [
+      rtcToken,
+      isFollowingHost,
+      grant,
+      pinnedMessage,
+      activeGuests,
+      selfGuestRequest,
+      canRecord,
+    ] = await Promise.all([
+      this.videoProviders.get(stream.videoProvider).mintToken({
+        channelName: stream.channelName,
+        userId: viewerId,
+        role: 'audience',
+      }),
+      this.social.isFollowing(viewerId, stream.hostId),
+      this.moderators.findActiveGrant(streamId, viewerId),
+      this.findPinnedMessage(stream.pinnedMessageId),
+      this.guests.activeGuests(streamId),
+      this.guests.findOwnPending(streamId, viewerId),
+      this.recordingPermissions.isAllowed(streamId, viewerId),
+    ]);
     return {
       stream,
       rtcToken,
@@ -309,6 +326,7 @@ export class StreamsService {
    */
   async watch(streamId: string, userId?: string) {
     const stream = await this.getLiveOrThrow(streamId);
+    if (userId) await this.assertNotBlocked(stream.hostId, userId);
     if (userId && (await this.roomBans.isBanned(stream.hostId, userId, streamId))) {
       throw new ForbiddenException('You are banned from this stream');
     }
@@ -410,12 +428,25 @@ export class StreamsService {
   }
 
   /** Host, or a moderator holding `BAN_USERS` (plan §6.4/§6.9), force-disconnects a participant. */
-  async banFromRoom(streamId: string, requesterId: string, targetUserId: string, scope: RoomBanScope) {
+  async banFromRoom(
+    streamId: string,
+    requesterId: string,
+    targetUserId: string,
+    scope: RoomBanScope,
+  ) {
     const stream = await this.getOrThrow(streamId);
-    if (!(await this.canUseCapability(requesterId, streamId, stream.hostId, ModeratorCapability.BAN_USERS))) {
+    if (
+      !(await this.canUseCapability(
+        requesterId,
+        streamId,
+        stream.hostId,
+        ModeratorCapability.BAN_USERS,
+      ))
+    ) {
       throw new ForbiddenException('Only the host or a moderator can ban a participant');
     }
-    if (targetUserId === stream.hostId) throw new BadRequestException("The host can't be banned from their own live");
+    if (targetUserId === stream.hostId)
+      throw new BadRequestException("The host can't be banned from their own live");
     if (targetUserId === requesterId) throw new BadRequestException("You can't ban yourself");
     await this.assertCanModerateTarget(streamId, stream.hostId, requesterId, targetUserId);
     return this.roomBans.ban(stream.hostId, targetUserId, scope, streamId, requesterId);
@@ -423,7 +454,14 @@ export class StreamsService {
 
   async unbanFromRoom(streamId: string, requesterId: string, targetUserId: string) {
     const stream = await this.getOrThrow(streamId);
-    if (!(await this.canUseCapability(requesterId, streamId, stream.hostId, ModeratorCapability.BAN_USERS))) {
+    if (
+      !(await this.canUseCapability(
+        requesterId,
+        streamId,
+        stream.hostId,
+        ModeratorCapability.BAN_USERS,
+      ))
+    ) {
       throw new ForbiddenException('Only the host or a moderator can lift a ban');
     }
     await this.assertCanModerateTarget(streamId, stream.hostId, requesterId, targetUserId);
@@ -435,15 +473,30 @@ export class StreamsService {
    * but the host and themselves. No `durationSeconds`: until the live ends.
    * The muted person still watches, likes and reads chat.
    */
-  async muteChat(streamId: string, requesterId: string, targetUserId: string, durationSeconds?: number) {
+  async muteChat(
+    streamId: string,
+    requesterId: string,
+    targetUserId: string,
+    durationSeconds?: number,
+  ) {
     const stream = await this.getLiveOrThrow(streamId);
-    if (!(await this.canUseCapability(requesterId, streamId, stream.hostId, ModeratorCapability.MUTE_CHAT))) {
+    if (
+      !(await this.canUseCapability(
+        requesterId,
+        streamId,
+        stream.hostId,
+        ModeratorCapability.MUTE_CHAT,
+      ))
+    ) {
       throw new ForbiddenException('Only the host or a moderator can mute someone in chat');
     }
     if (targetUserId === stream.hostId) throw new BadRequestException("The host can't be muted");
     if (targetUserId === requesterId) throw new BadRequestException("You can't mute yourself");
     await this.assertCanModerateTarget(streamId, stream.hostId, requesterId, targetUserId);
-    const target = await this.prisma.user.findUnique({ where: { id: targetUserId }, select: { id: true } });
+    const target = await this.prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: { id: true },
+    });
     if (!target) throw new NotFoundException('User not found');
 
     const mutedUntil = durationSeconds ? new Date(Date.now() + durationSeconds * 1000) : null;
@@ -453,7 +506,14 @@ export class StreamsService {
 
   async unmuteChat(streamId: string, requesterId: string, targetUserId: string) {
     const stream = await this.getOrThrow(streamId);
-    if (!(await this.canUseCapability(requesterId, streamId, stream.hostId, ModeratorCapability.MUTE_CHAT))) {
+    if (
+      !(await this.canUseCapability(
+        requesterId,
+        streamId,
+        stream.hostId,
+        ModeratorCapability.MUTE_CHAT,
+      ))
+    ) {
       throw new ForbiddenException('Only the host or a moderator can unmute someone in chat');
     }
     await this.assertCanModerateTarget(streamId, stream.hostId, requesterId, targetUserId);
@@ -464,7 +524,14 @@ export class StreamsService {
   /** Who's muted in this live's chat right now - for the people allowed to lift it. */
   async listChatMutes(streamId: string, requesterId: string) {
     const stream = await this.getOrThrow(streamId);
-    if (!(await this.canUseCapability(requesterId, streamId, stream.hostId, ModeratorCapability.MUTE_CHAT))) {
+    if (
+      !(await this.canUseCapability(
+        requesterId,
+        streamId,
+        stream.hostId,
+        ModeratorCapability.MUTE_CHAT,
+      ))
+    ) {
       throw new ForbiddenException('Only the host or a moderator can see who is muted');
     }
     return this.roomChatMutes.listActive(streamId);
@@ -479,8 +546,12 @@ export class StreamsService {
     if (!this.permissions.isHost(requesterId, stream.hostId)) {
       throw new ForbiddenException('Only the host can allow recording');
     }
-    if (targetUserId === stream.hostId) throw new BadRequestException('The host can always record their own live');
-    const target = await this.prisma.user.findUnique({ where: { id: targetUserId }, select: { id: true } });
+    if (targetUserId === stream.hostId)
+      throw new BadRequestException('The host can always record their own live');
+    const target = await this.prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: { id: true },
+    });
     if (!target) throw new NotFoundException('User not found');
     await this.recordingPermissions.allow(streamId, targetUserId, requesterId);
     return { ok: true };
@@ -508,7 +579,7 @@ export class StreamsService {
   async listModerators(streamId: string, requesterId: string) {
     const stream = await this.getOrThrow(streamId);
     if (!this.permissions.canManageModerators(requesterId, stream.hostId)) {
-      throw new ForbiddenException('Only the host can view this stream\'s moderators');
+      throw new ForbiddenException("Only the host can view this stream's moderators");
     }
     return this.moderators.list(streamId);
   }
@@ -519,7 +590,12 @@ export class StreamsService {
    * re-grants for their next stream if they want the same person again.
    * Only the host can grant - a moderator can't appoint another moderator.
    */
-  async grantModerator(streamId: string, requesterId: string, userId: string, capabilities: ModeratorCapability[]) {
+  async grantModerator(
+    streamId: string,
+    requesterId: string,
+    userId: string,
+    capabilities: ModeratorCapability[],
+  ) {
     // Must be live: appointing a moderator "for today's stream" needs a today's stream.
     const stream = await this.getLiveOrThrow(streamId);
     if (!this.permissions.canManageModerators(requesterId, stream.hostId)) {
@@ -528,10 +604,15 @@ export class StreamsService {
     return this.moderators.grant(stream.hostId, streamId, userId, capabilities);
   }
 
-  async updateModerator(streamId: string, requesterId: string, userId: string, capabilities: ModeratorCapability[]) {
+  async updateModerator(
+    streamId: string,
+    requesterId: string,
+    userId: string,
+    capabilities: ModeratorCapability[],
+  ) {
     const stream = await this.getOrThrow(streamId);
     if (!this.permissions.canManageModerators(requesterId, stream.hostId)) {
-      throw new ForbiddenException('Only the host can edit a moderator\'s abilities');
+      throw new ForbiddenException("Only the host can edit a moderator's abilities");
     }
     return this.moderators.updateCapabilities(streamId, userId, capabilities);
   }
@@ -544,11 +625,19 @@ export class StreamsService {
     return this.moderators.revoke(streamId, userId);
   }
 
-  /** Who's watching right now, paginated from presence (plan §6.13) - live streams only. */
-  async listViewers(streamId: string, cursor?: string, limit = 30) {
+  /**
+   * Who's watching right now, paginated from presence (plan §6.13) - live
+   * streams only, without anyone blocked either way with [requesterId].
+   */
+  async listViewers(streamId: string, requesterId: string, cursor?: string, limit = 30) {
     if (!(await this.findLive(streamId))) throw new NotFoundException('Stream is not live');
 
-    const allIds = (await this.presence.viewerIds(streamId)).sort();
+    const [viewerIds, blocked] = await Promise.all([
+      this.presence.viewerIds(streamId),
+      this.social.blockedEitherWayUserIds(requesterId),
+    ]);
+    const hidden = new Set(blocked);
+    const allIds = viewerIds.filter((id) => !hidden.has(id)).sort();
     const startIndex = cursor ? allIds.indexOf(cursor) + 1 : 0;
     const pageIds = allIds.slice(startIndex, startIndex + limit + 1);
     const hasMore = pageIds.length > limit;
@@ -561,7 +650,10 @@ export class StreamsService {
   /** Who these people are, in the order given; ids that aren't anyone are left out. */
   async participantSummaries(ids: string[]) {
     if (ids.length === 0) return [];
-    const users = await this.prisma.user.findMany({ where: { id: { in: ids } }, select: PARTICIPANT_SELECT });
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: ids } },
+      select: PARTICIPANT_SELECT,
+    });
     // Prisma doesn't preserve `in` order.
     const byId = new Map(users.map((user) => [user.id, user]));
     return ids.map((id) => byId.get(id)).filter((user) => user !== undefined);
@@ -596,7 +688,9 @@ export class StreamsService {
     const select = PARTICIPANT_SELECT;
     const hostIsCandidate = stream.hostId !== requesterId && !blocked.includes(stream.hostId);
     const [host, watching] = await Promise.all([
-      hostIsCandidate ? this.prisma.user.findFirst({ where: { id: stream.hostId, ...match }, select }) : null,
+      hostIsCandidate
+        ? this.prisma.user.findFirst({ where: { id: stream.hostId, ...match }, select })
+        : null,
       this.prisma.user.findMany({
         where: { id: { in: viewerIds.filter((id) => !excluded.has(id)) }, ...match },
         orderBy: { username: 'asc' },
@@ -610,6 +704,7 @@ export class StreamsService {
   /** Viewer raises their hand to join on stage (plan §6.5) - live streams only, not banned, not already a guest. */
   async requestToJoinAsGuest(streamId: string, viewerId: string) {
     const stream = await this.getLiveOrThrow(streamId);
+    await this.assertNotBlocked(stream.hostId, viewerId);
     if (await this.roomBans.isBanned(stream.hostId, viewerId, streamId)) {
       throw new ForbiddenException('You are banned from this stream');
     }
@@ -622,6 +717,7 @@ export class StreamsService {
     if (!this.permissions.canStartOrEndStream(requesterId, stream.hostId)) {
       throw new ForbiddenException('Only the host can invite someone on stage');
     }
+    await this.assertNotBlocked(stream.hostId, userId);
     return this.guests.invite(streamId, stream.hostId, userId);
   }
 
@@ -634,7 +730,14 @@ export class StreamsService {
   /** Pending requests awaiting a decision - host or a MANAGE_GUEST_REQUESTS moderator only. */
   async listGuestRequests(streamId: string, requesterId: string) {
     const stream = await this.getOrThrow(streamId);
-    if (!(await this.canUseCapability(requesterId, streamId, stream.hostId, ModeratorCapability.MANAGE_GUEST_REQUESTS))) {
+    if (
+      !(await this.canUseCapability(
+        requesterId,
+        streamId,
+        stream.hostId,
+        ModeratorCapability.MANAGE_GUEST_REQUESTS,
+      ))
+    ) {
       throw new ForbiddenException('Only the host or a moderator can view guest requests');
     }
     return this.guests.listPending(streamId);
@@ -659,7 +762,9 @@ export class StreamsService {
 
     const activeCount = await this.guests.countActiveGuests(streamId);
     if (activeCount >= MAX_ACTIVE_GUESTS) {
-      throw new ForbiddenException(`This stream already has the maximum of ${MAX_ACTIVE_GUESTS} guests`);
+      throw new ForbiddenException(
+        `This stream already has the maximum of ${MAX_ACTIVE_GUESTS} guests`,
+      );
     }
 
     const credentials = await this.videoProviders.get(stream.videoProvider).mintToken({
@@ -681,7 +786,14 @@ export class StreamsService {
   /** Host- or moderator-initiated (needs `REMOVE_GUESTS`) - sets the re-request cooldown (plan §6.6). */
   async removeGuest(streamId: string, requesterId: string, targetUserId: string) {
     const stream = await this.getOrThrow(streamId);
-    if (!(await this.canUseCapability(requesterId, streamId, stream.hostId, ModeratorCapability.REMOVE_GUESTS))) {
+    if (
+      !(await this.canUseCapability(
+        requesterId,
+        streamId,
+        stream.hostId,
+        ModeratorCapability.REMOVE_GUESTS,
+      ))
+    ) {
       throw new ForbiddenException('Only the host or a moderator can remove a guest');
     }
     await this.assertCanModerateTarget(streamId, stream.hostId, requesterId, targetUserId);
@@ -702,7 +814,12 @@ export class StreamsService {
    * lift the lock on their own mic. A guest who gets round it can still be
    * removed; nobody's mic is ever turned on remotely.
    */
-  async setGuestMicForceMuted(streamId: string, requesterId: string, targetUserId: string, forceMuted: boolean) {
+  async setGuestMicForceMuted(
+    streamId: string,
+    requesterId: string,
+    targetUserId: string,
+    forceMuted: boolean,
+  ) {
     const stream = await this.getLiveOrThrow(streamId);
     const liftingOwnLock =
       !forceMuted &&
@@ -713,7 +830,14 @@ export class StreamsService {
         await this.moderators.isActiveModerator(streamId, requesterId),
       );
     if (!liftingOwnLock) {
-      if (!(await this.canUseCapability(requesterId, streamId, stream.hostId, ModeratorCapability.FORCE_MUTE_GUESTS))) {
+      if (
+        !(await this.canUseCapability(
+          requesterId,
+          streamId,
+          stream.hostId,
+          ModeratorCapability.FORCE_MUTE_GUESTS,
+        ))
+      ) {
         throw new ForbiddenException("Only the host or a moderator can control a guest's mic");
       }
       await this.assertCanModerateTarget(streamId, stream.hostId, requesterId, targetUserId);
@@ -735,7 +859,9 @@ export class StreamsService {
     const isLive = stream.status === StreamStatus.LIVE;
     const until = stream.endedAt ?? new Date();
     const [peakViewerCount, likeCount, newFollowers] = await Promise.all([
-      isLive ? this.presence.peakViewerCount(streamId).catch(() => stream.peakViewerCount) : stream.peakViewerCount,
+      isLive
+        ? this.presence.peakViewerCount(streamId).catch(() => stream.peakViewerCount)
+        : stream.peakViewerCount,
       isLive ? this.presence.likeCount(streamId).catch(() => stream.likeCount) : stream.likeCount,
       // Someone who followed and unfollowed again during the live isn't counted.
       this.prisma.follow.count({
@@ -744,11 +870,50 @@ export class StreamsService {
     ]);
     return {
       streamId,
-      durationSeconds: Math.max(0, Math.round((until.getTime() - stream.startedAt.getTime()) / 1000)),
+      durationSeconds: Math.max(
+        0,
+        Math.round((until.getTime() - stream.startedAt.getTime()) / 1000),
+      ),
       peakViewerCount,
       likeCount,
       newFollowers,
     };
+  }
+
+  /**
+   * A block between a running live's host and someone in it (plan §6.4):
+   * they're out of it at once - off stage and out of the video room - and the
+   * gateway takes their sockets out of its room.
+   */
+  @OnEvent(DomainEvents.UserBlocked)
+  async handleUserBlocked({ blockerId, blockedId }: UserBlockedPayload): Promise<void> {
+    try {
+      const lives = await this.prisma.stream.findMany({
+        where: { status: StreamStatus.LIVE, hostId: { in: [blockerId, blockedId] } },
+      });
+      for (const stream of lives) {
+        const removedByHost = stream.hostId === blockerId;
+        const userId = removedByHost ? blockedId : blockerId;
+        await this.vacateGuestSeat(stream, userId, removedByHost, blockerId);
+        // A plain viewer has no seat, but still has the video.
+        await this.videoProviders
+          .get(stream.videoProvider)
+          .revokeToken(stream.channelName, userId)
+          .catch((error) =>
+            this.logger.warn(`Could not revoke token for ${userId} on ${stream.id}: ${error}`),
+          );
+        this.events.emit(DomainEvents.LiveAccessRevoked, {
+          streamId: stream.id,
+          hostId: stream.hostId,
+          userId,
+          removedByHost,
+        } satisfies LiveAccessRevokedPayload);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Could not apply ${blockerId}'s block of ${blockedId} to their lives: ${error}`,
+      );
+    }
   }
 
   // Media first, then the seat: once `guest:removed` goes out the client may
@@ -764,7 +929,9 @@ export class StreamsService {
     await this.videoProviders
       .get(stream.videoProvider)
       .revokeToken(stream.channelName, userId)
-      .catch((error) => this.logger.warn(`Could not revoke token for ${userId} on ${stream.id}: ${error}`));
+      .catch((error) =>
+        this.logger.warn(`Could not revoke token for ${userId} on ${stream.id}: ${error}`),
+      );
     await this.guests.remove(stream.id, stream.hostId, userId, removedByHostOrModerator, actorId);
   }
 
@@ -783,7 +950,14 @@ export class StreamsService {
       }
       return;
     }
-    if (!(await this.canUseCapability(requesterId, streamId, hostId, ModeratorCapability.MANAGE_GUEST_REQUESTS))) {
+    if (
+      !(await this.canUseCapability(
+        requesterId,
+        streamId,
+        hostId,
+        ModeratorCapability.MANAGE_GUEST_REQUESTS,
+      ))
+    ) {
       throw new ForbiddenException('Only the host or a moderator can respond to a guest request');
     }
   }
@@ -809,13 +983,25 @@ export class StreamsService {
     requesterId: string,
     targetUserId: string,
   ): Promise<void> {
-    const dependsOnGrant = !this.permissions.isHost(requesterId, hostId) && targetUserId !== requesterId && targetUserId !== hostId;
-    const targetIsModerator = dependsOnGrant && (await this.moderators.isActiveModerator(streamId, targetUserId));
-    switch (this.permissions.moderationTargetRefusal(requesterId, hostId, targetUserId, targetIsModerator)) {
+    const dependsOnGrant =
+      !this.permissions.isHost(requesterId, hostId) &&
+      targetUserId !== requesterId &&
+      targetUserId !== hostId;
+    const targetIsModerator =
+      dependsOnGrant && (await this.moderators.isActiveModerator(streamId, targetUserId));
+    switch (
+      this.permissions.moderationTargetRefusal(requesterId, hostId, targetUserId, targetIsModerator)
+    ) {
       case 'TARGET_IS_HOST':
-        throw new ForbiddenException({ message: "You can't do that to the host", code: 'TARGET_IS_HOST' });
+        throw new ForbiddenException({
+          message: "You can't do that to the host",
+          code: 'TARGET_IS_HOST',
+        });
       case 'TARGET_IS_MODERATOR':
-        throw new ForbiddenException({ message: 'Only the host can do that to a moderator', code: 'TARGET_IS_MODERATOR' });
+        throw new ForbiddenException({
+          message: 'Only the host can do that to a moderator',
+          code: 'TARGET_IS_MODERATOR',
+        });
     }
   }
 
@@ -830,8 +1016,12 @@ export class StreamsService {
    */
   async lock(streamId: string, actorId: string, reason: string) {
     const stream = await this.getOrThrow(streamId);
-    if (stream.status !== StreamStatus.LIVE) throw new ConflictException('Only a live that is running can be locked');
-    const { stream: locked, changed } = await this.closeStream(streamId, StreamEndReason.LOCKED, { actorId, reason });
+    if (stream.status !== StreamStatus.LIVE)
+      throw new ConflictException('Only a live that is running can be locked');
+    const { stream: locked, changed } = await this.closeStream(streamId, StreamEndReason.LOCKED, {
+      actorId,
+      reason,
+    });
     if (!changed) throw new ConflictException('This live has already ended');
     return locked;
   }
@@ -863,12 +1053,17 @@ export class StreamsService {
     });
     let locked = 0;
     for (const live of lives) {
-      if ((await this.closeStream(live.id, StreamEndReason.LOCKED, { actorId, reason })).changed) locked++;
+      if ((await this.closeStream(live.id, StreamEndReason.LOCKED, { actorId, reason })).changed)
+        locked++;
     }
     return locked;
   }
 
-  private async closeStream(streamId: string, reason: StreamEndReason, lock?: { actorId: string; reason: string }) {
+  private async closeStream(
+    streamId: string,
+    reason: StreamEndReason,
+    lock?: { actorId: string; reason: string },
+  ) {
     const [peakViewerCount, likeCount] = await Promise.all([
       this.presence.peakViewerCount(streamId).catch(() => 0),
       this.presence.likeCount(streamId).catch(() => 0),
@@ -936,6 +1131,14 @@ export class StreamsService {
       throw new NotFoundException('Stream not found');
     }
     return stream;
+  }
+
+  // Blocked either way (plan §6.4): to them the live doesn't exist - without
+  // saying which side blocked.
+  private async assertNotBlocked(hostId: string, userId: string): Promise<void> {
+    if (await this.social.isBlockedEitherWay(hostId, userId)) {
+      throw new NotFoundException('Stream not found');
+    }
   }
 
   private async getLiveOrThrow(streamId: string) {

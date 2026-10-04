@@ -1,8 +1,23 @@
-import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { AdminPermission, AlertScope, BannedPhraseSeverity, Prisma, StreamStatus } from '@prisma/client';
+import {
+  AdminPermission,
+  AlertScope,
+  BannedPhraseSeverity,
+  Prisma,
+  StreamStatus,
+} from '@prisma/client';
 import { BannedPhrasesService } from '../../chat/banned-phrases.service';
-import { AdminAlertSentPayload, BannedPhraseChangedPayload, DomainEvents } from '../../common/events/domain-events';
+import {
+  AdminAlertSentPayload,
+  BannedPhraseChangedPayload,
+  DomainEvents,
+} from '../../common/events/domain-events';
 import { PageQueryDto, pageArgs, toPage } from '../../common/pagination/page-query.dto';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
@@ -55,11 +70,16 @@ export class AdminContentService {
       take: 100,
       select: { id: true, title: true, host: PERSON_SELECT },
     });
-    return { items: lives.map((live) => ({ ...live, reach: this.realtime.connectedCount(live.id) })) };
+    return {
+      items: lives.map((live) => ({ ...live, reach: this.realtime.connectedCount(live.id) })),
+    };
   }
 
   async sendAlert(admin: AdminPrincipal, dto: SendAlertDto) {
-    if (dto.scope === AlertScope.GLOBAL && !admin.permissions.includes(AdminPermission.SEND_GLOBAL_ALERTS)) {
+    if (
+      dto.scope === AlertScope.GLOBAL &&
+      !admin.permissions.includes(AdminPermission.SEND_GLOBAL_ALERTS)
+    ) {
       throw new ForbiddenException({
         message: "You can't alert everyone. A super admin can give you access.",
         code: 'MISSING_PERMISSION',
@@ -67,7 +87,10 @@ export class AdminContentService {
     }
     const streamId = dto.scope === AlertScope.STREAM ? (dto.streamId ?? null) : null;
     if (streamId) {
-      const stream = await this.prisma.stream.findUnique({ where: { id: streamId }, select: { status: true } });
+      const stream = await this.prisma.stream.findUnique({
+        where: { id: streamId },
+        select: { status: true },
+      });
       if (!stream) throw new NotFoundException('Stream not found');
       if (stream.status !== StreamStatus.LIVE) throw new ConflictException('That live has ended');
     }
@@ -124,7 +147,10 @@ export class AdminContentService {
     try {
       const phrase = await this.prisma.bannedPhrase.update({
         where: { id: phraseId },
-        data: { ...(dto.phrase ? { phrase: dto.phrase } : {}), ...(dto.severity ? { severity: dto.severity } : {}) },
+        data: {
+          ...(dto.phrase ? { phrase: dto.phrase } : {}),
+          ...(dto.severity ? { severity: dto.severity } : {}),
+        },
       });
       this.announcePhrase(DomainEvents.BannedPhraseUpdated, admin, phrase);
       return phrase;
@@ -159,7 +185,10 @@ export class AdminContentService {
   }
 
   private announcePhrase(
-    event: typeof DomainEvents.BannedPhraseCreated | typeof DomainEvents.BannedPhraseUpdated | typeof DomainEvents.BannedPhraseDeleted,
+    event:
+      | typeof DomainEvents.BannedPhraseCreated
+      | typeof DomainEvents.BannedPhraseUpdated
+      | typeof DomainEvents.BannedPhraseDeleted,
     admin: AdminPrincipal,
     phrase: { id: string; phrase: string; severity: BannedPhraseSeverity },
   ): void {

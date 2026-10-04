@@ -19,7 +19,9 @@ export class VideoProviderRegistry {
     this.activeKind = parseProviderKind(config.get<string>('VIDEO_PROVIDER'));
 
     if (this.activeKind === VideoProviderKind.LIVEKIT && !livekit.isConfigured) {
-      throw new Error('VIDEO_PROVIDER=livekit needs LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET.');
+      throw new Error(
+        'VIDEO_PROVIDER=livekit needs LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET.',
+      );
     }
   }
 

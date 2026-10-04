@@ -1,7 +1,25 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AdminPermission } from '@prisma/client';
-import { ADMIN_API_THROTTLE, AdminGuard, AdminPrincipal, CurrentAdmin, RequirePermission } from '../admin.guard';
+import {
+  ADMIN_API_THROTTLE,
+  AdminGuard,
+  AdminPrincipal,
+  CurrentAdmin,
+  RequirePermission,
+} from '../admin.guard';
 import { AdminChatLogQueryDto, AdminStreamsQueryDto, LockStreamDto } from './admin-streams.dto';
 import { AdminStreamsService } from './admin-streams.service';
 
@@ -40,7 +58,11 @@ export class AdminStreamsController {
   @Post(':id/lock')
   @HttpCode(HttpStatus.OK)
   @RequirePermission(AdminPermission.MANAGE_LIVES)
-  lock(@CurrentAdmin() admin: AdminPrincipal, @Param('id', ParseUUIDPipe) id: string, @Body() dto: LockStreamDto) {
+  lock(
+    @CurrentAdmin() admin: AdminPrincipal,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: LockStreamDto,
+  ) {
     return this.streams.lock(admin, id, dto.reason);
   }
 

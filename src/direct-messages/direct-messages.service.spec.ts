@@ -49,7 +49,7 @@ describe('DirectMessagesService', () => {
     follow: { findMany: jest.fn() },
     $transaction: jest.fn(),
   };
-  const social = { isFriend: jest.fn() };
+  const social = { isFriend: jest.fn(), isBlockedByViewer: jest.fn() };
   const bannedPhrases = { match: jest.fn(), mask: jest.fn() };
   const rateLimit = { take: jest.fn() };
   const events = { emit: jest.fn() };
@@ -87,6 +87,7 @@ describe('DirectMessagesService', () => {
     );
     prisma.directMessage.count.mockResolvedValue(3);
     social.isFriend.mockResolvedValue(true);
+    social.isBlockedByViewer.mockResolvedValue(false);
     bannedPhrases.match.mockResolvedValue([]);
     rateLimit.take.mockResolvedValue(0);
   });
@@ -275,11 +276,15 @@ describe('DirectMessagesService', () => {
         nextCursor: null,
       });
       const query = prisma.conversation.findMany.mock.calls[0][0] as Record<string, unknown>;
-      // Anyone Ana blocked is left out, whichever side of the pair they're on.
+      // Anyone blocked either way is left out, whichever side of the pair they're on.
+      const notBlocked = {
+        blockedBy: { none: { blockerId: ANA } },
+        blocksMade: { none: { blockedId: ANA } },
+      };
       expect(query.where).toEqual({
         OR: [
-          { userAId: ANA, userB: { blockedBy: { none: { blockerId: ANA } } } },
-          { userBId: ANA, userA: { blockedBy: { none: { blockerId: ANA } } } },
+          { userAId: ANA, userB: notBlocked },
+          { userBId: ANA, userA: notBlocked },
         ],
       });
       expect(query.orderBy).toEqual([{ lastMessageAt: 'desc' }, { id: 'desc' }]);
@@ -340,6 +345,17 @@ describe('DirectMessagesService', () => {
         BadRequestException,
       );
     });
+
+    it('is a 404 for someone the other person blocked', async () => {
+      prisma.user.findUnique.mockResolvedValue(ben);
+      social.isBlockedByViewer.mockResolvedValue(true);
+
+      await expect(service().history(ANA, BEN, { limit: 50 })).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(social.isBlockedByViewer).toHaveBeenCalledWith(BEN, ANA);
+      expect(prisma.directMessage.findMany).not.toHaveBeenCalled();
+    });
   });
 
   describe('markRead', () => {
@@ -369,7 +385,7 @@ describe('DirectMessagesService', () => {
     });
   });
 
-  it('the unread badge counts every unread message except from people you blocked', async () => {
+  it('the unread badge counts every unread message except from anyone blocked either way', async () => {
     prisma.directMessage.count.mockResolvedValue(4);
 
     expect(await service().unreadCount(ANA)).toEqual({ count: 4 });
@@ -377,7 +393,10 @@ describe('DirectMessagesService', () => {
       where: {
         recipientId: ANA,
         readAt: null,
-        sender: { blockedBy: { none: { blockerId: ANA } } },
+        sender: {
+          blockedBy: { none: { blockerId: ANA } },
+          blocksMade: { none: { blockedId: ANA } },
+        },
       },
     });
   });

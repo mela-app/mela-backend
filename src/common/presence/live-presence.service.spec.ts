@@ -27,7 +27,10 @@ describe('LivePresenceService', () => {
   it('adds a viewer by socket, counted by user, and returns the unique count', async () => {
     client.eval.mockResolvedValue([3, 0]);
 
-    await expect(service().addViewer('s1', 'user-1', 'socket-1')).resolves.toEqual({ viewerCount: 3, arrived: false });
+    await expect(service().addViewer('s1', 'user-1', 'socket-1')).resolves.toEqual({
+      viewerCount: 3,
+      arrived: false,
+    });
 
     expect(client.eval).toHaveBeenCalledWith(
       expect.stringContaining('HSETNX'),
@@ -43,11 +46,18 @@ describe('LivePresenceService', () => {
   it("says when it's the person's first connection in the live", async () => {
     client.eval.mockResolvedValue([4, 1]);
 
-    await expect(service().addViewer('s1', 'user-2', 'socket-2')).resolves.toEqual({ viewerCount: 4, arrived: true });
+    await expect(service().addViewer('s1', 'user-2', 'socket-2')).resolves.toEqual({
+      viewerCount: 4,
+      arrived: true,
+    });
   });
 
   it('lists only the accounts watching - browser viewers without one are counted, not listed', async () => {
-    client.hkeys.mockResolvedValueOnce(['user-1', 'web-9b2f0c1d-4e5a-4a8b-9d7e-2b6f0c1d4e5a', 'user-2']);
+    client.hkeys.mockResolvedValueOnce([
+      'user-1',
+      'web-9b2f0c1d-4e5a-4a8b-9d7e-2b6f0c1d4e5a',
+      'user-2',
+    ]);
 
     await expect(service().viewerIds('s1')).resolves.toEqual(['user-1', 'user-2']);
     expect(client.hkeys).toHaveBeenCalledWith('stream:s1:viewers');
@@ -58,7 +68,13 @@ describe('LivePresenceService', () => {
 
     await expect(service().claimArrivalNotice('s1', 'user-1')).resolves.toBe(true);
     await expect(service().claimArrivalNotice('s1', 'user-1')).resolves.toBe(false);
-    expect(client.set).toHaveBeenCalledWith('stream:s1:arrival_notice:user-1', '1', 'EX', ARRIVAL_NOTICE_TTL_SECONDS, 'NX');
+    expect(client.set).toHaveBeenCalledWith(
+      'stream:s1:arrival_notice:user-1',
+      '1',
+      'EX',
+      ARRIVAL_NOTICE_TTL_SECONDS,
+      'NX',
+    );
   });
 
   it('removes a viewer by socket', async () => {

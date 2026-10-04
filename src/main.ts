@@ -20,7 +20,8 @@ async function bootstrap() {
     .filter(Boolean);
   // Behind a reverse proxy, the audit trail should record the client's IP, not the proxy's.
   const trustProxy = config.get<string>('TRUST_PROXY')?.trim();
-  if (trustProxy) app.set('trust proxy', /^\d+$/.test(trustProxy) ? Number(trustProxy) : trustProxy);
+  if (trustProxy)
+    app.set('trust proxy', /^\d+$/.test(trustProxy) ? Number(trustProxy) : trustProxy);
 
   app.use(helmet());
   // Plan §7: smaller responses on slow mobile networks.

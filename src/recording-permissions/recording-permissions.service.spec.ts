@@ -13,7 +13,10 @@ describe('RecordingPermissionsService', () => {
   };
   const events = { emit: jest.fn() };
   const service = () =>
-    new RecordingPermissionsService(prisma as unknown as PrismaService, events as unknown as EventEmitter2);
+    new RecordingPermissionsService(
+      prisma as unknown as PrismaService,
+      events as unknown as EventEmitter2,
+    );
 
   beforeEach(() => jest.clearAllMocks());
 
@@ -34,14 +37,21 @@ describe('RecordingPermissionsService', () => {
   });
 
   it('takes it back - and says nothing when there was nothing to take back', async () => {
-    prisma.recordingPermission.deleteMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
+    prisma.recordingPermission.deleteMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
 
     await service().disallow('s1', 'fan-1', 'host-1');
     await service().disallow('s1', 'fan-1', 'host-1');
 
-    expect(prisma.recordingPermission.deleteMany).toHaveBeenCalledWith({ where: { streamId: 's1', userId: 'fan-1' } });
+    expect(prisma.recordingPermission.deleteMany).toHaveBeenCalledWith({
+      where: { streamId: 's1', userId: 'fan-1' },
+    });
     expect(events.emit).toHaveBeenCalledTimes(1);
-    expect(events.emit).toHaveBeenCalledWith('recording_permission.changed', expect.objectContaining({ allowed: false }));
+    expect(events.emit).toHaveBeenCalledWith(
+      'recording_permission.changed',
+      expect.objectContaining({ allowed: false }),
+    );
   });
 
   it('answers whether a viewer may record, and lists who may', async () => {

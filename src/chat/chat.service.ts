@@ -15,13 +15,20 @@ import { RedisService } from '../common/redis/redis.service';
 import { STORAGE_PROVIDER, StorageProvider } from '../common/storage/storage-provider.interface';
 import { ModeratorsService } from '../moderators/moderators.service';
 import { RoomChatMutesService } from '../room-chat-mutes/room-chat-mutes.service';
+import { notBlockedEitherWayWith } from '../social/block-filters';
 import { StreamsService } from '../streams/streams.service';
 import { BannedPhrasesService } from './banned-phrases.service';
 import { ChatImageType, chatImageKey, chatPreviewText, isChatImageKey } from './chat-images';
 import { ChatTextError, cleanChatText } from './chat-text';
 import { ChatHistoryQueryDto } from './dto/chat-history.dto';
 import { hasDisallowedLink, parseLinkDomains } from './link-policy';
-import { ChatMention, MentionLookup, mentionedUsernames, mentionLookup, resolveMentions } from './mentions';
+import {
+  ChatMention,
+  MentionLookup,
+  mentionedUsernames,
+  mentionLookup,
+  resolveMentions,
+} from './mentions';
 
 /** Three messages at once, then one every 1.5 s, per person per live (plan §6.3). */
 export const CHAT_RATE_LIMIT: RateLimit = { capacity: 3, refillMs: 1500 };
@@ -117,7 +124,8 @@ export class ChatService {
     let imageUrl: string | null = null;
     if (imageKey) {
       const live = await this.streams.findLive(streamId);
-      if (!live || !this.permissions.isHost(userId, live.hostId)) return { ok: false, error: 'NOT_ALLOWED' };
+      if (!live || !this.permissions.isHost(userId, live.hostId))
+        return { ok: false, error: 'NOT_ALLOWED' };
       if (!isChatImageKey(imageKey, streamId)) return { ok: false, error: 'IMAGE_INVALID' };
       imageUrl = this.storage.publicUrl(imageKey);
     }
@@ -132,7 +140,11 @@ export class ChatService {
     const mute = await this.roomChatMutes.findActive(streamId, userId);
     if (mute) {
       return mute.expiresAt
-        ? { ok: false, error: 'CHAT_MUTED', retryAfterMs: Math.max(1, mute.expiresAt.getTime() - Date.now()) }
+        ? {
+            ok: false,
+            error: 'CHAT_MUTED',
+            retryAfterMs: Math.max(1, mute.expiresAt.getTime() - Date.now()),
+          }
         : { ok: false, error: 'CHAT_MUTED' };
     }
 
@@ -147,7 +159,8 @@ export class ChatService {
     );
     if (retryAfterMs > 0) return { ok: false, error: 'RATE_LIMITED', retryAfterMs };
 
-    if (hasDisallowedLink(cleanText, this.linkDomains)) return { ok: false, error: 'LINK_NOT_ALLOWED' };
+    if (hasDisallowedLink(cleanText, this.linkDomains))
+      return { ok: false, error: 'LINK_NOT_ALLOWED' };
 
     const text = phraseMatches.length > 0 ? await this.bannedPhrases.mask(cleanText) : cleanText;
     const row = await this.prisma.chatMessage.create({
@@ -157,7 +170,11 @@ export class ChatService {
     if (resendKey) {
       await this.redis.getClient().set(resendKey, row.id, 'EX', RESEND_WINDOW_SECONDS);
     }
-    return { ok: true, message: toView(row, await this.mentionLookupFor([row.text])), resent: false };
+    return {
+      ok: true,
+      message: toView(row, await this.mentionLookupFor([row.text])),
+      resent: false,
+    };
   }
 
   /**
@@ -167,13 +184,17 @@ export class ChatService {
   async createImageUploadUrl(streamId: string, userId: string, contentType: ChatImageType) {
     const live = await this.streams.findLive(streamId);
     if (!live) throw new NotFoundException('Stream is not live');
-    if (!this.permissions.isHost(userId, live.hostId)) throw new ForbiddenException('Only the host can post photos');
+    if (!this.permissions.isHost(userId, live.hostId))
+      throw new ForbiddenException('Only the host can post photos');
     const imageKey = chatImageKey(streamId, contentType);
     return { ...(await this.storage.createUploadUrl(imageKey, contentType)), imageKey };
   }
 
-  /** A live's visible messages, oldest first - see ChatHistoryQueryDto. */
-  async history(streamId: string, query: ChatHistoryQueryDto) {
+  /**
+   * A live's visible messages, oldest first - see ChatHistoryQueryDto. For
+   * [requesterId], without anyone blocked either way (plan §6.4).
+   */
+  async history(streamId: string, query: ChatHistoryQueryDto, requesterId?: string) {
     // Chat belongs to the live, not a public archive (plan §6.1).
     if (!(await this.streams.findLive(streamId))) {
       throw new NotFoundException('Stream is not live');
@@ -184,6 +205,7 @@ export class ChatService {
         streamId,
         moderationStatus: ChatModerationStatus.VISIBLE,
         id: { lt: query.before, gt: query.after },
+        ...(requesterId && { user: notBlockedEitherWayWith(requesterId) }),
       },
       // Newest first to pick the window; handed out oldest first.
       orderBy: { id: 'desc' },
@@ -225,19 +247,41 @@ export class ChatService {
    * deletes any message; an active moderator holding `DELETE_MESSAGES` any
    * but the host's and other moderators'.
    */
-  async delete(streamId: string, messageId: string, requesterId: string): Promise<ChatDeleteResult> {
+  async delete(
+    streamId: string,
+    messageId: string,
+    requesterId: string,
+  ): Promise<ChatDeleteResult> {
     const stream = await this.streams.findLive(streamId);
     if (!stream) return { ok: false, error: 'NOT_FOUND' };
-    if (!(await this.canUseCapability(requesterId, streamId, stream.hostId, ModeratorCapability.DELETE_MESSAGES))) {
+    if (
+      !(await this.canUseCapability(
+        requesterId,
+        streamId,
+        stream.hostId,
+        ModeratorCapability.DELETE_MESSAGES,
+      ))
+    ) {
       return { ok: false, error: 'NOT_ALLOWED' };
     }
     const visible = { id: messageId, streamId, moderationStatus: ChatModerationStatus.VISIBLE };
     if (!this.permissions.isHost(requesterId, stream.hostId)) {
-      const message = await this.prisma.chatMessage.findFirst({ where: visible, select: { userId: true } });
+      const message = await this.prisma.chatMessage.findFirst({
+        where: visible,
+        select: { userId: true },
+      });
       if (!message) return { ok: false, error: 'NOT_FOUND' };
       const senderIsModerator =
-        message.userId !== requesterId && (await this.moderators.isActiveModerator(streamId, message.userId));
-      if (this.permissions.moderationTargetRefusal(requesterId, stream.hostId, message.userId, senderIsModerator)) {
+        message.userId !== requesterId &&
+        (await this.moderators.isActiveModerator(streamId, message.userId));
+      if (
+        this.permissions.moderationTargetRefusal(
+          requesterId,
+          stream.hostId,
+          message.userId,
+          senderIsModerator,
+        )
+      ) {
         return { ok: false, error: 'NOT_ALLOWED' };
       }
     }
@@ -282,7 +326,12 @@ export class ChatService {
   async pin(streamId: string, messageId: string, requesterId: string): Promise<ChatPinResult> {
     const stream = await this.streams.findLive(streamId);
     if (!stream) return { ok: false, error: 'NOT_FOUND' };
-    const canModerate = await this.canUseCapability(requesterId, streamId, stream.hostId, ModeratorCapability.PIN_MESSAGES);
+    const canModerate = await this.canUseCapability(
+      requesterId,
+      streamId,
+      stream.hostId,
+      ModeratorCapability.PIN_MESSAGES,
+    );
     if (!canModerate) return { ok: false, error: 'NOT_ALLOWED' };
 
     const message = await this.prisma.chatMessage.findFirst({
@@ -291,7 +340,10 @@ export class ChatService {
     });
     if (!message) return { ok: false, error: 'NOT_FOUND' };
 
-    await this.prisma.stream.update({ where: { id: streamId }, data: { pinnedMessageId: messageId } });
+    await this.prisma.stream.update({
+      where: { id: streamId },
+      data: { pinnedMessageId: messageId },
+    });
     this.events.emit(DomainEvents.ChatMessagePinned, {
       streamId,
       messageId,
@@ -306,7 +358,12 @@ export class ChatService {
   async unpin(streamId: string, requesterId: string): Promise<ChatPinResult> {
     const stream = await this.streams.findLive(streamId);
     if (!stream) return { ok: false, error: 'NOT_FOUND' };
-    const canModerate = await this.canUseCapability(requesterId, streamId, stream.hostId, ModeratorCapability.PIN_MESSAGES);
+    const canModerate = await this.canUseCapability(
+      requesterId,
+      streamId,
+      stream.hostId,
+      ModeratorCapability.PIN_MESSAGES,
+    );
     if (!canModerate) return { ok: false, error: 'NOT_ALLOWED' };
 
     await this.prisma.stream.update({ where: { id: streamId }, data: { pinnedMessageId: null } });

@@ -20,7 +20,12 @@ describe('RoomBansService', () => {
       await service().ban('host-1', 'troll-1', RoomBanScope.SESSION, 's1');
 
       expect(prisma.roomBan.create).toHaveBeenCalledWith({
-        data: { hostId: 'host-1', bannedUserId: 'troll-1', scope: RoomBanScope.SESSION, streamId: 's1' },
+        data: {
+          hostId: 'host-1',
+          bannedUserId: 'troll-1',
+          scope: RoomBanScope.SESSION,
+          streamId: 's1',
+        },
       });
       expect(events.emit).toHaveBeenCalledWith('room_ban.created', {
         hostId: 'host-1',
@@ -34,14 +39,22 @@ describe('RoomBansService', () => {
     it('names the moderator who issued the ban, for the audit trail', async () => {
       await service().ban('host-1', 'troll-1', RoomBanScope.SESSION, 's1', 'mod-1');
 
-      expect(events.emit).toHaveBeenCalledWith('room_ban.created', expect.objectContaining({ actorId: 'mod-1' }));
+      expect(events.emit).toHaveBeenCalledWith(
+        'room_ban.created',
+        expect.objectContaining({ actorId: 'mod-1' }),
+      );
     });
 
     it('never persists or emits a streamId for a permanent ban, even if one was given', async () => {
       await service().ban('host-1', 'troll-1', RoomBanScope.HOST_PERMANENT, 's1');
 
       expect(prisma.roomBan.create).toHaveBeenCalledWith({
-        data: { hostId: 'host-1', bannedUserId: 'troll-1', scope: RoomBanScope.HOST_PERMANENT, streamId: null },
+        data: {
+          hostId: 'host-1',
+          bannedUserId: 'troll-1',
+          scope: RoomBanScope.HOST_PERMANENT,
+          streamId: null,
+        },
       });
       expect(events.emit).toHaveBeenCalledWith('room_ban.created', {
         hostId: 'host-1',

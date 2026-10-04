@@ -43,13 +43,15 @@ export const AdminRoles = (...roles: PlatformRole[]) => SetMetadata(ADMIN_ROLES_
 export const SuperAdminOnly = () => AdminRoles(PlatformRole.SUPER_ADMIN);
 
 /** Needs this console permission (a super admin has them all). On a method, it replaces the controller's. */
-export const RequirePermission = (permission: AdminPermission) => SetMetadata(ADMIN_PERMISSION_KEY, permission);
+export const RequirePermission = (permission: AdminPermission) =>
+  SetMetadata(ADMIN_PERMISSION_KEY, permission);
 
 /** Still reachable before a seeded or staff-created account has set its own password. */
 export const AllowPendingPasswordChange = () => SetMetadata(ALLOW_PENDING_PASSWORD_KEY, true);
 
 export const CurrentAdmin = createParamDecorator(
-  (_data: unknown, context: ExecutionContext): AdminPrincipal => context.switchToHttp().getRequest().admin,
+  (_data: unknown, context: ExecutionContext): AdminPrincipal =>
+    context.switchToHttp().getRequest().admin,
 );
 
 /**
@@ -102,8 +104,10 @@ export class AdminGuard implements CanActivate {
       },
     });
     const user = session?.user;
-    if (!user || user.status !== UserStatus.ACTIVE) throw new UnauthorizedException('Your session has ended');
-    if (user.platformRole === PlatformRole.USER) throw new ForbiddenException('Admin access is required');
+    if (!user || user.status !== UserStatus.ACTIVE)
+      throw new UnauthorizedException('Your session has ended');
+    if (user.platformRole === PlatformRole.USER)
+      throw new ForbiddenException('Admin access is required');
 
     const roles = this.reflector.getAllAndOverride<PlatformRole[] | undefined>(ADMIN_ROLES_KEY, [
       context.getHandler(),
@@ -112,18 +116,21 @@ export class AdminGuard implements CanActivate {
     if (roles && !roles.includes(user.platformRole)) {
       throw new ForbiddenException('Only a super admin can do this');
     }
-    const allowPending = this.reflector.getAllAndOverride<boolean | undefined>(ALLOW_PENDING_PASSWORD_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
+    const allowPending = this.reflector.getAllAndOverride<boolean | undefined>(
+      ALLOW_PENDING_PASSWORD_KEY,
+      [context.getHandler(), context.getClass()],
+    );
     if (user.passwordChangeRequired && !allowPending) {
-      throw new ForbiddenException({ message: 'Set a new password to continue', code: 'PASSWORD_CHANGE_REQUIRED' });
+      throw new ForbiddenException({
+        message: 'Set a new password to continue',
+        code: 'PASSWORD_CHANGE_REQUIRED',
+      });
     }
     const permissions = effectiveAdminPermissions(user.platformRole, user.adminPermissions);
-    const required = this.reflector.getAllAndOverride<AdminPermission | undefined>(ADMIN_PERMISSION_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
+    const required = this.reflector.getAllAndOverride<AdminPermission | undefined>(
+      ADMIN_PERMISSION_KEY,
+      [context.getHandler(), context.getClass()],
+    );
     if (required && !permissions.includes(required)) {
       throw new ForbiddenException({
         message: "You don't have access to this. A super admin can give it to you",

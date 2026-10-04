@@ -1,6 +1,17 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { GuestRequestInitiator, GuestRequestStatus, ModeratorCapability, StreamGuestStatus, VideoProviderKind } from '@prisma/client';
+import {
+  GuestRequestInitiator,
+  GuestRequestStatus,
+  ModeratorCapability,
+  StreamGuestStatus,
+  VideoProviderKind,
+} from '@prisma/client';
 import {
   DomainEvents,
   GuestJoinedPayload,
@@ -63,8 +74,10 @@ export class GuestsService {
 
   /** Viewer raises their hand (plan §6.5). StreamsService has already confirmed the stream is live and this viewer isn't banned. */
   async request(streamId: string, hostId: string, userId: string): Promise<{ id: string }> {
-    if (userId === hostId) throw new BadRequestException("You can't request to join your own stream");
-    if (await this.isActiveGuest(streamId, userId)) throw new BadRequestException("You're already a guest");
+    if (userId === hostId)
+      throw new BadRequestException("You can't request to join your own stream");
+    if (await this.isActiveGuest(streamId, userId))
+      throw new BadRequestException("You're already a guest");
     if (await this.isOnRemovalCooldown(streamId, userId)) {
       throw new ForbiddenException('You were recently removed from this stream - try again later');
     }
@@ -89,7 +102,8 @@ export class GuestsService {
   /** Host invites someone on stage - the reverse direction (plan §6.5), host-only (StreamsService checks that). */
   async invite(streamId: string, hostId: string, userId: string): Promise<{ id: string }> {
     if (userId === hostId) throw new BadRequestException("You can't invite yourself");
-    if (await this.isActiveGuest(streamId, userId)) throw new BadRequestException('Already a guest');
+    if (await this.isActiveGuest(streamId, userId))
+      throw new BadRequestException('Already a guest');
     await this.assertNoPending(streamId, userId);
 
     const row = await this.prisma.guestRequest.create({
@@ -109,7 +123,11 @@ export class GuestsService {
   /** VIEWER-initiated pending requests only, oldest first - the host/mod incoming-requests sheet (plan §6.5). */
   async listPending(streamId: string) {
     const rows = await this.prisma.guestRequest.findMany({
-      where: { streamId, status: GuestRequestStatus.PENDING, initiatedBy: GuestRequestInitiator.VIEWER },
+      where: {
+        streamId,
+        status: GuestRequestStatus.PENDING,
+        initiatedBy: GuestRequestInitiator.VIEWER,
+      },
       orderBy: { requestedAt: 'asc' },
       select: { id: true, requestedAt: true, user: { select: PROFILE_SUMMARY_SELECT } },
     });
@@ -119,7 +137,8 @@ export class GuestsService {
   async findPendingOrThrow(streamId: string, requestId: string) {
     const row = await this.prisma.guestRequest.findUnique({ where: { id: requestId } });
     if (!row || row.streamId !== streamId) throw new NotFoundException('Request not found');
-    if (row.status !== GuestRequestStatus.PENDING) throw new BadRequestException('This request was already resolved');
+    if (row.status !== GuestRequestStatus.PENDING)
+      throw new BadRequestException('This request was already resolved');
     return row;
   }
 
@@ -145,9 +164,17 @@ export class GuestsService {
         where: { streamId_userId: { streamId, userId: request.userId } },
         create: { streamId, userId: request.userId },
         // A new seat starts with the mic allowed, whatever happened last time.
-        update: { status: StreamGuestStatus.ACTIVE, joinedAt: now, leftAt: null, micForceMuted: false },
+        update: {
+          status: StreamGuestStatus.ACTIVE,
+          joinedAt: now,
+          leftAt: null,
+          micForceMuted: false,
+        },
       }),
-      this.prisma.user.findUniqueOrThrow({ where: { id: request.userId }, select: PROFILE_SUMMARY_SELECT }),
+      this.prisma.user.findUniqueOrThrow({
+        where: { id: request.userId },
+        select: PROFILE_SUMMARY_SELECT,
+      }),
     ]);
 
     this.events.emit(DomainEvents.GuestRequestAccepted, {
@@ -177,9 +204,15 @@ export class GuestsService {
   }
 
   /** The originator backs out - the VIEWER withdrawing their own request, or the HOST retracting their own invite. */
-  async cancel(streamId: string, requestId: string, actorId: string, hostId: string): Promise<void> {
+  async cancel(
+    streamId: string,
+    requestId: string,
+    actorId: string,
+    hostId: string,
+  ): Promise<void> {
     const request = await this.findPendingOrThrow(streamId, requestId);
-    const isOwnRequest = request.initiatedBy === GuestRequestInitiator.VIEWER && request.userId === actorId;
+    const isOwnRequest =
+      request.initiatedBy === GuestRequestInitiator.VIEWER && request.userId === actorId;
     const isOwnInvite = request.initiatedBy === GuestRequestInitiator.HOST && actorId === hostId;
     if (!isOwnRequest && !isOwnInvite) throw new ForbiddenException("You can't cancel this");
 
@@ -223,14 +256,20 @@ export class GuestsService {
    * and keeps it off until lifted. Lifting only lets them unmute again - it
    * never turns anyone's mic on. Idempotent, like remove().
    */
-  async setMicForceMuted(streamId: string, userId: string, actorId: string, forceMuted: boolean): Promise<void> {
+  async setMicForceMuted(
+    streamId: string,
+    userId: string,
+    actorId: string,
+    forceMuted: boolean,
+  ): Promise<void> {
     const { count } = await this.prisma.streamGuest.updateMany({
       where: { streamId, userId, status: StreamGuestStatus.ACTIVE, micForceMuted: !forceMuted },
       data: { micForceMuted: forceMuted },
     });
     if (count === 0) {
       // Already that way is fine; not being on stage isn't.
-      if (!(await this.isActiveGuest(streamId, userId))) throw new NotFoundException("They're not on stage");
+      if (!(await this.isActiveGuest(streamId, userId)))
+        throw new NotFoundException("They're not on stage");
       return;
     }
     this.events.emit(DomainEvents.GuestMicForceMuteChanged, {
@@ -261,7 +300,9 @@ export class GuestsService {
     if (result.count === 0) return;
 
     if (removedByHostOrModerator) {
-      await this.redis.getClient().set(this.cooldownKey(streamId, userId), '1', 'EX', REMOVAL_COOLDOWN_SECONDS);
+      await this.redis
+        .getClient()
+        .set(this.cooldownKey(streamId, userId), '1', 'EX', REMOVAL_COOLDOWN_SECONDS);
     }
     this.events.emit(DomainEvents.GuestRemoved, {
       streamId,

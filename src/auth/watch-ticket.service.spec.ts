@@ -26,7 +26,10 @@ describe('WatchTicketService', () => {
 
   it('never passes as an access token, nor an access token as a ticket', async () => {
     const { ticket } = await tickets.issue(LIVE);
-    const accessToken = await jwt.signAsync({ sub: 'user-1', streamId: LIVE }, { secret: 'access-secret' });
+    const accessToken = await jwt.signAsync(
+      { sub: 'user-1', streamId: LIVE },
+      { secret: 'access-secret' },
+    );
 
     await expect(jwt.verifyAsync(ticket, { secret: 'access-secret' })).rejects.toThrow();
     await expect(tickets.verify(accessToken)).rejects.toThrow();

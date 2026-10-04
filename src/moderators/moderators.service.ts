@@ -61,11 +61,20 @@ export class ModeratorsService {
     });
     // Wrapped, like every other list endpoint in the app (plan §7) - a bare
     // JSON array at the top level doesn't fit the client's Map<String, dynamic> convention.
-    return { items: rows.map((row) => ({ user: row.user, capabilities: row.capabilities, grantedAt: row.grantedAt })) };
+    return {
+      items: rows.map((row) => ({
+        user: row.user,
+        capabilities: row.capabilities,
+        grantedAt: row.grantedAt,
+      })),
+    };
   }
 
   /** Every active moderator's userId holding `capability` for this stream - for a realtime fan-out list, not display. */
-  async listUserIdsWithCapability(streamId: string, capability: ModeratorCapability): Promise<string[]> {
+  async listUserIdsWithCapability(
+    streamId: string,
+    capability: ModeratorCapability,
+  ): Promise<string[]> {
     const rows = await this.prisma.moderator.findMany({
       where: { streamId, status: ModeratorStatus.ACTIVE, capabilities: { has: capability } },
       select: { userId: true },
@@ -79,9 +88,17 @@ export class ModeratorsService {
    * (`StreamsService`) has already confirmed the requester is the host of
    * this specific, currently-live stream before calling this.
    */
-  async grant(hostId: string, streamId: string, userId: string, capabilities: ModeratorCapability[]) {
+  async grant(
+    hostId: string,
+    streamId: string,
+    userId: string,
+    capabilities: ModeratorCapability[],
+  ) {
     if (hostId === userId) throw new BadRequestException("You can't moderate your own stream");
-    const target = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+    const target = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    });
     if (!target) throw new NotFoundException('User not found');
 
     await this.prisma.moderator.upsert({
@@ -120,7 +137,10 @@ export class ModeratorsService {
       data: { status: ModeratorStatus.REVOKED, revokedAt: new Date() },
     });
     if (result.count > 0) {
-      this.events.emit(DomainEvents.ModeratorRevoked, { streamId, userId } satisfies ModeratorRevokedPayload);
+      this.events.emit(DomainEvents.ModeratorRevoked, {
+        streamId,
+        userId,
+      } satisfies ModeratorRevokedPayload);
     }
     return { ok: true };
   }

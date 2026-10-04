@@ -114,7 +114,10 @@ export class AuditEventsListener {
 
   @OnEvent(DomainEvents.AccountPasswordChanged)
   onPasswordChanged(payload: AccountCredentialChangedPayload) {
-    return this.track(async () => ({ action: 'account.password_changed', actorId: payload.userId }));
+    return this.track(async () => ({
+      action: 'account.password_changed',
+      actorId: payload.userId,
+    }));
   }
 
   @OnEvent(DomainEvents.AccountEmailChanged)
@@ -189,7 +192,10 @@ export class AuditEventsListener {
       action: 'admin.staff_created',
       actorId: payload.actorId,
       target: await this.userTarget(payload.userId),
-      metadata: { role: payload.role, ...(payload.permissions.length ? { permissions: payload.permissions } : {}) },
+      metadata: {
+        role: payload.role,
+        ...(payload.permissions.length ? { permissions: payload.permissions } : {}),
+      },
     }));
   }
 
@@ -222,7 +228,13 @@ export class AuditEventsListener {
     return this.track(async () => {
       const stream = await this.prisma.stream.findUnique({
         where: { id: payload.streamId },
-        select: { hostId: true, title: true, startedAt: true, endedAt: true, peakViewerCount: true },
+        select: {
+          hostId: true,
+          title: true,
+          startedAt: true,
+          endedAt: true,
+          peakViewerCount: true,
+        },
       });
       if (!stream) return null;
       const byHost = payload.reason !== StreamEndReason.HOST_DISCONNECTED;
@@ -295,15 +307,26 @@ export class AuditEventsListener {
     return this.track(async () => {
       const message = await this.prisma.chatMessage.findUnique({
         where: { id: payload.messageId },
-        select: { text: true, userId: true, user: { select: { username: true } }, stream: { select: { hostId: true } } },
+        select: {
+          text: true,
+          userId: true,
+          user: { select: { username: true } },
+          stream: { select: { hostId: true } },
+        },
       });
       return {
         action: 'chat.message_deleted',
         actorId: payload.actorId,
         hostId: message?.stream.hostId,
-        target: { type: 'MESSAGE', id: payload.messageId, label: message ? excerpt(message.text) : null },
+        target: {
+          type: 'MESSAGE',
+          id: payload.messageId,
+          label: message ? excerpt(message.text) : null,
+        },
         streamId: payload.streamId,
-        metadata: message ? { senderId: message.userId, sender: `@${message.user.username}` } : undefined,
+        metadata: message
+          ? { senderId: message.userId, sender: `@${message.user.username}` }
+          : undefined,
       };
     });
   }
@@ -363,7 +386,9 @@ export class AuditEventsListener {
       hostId: await this.hostOf(payload.streamId),
       target: await this.userTarget(payload.userId),
       streamId: payload.streamId,
-      metadata: payload.muted ? { until: payload.mutedUntil?.toISOString() ?? 'end of live' } : undefined,
+      metadata: payload.muted
+        ? { until: payload.mutedUntil?.toISOString() ?? 'end of live' }
+        : undefined,
     }));
   }
 
@@ -532,7 +557,10 @@ export class AuditEventsListener {
     return this.trackPhrase('phrase.removed', payload);
   }
 
-  private trackPhrase(action: 'phrase.added' | 'phrase.updated' | 'phrase.removed', payload: BannedPhraseChangedPayload) {
+  private trackPhrase(
+    action: 'phrase.added' | 'phrase.updated' | 'phrase.removed',
+    payload: BannedPhraseChangedPayload,
+  ) {
     return this.track(async () => ({
       action,
       actorId: payload.actorId,
@@ -551,17 +579,26 @@ export class AuditEventsListener {
   }
 
   private async userTarget(userId: string): Promise<AuditEntry['target']> {
-    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { username: true } });
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { username: true },
+    });
     return { type: 'USER', id: userId, label: user ? `@${user.username}` : null };
   }
 
   private async streamTarget(streamId: string): Promise<AuditEntry['target']> {
-    const stream = await this.prisma.stream.findUnique({ where: { id: streamId }, select: { title: true } });
+    const stream = await this.prisma.stream.findUnique({
+      where: { id: streamId },
+      select: { title: true },
+    });
     return { type: 'STREAM', id: streamId, label: stream?.title ?? null };
   }
 
   private async hostOf(streamId: string): Promise<string | undefined> {
-    const stream = await this.prisma.stream.findUnique({ where: { id: streamId }, select: { hostId: true } });
+    const stream = await this.prisma.stream.findUnique({
+      where: { id: streamId },
+      select: { hostId: true },
+    });
     return stream?.hostId;
   }
 }

@@ -81,4 +81,3 @@ export class PermissionsService {
 
   // Admin console access is per permission, not per role: see ./admin-permissions.ts.
 }
-

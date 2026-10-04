@@ -17,7 +17,9 @@ export function chatImageKey(streamId: string, contentType: ChatImageType): stri
  */
 export function isChatImageKey(key: string, streamId: string): boolean {
   const prefix = `chat-images/${streamId}/`;
-  return key.startsWith(prefix) && new RegExp(`^${UUID}\\.(jpg|png)$`).test(key.slice(prefix.length));
+  return (
+    key.startsWith(prefix) && new RegExp(`^${UUID}\\.(jpg|png)$`).test(key.slice(prefix.length))
+  );
 }
 
 /** One line for where only text fits (the pinned banner): a photo reads as one. */

@@ -16,7 +16,10 @@ export interface ProfileViewer {
  * follow lists. Name, username and picture are always public: they show in
  * every chat and viewer list anyway.
  */
-export function canViewProfileDetails(visibility: ProfileVisibility, viewer: ProfileViewer): boolean {
+export function canViewProfileDetails(
+  visibility: ProfileVisibility,
+  viewer: ProfileViewer,
+): boolean {
   if (viewer.isSelf) return true;
   if (viewer.blockedByOwner) return false;
   switch (visibility) {
@@ -35,6 +38,9 @@ export function canViewProfileDetails(visibility: ProfileVisibility, viewer: Pro
  * The setting as this viewer is told it. Someone the owner blocked just
  * sees a private profile - never that they were blocked.
  */
-export function visibilityShownTo(visibility: ProfileVisibility, viewer: ProfileViewer): ProfileVisibility {
+export function visibilityShownTo(
+  visibility: ProfileVisibility,
+  viewer: ProfileViewer,
+): ProfileVisibility {
   return viewer.blockedByOwner && !viewer.isSelf ? ProfileVisibility.ONLY_ME : visibility;
 }

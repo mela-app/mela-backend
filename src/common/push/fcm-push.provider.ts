@@ -26,7 +26,8 @@ export class FcmPushProvider implements PushProvider {
       );
     }
     const credential = admin.credential.cert(parseServiceAccount(raw));
-    this.app = admin.apps.length > 0 && admin.apps[0] ? admin.apps[0] : admin.initializeApp({ credential });
+    this.app =
+      admin.apps.length > 0 && admin.apps[0] ? admin.apps[0] : admin.initializeApp({ credential });
   }
 
   async send(tokens: string[], message: PushMessage): Promise<{ invalidTokens: string[] }> {
@@ -46,14 +47,18 @@ export class FcmPushProvider implements PushProvider {
 
     const invalidTokens: string[] = [];
     response.responses.forEach((result, index) => {
-      if (!result.success && isInvalidTokenError(result.error?.code)) invalidTokens.push(tokens[index]);
+      if (!result.success && isInvalidTokenError(result.error?.code))
+        invalidTokens.push(tokens[index]);
     });
     return { invalidTokens };
   }
 }
 
 function isInvalidTokenError(code: string | undefined): boolean {
-  return code === 'messaging/invalid-registration-token' || code === 'messaging/registration-token-not-registered';
+  return (
+    code === 'messaging/invalid-registration-token' ||
+    code === 'messaging/registration-token-not-registered'
+  );
 }
 
 function parseServiceAccount(raw: string): admin.ServiceAccount {

@@ -1,4 +1,9 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StreamStatus } from '@prisma/client';
 import { DomainEvents, StreamInviteSentPayload } from '../common/events/domain-events';
@@ -24,9 +29,17 @@ export class ShareService {
     private readonly events: EventEmitter2,
   ) {}
 
-  async sendInvites(streamId: string, senderId: string, userIds: string[]): Promise<{ invited: string[] }> {
-    const stream = await this.prisma.stream.findUnique({ where: { id: streamId }, select: { status: true } });
-    if (!stream || stream.status !== StreamStatus.LIVE) throw new NotFoundException('This live has ended');
+  async sendInvites(
+    streamId: string,
+    senderId: string,
+    userIds: string[],
+  ): Promise<{ invited: string[] }> {
+    const stream = await this.prisma.stream.findUnique({
+      where: { id: streamId },
+      select: { status: true },
+    });
+    if (!stream || stream.status !== StreamStatus.LIVE)
+      throw new NotFoundException('This live has ended');
 
     const waitMs = await this.rateLimit.take(`invite:${senderId}`, INVITE_RATE_LIMIT);
     if (waitMs > 0) throw new BadRequestException('Slow down - try again in a moment');
@@ -44,7 +57,9 @@ export class ShareService {
     const alreadyInvited = new Set(await client.smembers(capKey));
     const room = INVITE_CAP_PER_STREAM - alreadyInvited.size;
     if (room <= 0) {
-      throw new ForbiddenException(`You've already invited the max of ${INVITE_CAP_PER_STREAM} people to this live`);
+      throw new ForbiddenException(
+        `You've already invited the max of ${INVITE_CAP_PER_STREAM} people to this live`,
+      );
     }
 
     const toInvite = friends.filter((id) => !alreadyInvited.has(id)).slice(0, room);

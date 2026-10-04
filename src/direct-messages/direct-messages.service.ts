@@ -22,6 +22,7 @@ import {
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RateLimit, RateLimitService } from '../common/rate-limit/rate-limit.service';
 import { Page, SocialService } from '../social/social.service';
+import { notBlockedEitherWayWith } from '../social/block-filters';
 import { ConversationHistoryQueryDto } from './dto/conversation-history-query.dto';
 
 /** Longer than live chat's 200: a conversation, not a comment on a live. */
@@ -173,7 +174,7 @@ export class DirectMessagesService {
     return message;
   }
 
-  /** The inbox: newest conversation first, without anyone this user blocked. */
+  /** The inbox: newest conversation first, without anyone blocked either way (plan §6.4). */
   async listConversations(
     userId: string,
     cursor?: string,
@@ -182,8 +183,8 @@ export class DirectMessagesService {
     const rows = await this.prisma.conversation.findMany({
       where: {
         OR: [
-          { userAId: userId, userB: { blockedBy: { none: { blockerId: userId } } } },
-          { userBId: userId, userA: { blockedBy: { none: { blockerId: userId } } } },
+          { userAId: userId, userB: notBlockedEitherWayWith(userId) },
+          { userBId: userId, userA: notBlockedEitherWayWith(userId) },
         ],
       },
       orderBy: [{ lastMessageAt: 'desc' }, { id: 'desc' }],
@@ -234,23 +235,26 @@ export class DirectMessagesService {
     };
   }
 
-  /** The inbox badge: every unread message, except from people this user blocked. */
+  /** The inbox badge: every unread message, except from anyone blocked either way. */
   async unreadCount(userId: string): Promise<{ count: number }> {
     return { count: await this.unreadTotal(userId) };
   }
 
-  /** One conversation, oldest first - see ConversationHistoryQueryDto. */
+  /** One conversation, oldest first - see ConversationHistoryQueryDto. Gone for someone the other side blocked. */
   async history(
     userId: string,
     otherId: string,
     query: ConversationHistoryQueryDto,
   ): Promise<ConversationHistory> {
     assertNotSelf(userId, otherId);
-    const user = await this.prisma.user.findUnique({
-      where: { id: otherId },
-      select: PERSON_SELECT,
-    });
-    if (!user) throw new NotFoundException('User not found');
+    const [user, blockedByOther] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: otherId },
+        select: PERSON_SELECT,
+      }),
+      this.social.isBlockedByViewer(otherId, userId),
+    ]);
+    if (!user || blockedByOther) throw new NotFoundException('User not found');
 
     const [rows, canMessage] = await Promise.all([
       this.prisma.directMessage.findMany({
@@ -326,11 +330,11 @@ export class DirectMessagesService {
 
   private unreadTotal(userId: string): Promise<number> {
     return this.prisma.directMessage.count({
-      // A blocked person's conversation is hidden, so it can't be opened to clear its count.
+      // A blocked conversation is hidden, so it can't be opened to clear its count.
       where: {
         recipientId: userId,
         readAt: null,
-        sender: { blockedBy: { none: { blockerId: userId } } },
+        sender: notBlockedEitherWayWith(userId),
       },
     });
   }

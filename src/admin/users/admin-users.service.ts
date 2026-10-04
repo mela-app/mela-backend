@@ -1,4 +1,10 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AdminPermission, PlatformRole, Prisma, StreamStatus, UserStatus } from '@prisma/client';
 import * as argon2 from 'argon2';
@@ -14,7 +20,10 @@ import {
   UserSuspendedPayload,
 } from '../../common/events/domain-events';
 import { pageArgs, toPage } from '../../common/pagination/page-query.dto';
-import { effectiveAdminPermissions, withIncludedPermissions } from '../../common/permissions/admin-permissions';
+import {
+  effectiveAdminPermissions,
+  withIncludedPermissions,
+} from '../../common/permissions/admin-permissions';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { StreamsService } from '../../streams/streams.service';
 import { AdminPrincipal } from '../admin.guard';
@@ -148,8 +157,10 @@ export class AdminUsersService {
     const target = await this.getTarget(userId);
     if (target.id === admin.id) throw new BadRequestException("You can't suspend your own account");
     this.assertCanActOnStaff(admin, target.platformRole);
-    if (target.status === UserStatus.SUSPENDED) throw new ConflictException('This account is already suspended');
-    if (target.platformRole === PlatformRole.SUPER_ADMIN) await this.assertAnotherSuperAdmin(target.id);
+    if (target.status === UserStatus.SUSPENDED)
+      throw new ConflictException('This account is already suspended');
+    if (target.platformRole === PlatformRole.SUPER_ADMIN)
+      await this.assertAnotherSuperAdmin(target.id);
 
     await this.prisma.user.update({
       where: { id: userId },
@@ -161,19 +172,27 @@ export class AdminUsersService {
       reason,
     } satisfies UserSuspendedPayload);
     // Viewers see this; the suspension reason itself stays in the console.
-    const lockedLives = await this.streams.lockLiveStreamsOfHost(userId, admin.id, "The host's account was suspended");
+    const lockedLives = await this.streams.lockLiveStreamsOfHost(
+      userId,
+      admin.id,
+      "The host's account was suspended",
+    );
     return { ok: true, lockedLives };
   }
 
   async reinstate(admin: AdminPrincipal, userId: string) {
     const target = await this.getTarget(userId);
     this.assertCanActOnStaff(admin, target.platformRole);
-    if (target.status !== UserStatus.SUSPENDED) throw new ConflictException('This account is not suspended');
+    if (target.status !== UserStatus.SUSPENDED)
+      throw new ConflictException('This account is not suspended');
     await this.prisma.user.update({
       where: { id: userId },
       data: { status: UserStatus.ACTIVE, suspendedAt: null, suspensionReason: null },
     });
-    this.events.emit(DomainEvents.UserReinstated, { userId, reinstatedBy: admin.id } satisfies UserReinstatedPayload);
+    this.events.emit(DomainEvents.UserReinstated, {
+      userId,
+      reinstatedBy: admin.id,
+    } satisfies UserReinstatedPayload);
     return { ok: true };
   }
 
@@ -181,14 +200,24 @@ export class AdminUsersService {
    * Super admins only (guarded on the route). There is always at least one
    * active super admin, and a new platform moderator is given what they may do.
    */
-  async changeRole(admin: AdminPrincipal, userId: string, role: PlatformRole, permissions: AdminPermission[] = []) {
+  async changeRole(
+    admin: AdminPrincipal,
+    userId: string,
+    role: PlatformRole,
+    permissions: AdminPermission[] = [],
+  ) {
     const target = await this.getTarget(userId);
     if (target.id === admin.id) throw new BadRequestException("You can't change your own role");
     if (target.platformRole === role) return { ok: true };
-    const granted = role === PlatformRole.PLATFORM_MODERATOR ? moderatorPermissions(permissions) : [];
-    if (target.platformRole === PlatformRole.SUPER_ADMIN) await this.assertAnotherSuperAdmin(target.id);
+    const granted =
+      role === PlatformRole.PLATFORM_MODERATOR ? moderatorPermissions(permissions) : [];
+    if (target.platformRole === PlatformRole.SUPER_ADMIN)
+      await this.assertAnotherSuperAdmin(target.id);
 
-    await this.prisma.user.update({ where: { id: userId }, data: { platformRole: role, adminPermissions: granted } });
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { platformRole: role, adminPermissions: granted },
+    });
     this.events.emit(DomainEvents.UserRoleChanged, {
       userId,
       actorId: admin.id,
@@ -207,7 +236,9 @@ export class AdminUsersService {
     });
     if (!target) throw new NotFoundException('User not found');
     if (target.platformRole !== PlatformRole.PLATFORM_MODERATOR) {
-      throw new BadRequestException("Only a platform moderator's access can be chosen. A super admin can do everything.");
+      throw new BadRequestException(
+        "Only a platform moderator's access can be chosen. A super admin can do everything.",
+      );
     }
     const from = withIncludedPermissions(target.adminPermissions);
     const to = moderatorPermissions(permissions);
@@ -227,7 +258,10 @@ export class AdminUsersService {
     const target = await this.getTarget(userId);
     this.assertCanActOnStaff(admin, target.platformRole);
     const revoked = await this.auth.revokeAllSessions(userId);
-    this.events.emit(DomainEvents.UserSessionsRevoked, { userId, actorId: admin.id } satisfies UserSessionsRevokedPayload);
+    this.events.emit(DomainEvents.UserSessionsRevoked, {
+      userId,
+      actorId: admin.id,
+    } satisfies UserSessionsRevokedPayload);
     return { ok: true, revoked };
   }
 
@@ -235,7 +269,14 @@ export class AdminUsersService {
   async editProfile(admin: AdminPrincipal, userId: string, dto: EditUserProfileDto) {
     const target = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, platformRole: true, username: true, displayName: true, bio: true, avatarUrl: true },
+      select: {
+        id: true,
+        platformRole: true,
+        username: true,
+        displayName: true,
+        bio: true,
+        avatarUrl: true,
+      },
     });
     if (!target) throw new NotFoundException('User not found');
     this.assertCanActOnStaff(admin, target.platformRole);
@@ -312,13 +353,17 @@ export class AdminUsersService {
   /** A console-only account with a one-time password, shown to the creator once and replaced at first sign-in. */
   async createStaff(admin: AdminPrincipal, dto: CreateStaffDto) {
     const permissions =
-      dto.platformRole === PlatformRole.PLATFORM_MODERATOR ? moderatorPermissions(dto.permissions ?? []) : [];
+      dto.platformRole === PlatformRole.PLATFORM_MODERATOR
+        ? moderatorPermissions(dto.permissions ?? [])
+        : [];
     const existing = await this.prisma.user.findFirst({
       where: { email: { equals: dto.email, mode: 'insensitive' } },
       select: { id: true },
     });
     if (existing) {
-      throw new ConflictException('An account with this email already exists - change its role from its user page');
+      throw new ConflictException(
+        'An account with this email already exists - change its role from its user page',
+      );
     }
     const temporaryPassword = generateTemporaryPassword();
     const user = await this.prisma.user.create({
@@ -354,7 +399,10 @@ export class AdminUsersService {
         .slice(0, 20) || 'staff';
     for (let attempt = 0; attempt < 20; attempt++) {
       const candidate = attempt === 0 ? base : `${base}${Math.floor(1000 + Math.random() * 9000)}`;
-      const taken = await this.prisma.user.findUnique({ where: { username: candidate }, select: { id: true } });
+      const taken = await this.prisma.user.findUnique({
+        where: { username: candidate },
+        select: { id: true },
+      });
       if (!taken) return candidate;
     }
     throw new ConflictException('Could not pick a username - try again');
@@ -368,9 +416,14 @@ export class AdminUsersService {
 
   private async assertAnotherSuperAdmin(exceptUserId: string): Promise<void> {
     const others = await this.prisma.user.count({
-      where: { platformRole: PlatformRole.SUPER_ADMIN, status: UserStatus.ACTIVE, id: { not: exceptUserId } },
+      where: {
+        platformRole: PlatformRole.SUPER_ADMIN,
+        status: UserStatus.ACTIVE,
+        id: { not: exceptUserId },
+      },
     });
-    if (others === 0) throw new ConflictException('There must always be at least one active super admin');
+    if (others === 0)
+      throw new ConflictException('There must always be at least one active super admin');
   }
 
   private async getTarget(userId: string) {

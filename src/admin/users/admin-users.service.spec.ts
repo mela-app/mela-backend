@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AdminPermission, PlatformRole, UserStatus } from '@prisma/client';
 import * as argon2 from 'argon2';
@@ -33,7 +38,10 @@ describe('AdminUsersService', () => {
       events as unknown as EventEmitter2,
     );
 
-  function principal(platformRole: PlatformRole = PlatformRole.SUPER_ADMIN, granted: AdminPermission[] = []): AdminPrincipal {
+  function principal(
+    platformRole: PlatformRole = PlatformRole.SUPER_ADMIN,
+    granted: AdminPermission[] = [],
+  ): AdminPrincipal {
     return {
       id: 'admin-1',
       username: 'admin',
@@ -85,24 +93,38 @@ describe('AdminUsersService', () => {
 
       expect(prisma.user.update).toHaveBeenCalledWith({
         where: { id: 'u1' },
-        data: { status: UserStatus.SUSPENDED, suspendedAt: expect.any(Date), suspensionReason: 'Spam links' },
+        data: {
+          status: UserStatus.SUSPENDED,
+          suspendedAt: expect.any(Date),
+          suspensionReason: 'Spam links',
+        },
       });
       expect(events.emit).toHaveBeenCalledWith('user.suspended', {
         userId: 'u1',
         suspendedBy: 'admin-1',
         reason: 'Spam links',
       });
-      expect(streams.lockLiveStreamsOfHost).toHaveBeenCalledWith('u1', 'admin-1', "The host's account was suspended");
+      expect(streams.lockLiveStreamsOfHost).toHaveBeenCalledWith(
+        'u1',
+        'admin-1',
+        "The host's account was suspended",
+      );
       expect(result).toEqual({ ok: true, lockedLives: 1 });
     });
 
     it("won't suspend your own account", async () => {
-      prisma.user.findUnique.mockResolvedValue(target({ id: 'admin-1', platformRole: PlatformRole.SUPER_ADMIN }));
-      await expect(service().suspend(principal(), 'admin-1', 'Testing')).rejects.toThrow(BadRequestException);
+      prisma.user.findUnique.mockResolvedValue(
+        target({ id: 'admin-1', platformRole: PlatformRole.SUPER_ADMIN }),
+      );
+      await expect(service().suspend(principal(), 'admin-1', 'Testing')).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('leaves staff accounts to super admins', async () => {
-      prisma.user.findUnique.mockResolvedValue(target({ platformRole: PlatformRole.PLATFORM_MODERATOR }));
+      prisma.user.findUnique.mockResolvedValue(
+        target({ platformRole: PlatformRole.PLATFORM_MODERATOR }),
+      );
       await expect(service().suspend(moderator, 'u1', 'Abuse')).rejects.toThrow(ForbiddenException);
       expect(prisma.user.update).not.toHaveBeenCalled();
     });
@@ -111,7 +133,9 @@ describe('AdminUsersService', () => {
       prisma.user.findUnique.mockResolvedValue(target({ platformRole: PlatformRole.SUPER_ADMIN }));
       prisma.user.count.mockResolvedValue(0);
 
-      await expect(service().suspend(principal(), 'u1', 'Left the company')).rejects.toThrow(ConflictException);
+      await expect(service().suspend(principal(), 'u1', 'Left the company')).rejects.toThrow(
+        ConflictException,
+      );
       expect(prisma.user.update).not.toHaveBeenCalled();
     });
 
@@ -131,7 +155,10 @@ describe('AdminUsersService', () => {
         where: { id: 'u1' },
         data: { status: UserStatus.ACTIVE, suspendedAt: null, suspensionReason: null },
       });
-      expect(events.emit).toHaveBeenCalledWith('user.reinstated', { userId: 'u1', reinstatedBy: 'admin-1' });
+      expect(events.emit).toHaveBeenCalledWith('user.reinstated', {
+        userId: 'u1',
+        reinstatedBy: 'admin-1',
+      });
     });
 
     it('refuses an account that is not suspended', async () => {
@@ -141,7 +168,9 @@ describe('AdminUsersService', () => {
 
   describe('changeRole', () => {
     it('records the old and the new role, and what a new moderator may do', async () => {
-      await service().changeRole(principal(), 'u1', PlatformRole.PLATFORM_MODERATOR, [AdminPermission.MANAGE_USERS]);
+      await service().changeRole(principal(), 'u1', PlatformRole.PLATFORM_MODERATOR, [
+        AdminPermission.MANAGE_USERS,
+      ]);
 
       const granted = [AdminPermission.VIEW_USERS, AdminPermission.MANAGE_USERS];
       expect(prisma.user.update).toHaveBeenCalledWith({
@@ -158,16 +187,20 @@ describe('AdminUsersService', () => {
     });
 
     it('needs to know what a new platform moderator may do', async () => {
-      await expect(service().changeRole(principal(), 'u1', PlatformRole.PLATFORM_MODERATOR)).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(
+        service().changeRole(principal(), 'u1', PlatformRole.PLATFORM_MODERATOR),
+      ).rejects.toThrow(BadRequestException);
       expect(prisma.user.update).not.toHaveBeenCalled();
     });
 
     it('clears the permissions of anyone who stops being a platform moderator', async () => {
-      prisma.user.findUnique.mockResolvedValue(target({ platformRole: PlatformRole.PLATFORM_MODERATOR }));
+      prisma.user.findUnique.mockResolvedValue(
+        target({ platformRole: PlatformRole.PLATFORM_MODERATOR }),
+      );
 
-      await service().changeRole(principal(), 'u1', PlatformRole.USER, [AdminPermission.VIEW_LIVES]);
+      await service().changeRole(principal(), 'u1', PlatformRole.USER, [
+        AdminPermission.VIEW_LIVES,
+      ]);
 
       expect(prisma.user.update).toHaveBeenCalledWith({
         where: { id: 'u1' },
@@ -187,14 +220,20 @@ describe('AdminUsersService', () => {
         BadRequestException,
       );
 
-      prisma.user.findUnique.mockResolvedValueOnce(target({ platformRole: PlatformRole.SUPER_ADMIN }));
+      prisma.user.findUnique.mockResolvedValueOnce(
+        target({ platformRole: PlatformRole.SUPER_ADMIN }),
+      );
       prisma.user.count.mockResolvedValue(0);
-      await expect(service().changeRole(principal(), 'u1', PlatformRole.USER)).rejects.toThrow(ConflictException);
+      await expect(service().changeRole(principal(), 'u1', PlatformRole.USER)).rejects.toThrow(
+        ConflictException,
+      );
       expect(events.emit).not.toHaveBeenCalled();
     });
 
     it('does nothing when the role is unchanged', async () => {
-      await expect(service().changeRole(principal(), 'u1', PlatformRole.USER)).resolves.toEqual({ ok: true });
+      await expect(service().changeRole(principal(), 'u1', PlatformRole.USER)).resolves.toEqual({
+        ok: true,
+      });
       expect(prisma.user.update).not.toHaveBeenCalled();
     });
   });
@@ -207,27 +246,44 @@ describe('AdminUsersService', () => {
       prisma.user.findUnique.mockResolvedValue(moderatorRow([AdminPermission.VIEW_LIVES]));
 
       await expect(
-        service().changePermissions(principal(), 'u1', [AdminPermission.MANAGE_LIVES, AdminPermission.VIEW_AUDIT_LOG]),
+        service().changePermissions(principal(), 'u1', [
+          AdminPermission.MANAGE_LIVES,
+          AdminPermission.VIEW_AUDIT_LOG,
+        ]),
       ).resolves.toEqual({
         ok: true,
-        permissions: [AdminPermission.VIEW_LIVES, AdminPermission.MANAGE_LIVES, AdminPermission.VIEW_AUDIT_LOG],
+        permissions: [
+          AdminPermission.VIEW_LIVES,
+          AdminPermission.MANAGE_LIVES,
+          AdminPermission.VIEW_AUDIT_LOG,
+        ],
       });
       expect(prisma.user.update).toHaveBeenCalledWith({
         where: { id: 'u1' },
         data: {
-          adminPermissions: [AdminPermission.VIEW_LIVES, AdminPermission.MANAGE_LIVES, AdminPermission.VIEW_AUDIT_LOG],
+          adminPermissions: [
+            AdminPermission.VIEW_LIVES,
+            AdminPermission.MANAGE_LIVES,
+            AdminPermission.VIEW_AUDIT_LOG,
+          ],
         },
       });
       expect(events.emit).toHaveBeenCalledWith('user.admin_permissions_changed', {
         userId: 'u1',
         actorId: 'admin-1',
         from: [AdminPermission.VIEW_LIVES],
-        to: [AdminPermission.VIEW_LIVES, AdminPermission.MANAGE_LIVES, AdminPermission.VIEW_AUDIT_LOG],
+        to: [
+          AdminPermission.VIEW_LIVES,
+          AdminPermission.MANAGE_LIVES,
+          AdminPermission.VIEW_AUDIT_LOG,
+        ],
       });
     });
 
     it('records nothing when the access is the same', async () => {
-      prisma.user.findUnique.mockResolvedValue(moderatorRow([AdminPermission.VIEW_LIVES, AdminPermission.MANAGE_LIVES]));
+      prisma.user.findUnique.mockResolvedValue(
+        moderatorRow([AdminPermission.VIEW_LIVES, AdminPermission.MANAGE_LIVES]),
+      );
 
       await service().changePermissions(principal(), 'u1', [AdminPermission.MANAGE_LIVES]);
 
@@ -236,18 +292,22 @@ describe('AdminUsersService', () => {
     });
 
     it('only applies to platform moderators, who must keep some access', async () => {
-      prisma.user.findUnique.mockResolvedValueOnce(target({ platformRole: PlatformRole.SUPER_ADMIN }));
-      await expect(service().changePermissions(principal(), 'u1', [AdminPermission.VIEW_LIVES])).rejects.toThrow(
+      prisma.user.findUnique.mockResolvedValueOnce(
+        target({ platformRole: PlatformRole.SUPER_ADMIN }),
+      );
+      await expect(
+        service().changePermissions(principal(), 'u1', [AdminPermission.VIEW_LIVES]),
+      ).rejects.toThrow(BadRequestException);
+
+      prisma.user.findUnique.mockResolvedValueOnce(moderatorRow([AdminPermission.VIEW_LIVES]));
+      await expect(service().changePermissions(principal(), 'u1', [])).rejects.toThrow(
         BadRequestException,
       );
 
-      prisma.user.findUnique.mockResolvedValueOnce(moderatorRow([AdminPermission.VIEW_LIVES]));
-      await expect(service().changePermissions(principal(), 'u1', [])).rejects.toThrow(BadRequestException);
-
       prisma.user.findUnique.mockResolvedValueOnce(null);
-      await expect(service().changePermissions(principal(), 'u1', [AdminPermission.VIEW_LIVES])).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        service().changePermissions(principal(), 'u1', [AdminPermission.VIEW_LIVES]),
+      ).rejects.toThrow(NotFoundException);
       expect(prisma.user.update).not.toHaveBeenCalled();
     });
   });
@@ -255,15 +315,23 @@ describe('AdminUsersService', () => {
   it('signs a user out everywhere', async () => {
     auth.revokeAllSessions.mockResolvedValue(3);
 
-    await expect(service().revokeSessions(moderator, 'u1')).resolves.toEqual({ ok: true, revoked: 3 });
-    expect(events.emit).toHaveBeenCalledWith('user.sessions_revoked', { userId: 'u1', actorId: 'admin-1' });
+    await expect(service().revokeSessions(moderator, 'u1')).resolves.toEqual({
+      ok: true,
+      revoked: 3,
+    });
+    expect(events.emit).toHaveBeenCalledWith('user.sessions_revoked', {
+      userId: 'u1',
+      actorId: 'admin-1',
+    });
   });
 
   describe('createStaff', () => {
     it('creates the account with a one-time password it must replace', async () => {
       prisma.user.findFirst.mockResolvedValue(null);
       prisma.user.findUnique.mockResolvedValue(null);
-      prisma.user.create.mockImplementation(({ data }) => Promise.resolve({ id: 'staff-1', ...data }));
+      prisma.user.create.mockImplementation(({ data }) =>
+        Promise.resolve({ id: 'staff-1', ...data }),
+      );
 
       const { user, temporaryPassword } = await service().createStaff(principal(), {
         email: 'Mia.Lee@example.com',
@@ -308,7 +376,9 @@ describe('AdminUsersService', () => {
     it('gives a new super admin everything, storing nothing', async () => {
       prisma.user.findFirst.mockResolvedValue(null);
       prisma.user.findUnique.mockResolvedValue(null);
-      prisma.user.create.mockImplementation(({ data }) => Promise.resolve({ id: 'staff-2', ...data }));
+      prisma.user.create.mockImplementation(({ data }) =>
+        Promise.resolve({ id: 'staff-2', ...data }),
+      );
 
       const { user } = await service().createStaff(principal(), {
         email: 'sam@example.com',
@@ -394,8 +464,11 @@ describe('AdminUsersService', () => {
       expect(prisma.user.update).not.toHaveBeenCalled();
     });
 
-    it("leaves staff profiles to super admins", async () => {
-      prisma.user.findUnique.mockResolvedValueOnce({ ...profile, platformRole: PlatformRole.SUPER_ADMIN });
+    it('leaves staff profiles to super admins', async () => {
+      prisma.user.findUnique.mockResolvedValueOnce({
+        ...profile,
+        platformRole: PlatformRole.SUPER_ADMIN,
+      });
 
       await expect(
         service().editProfile(moderator, 'u1', { displayName: 'X', reason: 'Because' }),

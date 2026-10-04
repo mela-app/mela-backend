@@ -1,4 +1,13 @@
-import { Body, Controller, ForbiddenException, HttpCode, HttpStatus, Post, Req, Res } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  ForbiddenException,
+  HttpCode,
+  HttpStatus,
+  Post,
+  Req,
+  Res,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
 import { SessionPlatform } from '@prisma/client';
@@ -29,7 +38,11 @@ export class WebAuthController {
 
   @Post('signup')
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
-  async signup(@Req() req: Request, @Body() dto: SignupDto, @Res({ passthrough: true }) res: Response) {
+  async signup(
+    @Req() req: Request,
+    @Body() dto: SignupDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     assertWebClient(req);
     return this.respond(await this.auth.signup({ ...dto, platform: SessionPlatform.WEB }), res);
   }
@@ -37,7 +50,11 @@ export class WebAuthController {
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
-  async login(@Req() req: Request, @Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
+  async login(
+    @Req() req: Request,
+    @Body() dto: LoginDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     assertWebClient(req);
     return this.respond(await this.auth.login({ ...dto, platform: SessionPlatform.WEB }), res);
   }

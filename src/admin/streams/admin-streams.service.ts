@@ -8,7 +8,9 @@ import { StreamsService } from '../../streams/streams.service';
 import { AdminPrincipal } from '../admin.guard';
 import { AdminChatLogQueryDto, AdminStreamsQueryDto } from './admin-streams.dto';
 
-const PERSON_SELECT = { select: { id: true, username: true, displayName: true, avatarUrl: true } } as const;
+const PERSON_SELECT = {
+  select: { id: true, username: true, displayName: true, avatarUrl: true },
+} as const;
 
 const STREAM_ROW_SELECT = {
   id: true,
@@ -72,12 +74,19 @@ export class AdminStreamsService {
           : [{ startedAt: order }];
 
     const [rows, total] = await Promise.all([
-      this.prisma.stream.findMany({ where, orderBy, select: STREAM_ROW_SELECT, ...pageArgs(query) }),
+      this.prisma.stream.findMany({
+        where,
+        orderBy,
+        select: STREAM_ROW_SELECT,
+        ...pageArgs(query),
+      }),
       this.prisma.stream.count({ where }),
     ]);
 
     const liveIds = rows.filter((row) => row.status === StreamStatus.LIVE).map((row) => row.id);
-    const viewerCounts = await this.presence.viewerCounts(liveIds).catch(() => new Map<string, number>());
+    const viewerCounts = await this.presence
+      .viewerCounts(liveIds)
+      .catch(() => new Map<string, number>());
     return toPage(
       rows.map((row) => ({
         ...row,
@@ -117,12 +126,24 @@ export class AdminStreamsService {
       this.prisma.streamGuest.findMany({
         where: { streamId },
         orderBy: { joinedAt: 'asc' },
-        select: { status: true, joinedAt: true, leftAt: true, micForceMuted: true, user: PERSON_SELECT },
+        select: {
+          status: true,
+          joinedAt: true,
+          leftAt: true,
+          micForceMuted: true,
+          user: PERSON_SELECT,
+        },
       }),
       this.prisma.moderator.findMany({
         where: { streamId },
         orderBy: { grantedAt: 'asc' },
-        select: { status: true, capabilities: true, grantedAt: true, revokedAt: true, user: PERSON_SELECT },
+        select: {
+          status: true,
+          capabilities: true,
+          grantedAt: true,
+          revokedAt: true,
+          user: PERSON_SELECT,
+        },
       }),
     ]);
 
@@ -132,9 +153,19 @@ export class AdminStreamsService {
       viewerCount: live ? live[0] : null,
       likeCount: live ? live[1] : stream.likeCount,
       paused: live ? live[2] : false,
-      counts: { messages: counts.chatMessages, removedMessages: deletedMessages, roomBans: counts.roomBans },
-      guests: guests.map((guest) => ({ ...guest, active: guest.status === StreamGuestStatus.ACTIVE })),
-      moderators: moderators.map((moderator) => ({ ...moderator, active: moderator.status === ModeratorStatus.ACTIVE })),
+      counts: {
+        messages: counts.chatMessages,
+        removedMessages: deletedMessages,
+        roomBans: counts.roomBans,
+      },
+      guests: guests.map((guest) => ({
+        ...guest,
+        active: guest.status === StreamGuestStatus.ACTIVE,
+      })),
+      moderators: moderators.map((moderator) => ({
+        ...moderator,
+        active: moderator.status === ModeratorStatus.ACTIVE,
+      })),
     };
   }
 
@@ -167,7 +198,10 @@ export class AdminStreamsService {
   }
 
   async deleteMessage(admin: AdminPrincipal, streamId: string, messageId: string) {
-    const message = await this.prisma.chatMessage.findFirst({ where: { id: messageId, streamId }, select: { id: true } });
+    const message = await this.prisma.chatMessage.findFirst({
+      where: { id: messageId, streamId },
+      select: { id: true },
+    });
     if (!message) throw new NotFoundException('Message not found');
     await this.chat.deleteAsAdmin(messageId, admin.id);
     return { ok: true };
@@ -184,7 +218,10 @@ export class AdminStreamsService {
   }
 
   private async assertExists(streamId: string): Promise<void> {
-    const stream = await this.prisma.stream.findUnique({ where: { id: streamId }, select: { id: true } });
+    const stream = await this.prisma.stream.findUnique({
+      where: { id: streamId },
+      select: { id: true },
+    });
     if (!stream) throw new NotFoundException('Stream not found');
   }
 }

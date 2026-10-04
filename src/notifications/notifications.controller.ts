@@ -44,7 +44,10 @@ export class NotificationsController {
   }
 
   @Patch('notification-settings')
-  updateSettings(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdateNotificationSettingsDto) {
+  updateSettings(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: UpdateNotificationSettingsDto,
+  ) {
     return this.notifications.updateSettings(user.id, dto);
   }
 }

@@ -1,4 +1,8 @@
-import { adminPasswordProblem, generateTemporaryPassword, MIN_ADMIN_PASSWORD_LENGTH } from './password-policy';
+import {
+  adminPasswordProblem,
+  generateTemporaryPassword,
+  MIN_ADMIN_PASSWORD_LENGTH,
+} from './password-policy';
 
 describe('admin password policy', () => {
   it('accepts a long password with letters and numbers', () => {
@@ -12,8 +16,12 @@ describe('admin password policy', () => {
   });
 
   it('asks for both letters and numbers', () => {
-    expect(adminPasswordProblem('onlyletterslonger', 'ana@example.com')).toBe('Use both letters and numbers');
-    expect(adminPasswordProblem('1234567890123', 'ana@example.com')).toBe('Use both letters and numbers');
+    expect(adminPasswordProblem('onlyletterslonger', 'ana@example.com')).toBe(
+      'Use both letters and numbers',
+    );
+    expect(adminPasswordProblem('1234567890123', 'ana@example.com')).toBe(
+      'Use both letters and numbers',
+    );
   });
 
   it('refuses a password built on the email address', () => {

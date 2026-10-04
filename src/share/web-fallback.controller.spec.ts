@@ -27,7 +27,9 @@ describe('WebFallbackController', () => {
   const header = (name: string) =>
     setHeader.mock.calls.find(([key]) => key === name)?.[1] as string | undefined;
   const playerConfig = (): PlayerConfig => {
-    const json = /<script id="mela-player-config" type="application\/json">(.*?)<\/script>/.exec(page())?.[1];
+    const json = /<script id="mela-player-config" type="application\/json">(.*?)<\/script>/.exec(
+      page(),
+    )?.[1];
     return JSON.parse(json ?? 'null') as PlayerConfig;
   };
 
@@ -51,7 +53,9 @@ describe('WebFallbackController', () => {
 
     await controller.show(LIVE, res);
 
-    expect(page()).toContain('<title>&lt;script&gt;alert(1)&lt;/script&gt; Big night - Mela</title>');
+    expect(page()).toContain(
+      '<title>&lt;script&gt;alert(1)&lt;/script&gt; Big night - Mela</title>',
+    );
     expect(page()).not.toContain('<script>alert');
     expect(page()).toContain('Ana &amp; &quot;Co&quot; is live now on Mela');
     expect(page()).toContain(`href="gamblinglive://live/${LIVE}"`);
@@ -59,7 +63,11 @@ describe('WebFallbackController', () => {
   });
 
   it('loads the browser player over a live, with what it needs and a policy that lets video through', async () => {
-    findUnique.mockResolvedValue({ title: 'Big night', status: StreamStatus.LIVE, host: { displayName: 'Ana' } });
+    findUnique.mockResolvedValue({
+      title: 'Big night',
+      status: StreamStatus.LIVE,
+      host: { displayName: 'Ana' },
+    });
 
     await controller.show(LIVE, res);
 
@@ -78,7 +86,11 @@ describe('WebFallbackController', () => {
   });
 
   it('lets plain http media through on a development machine only', async () => {
-    findUnique.mockResolvedValue({ title: 'Big night', status: StreamStatus.LIVE, host: { displayName: 'Ana' } });
+    findUnique.mockResolvedValue({
+      title: 'Big night',
+      status: StreamStatus.LIVE,
+      host: { displayName: 'Ana' },
+    });
 
     await controller.show(LIVE, res);
     expect(header('Content-Security-Policy')).toContain("img-src 'self' data: blob: https: http:;");
@@ -91,7 +103,11 @@ describe('WebFallbackController', () => {
   });
 
   it('points "Get the app" where it is configured', async () => {
-    findUnique.mockResolvedValue({ title: 'Big night', status: StreamStatus.LIVE, host: { displayName: 'Ana' } });
+    findUnique.mockResolvedValue({
+      title: 'Big night',
+      status: StreamStatus.LIVE,
+      host: { displayName: 'Ana' },
+    });
     const settings: Record<string, string> = {
       ANDROID_INSTALL_URL: 'https://example.com/mela.apk',
       IOS_INSTALL_URL: 'https://apps.apple.com/app/id1',
@@ -107,19 +123,31 @@ describe('WebFallbackController', () => {
   });
 
   it("keeps the player's settings from breaking out of their script tag", async () => {
-    findUnique.mockResolvedValue({ title: 'Big night', status: StreamStatus.LIVE, host: { displayName: 'Ana' } });
+    findUnique.mockResolvedValue({
+      title: 'Big night',
+      status: StreamStatus.LIVE,
+      host: { displayName: 'Ana' },
+    });
     config.get.mockImplementation((key: string) =>
-      key === 'ANDROID_INSTALL_URL' ? 'https://x.example/</script><script>alert(1)</script>' : undefined,
+      key === 'ANDROID_INSTALL_URL'
+        ? 'https://x.example/</script><script>alert(1)</script>'
+        : undefined,
     );
 
     await controller.show(LIVE, res);
 
     expect(page()).not.toContain('</script><script>alert(1)');
-    expect(playerConfig().androidInstallUrl).toBe('https://x.example/</script><script>alert(1)</script>');
+    expect(playerConfig().androidInstallUrl).toBe(
+      'https://x.example/</script><script>alert(1)</script>',
+    );
   });
 
   it('shows just the preview for a live that is over - nothing to play', async () => {
-    findUnique.mockResolvedValue({ title: 'Big night', status: StreamStatus.ENDED, host: { displayName: 'Ana' } });
+    findUnique.mockResolvedValue({
+      title: 'Big night',
+      status: StreamStatus.ENDED,
+      host: { displayName: 'Ana' },
+    });
 
     await controller.show(LIVE, res);
 
@@ -138,8 +166,12 @@ describe('WebFallbackController', () => {
     expect(page()).toContain('This live has ended');
   });
 
-  it("has no built-in app identifiers: without them it serves nothing", async () => {
-    findUnique.mockResolvedValue({ title: 'Big night', status: StreamStatus.LIVE, host: { displayName: 'Ana' } });
+  it('has no built-in app identifiers: without them it serves nothing', async () => {
+    findUnique.mockResolvedValue({
+      title: 'Big night',
+      status: StreamStatus.LIVE,
+      host: { displayName: 'Ana' },
+    });
     config.getOrThrow.mockImplementation(requiredSettings({ APP_URL_SCHEME: 'gamblinglive' }));
 
     await expect(controller.show(LIVE, res)).rejects.toThrow('ANDROID_APP_PACKAGE_NAME is not set');

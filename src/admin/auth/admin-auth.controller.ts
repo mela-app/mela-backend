@@ -18,8 +18,19 @@ import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
 import { CookieOptions, Request, Response } from 'express';
 import { readCookie } from '../../common/http/read-cookie';
-import { ADMIN_API_THROTTLE, AdminGuard, AdminPrincipal, AllowPendingPasswordChange, CurrentAdmin } from '../admin.guard';
-import { AdminSignInDto, ChangeEmailDto, ChangePasswordDto, UpdateAdminProfileDto } from './admin-auth.dto';
+import {
+  ADMIN_API_THROTTLE,
+  AdminGuard,
+  AdminPrincipal,
+  AllowPendingPasswordChange,
+  CurrentAdmin,
+} from '../admin.guard';
+import {
+  AdminSignInDto,
+  ChangeEmailDto,
+  ChangePasswordDto,
+  UpdateAdminProfileDto,
+} from './admin-auth.dto';
 import { AdminAuthService, AdminSession } from './admin-auth.service';
 
 // httpOnly, and sent to these three routes only: page script never sees it.
@@ -119,11 +130,15 @@ export class AdminAccountController {
   }
 
   @Delete('sessions/:sessionId')
-  revokeSession(@CurrentAdmin() admin: AdminPrincipal, @Param('sessionId', ParseUUIDPipe) sessionId: string) {
+  revokeSession(
+    @CurrentAdmin() admin: AdminPrincipal,
+    @Param('sessionId', ParseUUIDPipe) sessionId: string,
+  ) {
     return this.adminAuth.revokeSession(admin, sessionId);
   }
 }
 
 function assertConsoleRequest(req: Request): void {
-  if (req.headers[CSRF_HEADER] !== 'admin-console') throw new ForbiddenException('Unsupported client');
+  if (req.headers[CSRF_HEADER] !== 'admin-console')
+    throw new ForbiddenException('Unsupported client');
 }

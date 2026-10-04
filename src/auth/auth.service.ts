@@ -1,5 +1,10 @@
 import { createHash, randomUUID, timingSafeEqual } from 'crypto';
-import { ConflictException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { JwtService } from '@nestjs/jwt';
@@ -80,7 +85,10 @@ export class AuthService {
     }
     // Only after the right password: telling a stranger an account is suspended would leak that it exists.
     if (user.status === UserStatus.SUSPENDED) {
-      throw new ForbiddenException({ message: 'This account has been suspended', code: 'ACCOUNT_SUSPENDED' });
+      throw new ForbiddenException({
+        message: 'This account has been suspended',
+        code: 'ACCOUNT_SUSPENDED',
+      });
     }
 
     const tokens = await this.startSession(user, dto.platform);
@@ -114,7 +122,9 @@ export class AuthService {
   async endSession(refreshToken: string): Promise<string | null> {
     const claims = await this.verifyRefreshToken(refreshToken, { ignoreExpiration: true });
     if (!claims?.sid) return null;
-    const { count } = await this.prisma.userSession.deleteMany({ where: { id: claims.sid, userId: claims.sub } });
+    const { count } = await this.prisma.userSession.deleteMany({
+      where: { id: claims.sid, userId: claims.sub },
+    });
     return count > 0 ? claims.sub : null;
   }
 
@@ -131,7 +141,9 @@ export class AuthService {
 
   /** Everywhere but the device in [keepSessionId] - after a password change. */
   async revokeOtherSessions(userId: string, keepSessionId: string): Promise<number> {
-    const { count } = await this.prisma.userSession.deleteMany({ where: { userId, id: { not: keepSessionId } } });
+    const { count } = await this.prisma.userSession.deleteMany({
+      where: { userId, id: { not: keepSessionId } },
+    });
     return count;
   }
 
@@ -203,7 +215,10 @@ export class AuthService {
 
     // Sessions idle longer than the refresh TTL can never refresh again.
     await this.prisma.userSession.deleteMany({
-      where: { userId: user.id, lastSeenAt: { lt: new Date(Date.now() - this.refreshTtlSeconds() * 1000) } },
+      where: {
+        userId: user.id,
+        lastSeenAt: { lt: new Date(Date.now() - this.refreshTtlSeconds() * 1000) },
+      },
     });
     await this.prisma.userSession.create({
       data: {
@@ -241,10 +256,13 @@ export class AuthService {
 
   private signRefreshToken(claims: AccessTokenClaims): Promise<string> {
     // A unique jti keeps two refreshes in the same second from minting identical tokens.
-    return this.jwtService.signAsync({ ...claims, jti: randomUUID() } satisfies RefreshTokenClaims, {
-      secret: this.config.get<string>('JWT_REFRESH_SECRET'),
-      expiresIn: this.refreshTtlSeconds(),
-    });
+    return this.jwtService.signAsync(
+      { ...claims, jti: randomUUID() } satisfies RefreshTokenClaims,
+      {
+        secret: this.config.get<string>('JWT_REFRESH_SECRET'),
+        expiresIn: this.refreshTtlSeconds(),
+      },
+    );
   }
 
   refreshTtlSeconds(): number {

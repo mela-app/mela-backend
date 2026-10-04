@@ -3,7 +3,12 @@ import { AuditActorRole, PlatformRole, Prisma } from '@prisma/client';
 import { toPage, pageArgs } from '../common/pagination/page-query.dto';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RequestContext, RequestContextStore } from '../common/request-context/request-context';
-import { AUDIT_ACTIONS, AUDIT_CATEGORY_LABELS, AuditAction, AuditTargetType } from './audit-catalog';
+import {
+  AUDIT_ACTIONS,
+  AUDIT_CATEGORY_LABELS,
+  AuditAction,
+  AuditTargetType,
+} from './audit-catalog';
 import { AuditLogQueryDto } from './audit-log-query.dto';
 
 export interface AuditEntry {
@@ -192,7 +197,9 @@ export class AuditService {
 type AuditRow = Prisma.AuditLogGetPayload<object>;
 
 function toView(row: AuditRow) {
-  const definition = (AUDIT_ACTIONS as Record<string, { category: string; label: string } | undefined>)[row.action];
+  const definition = (
+    AUDIT_ACTIONS as Record<string, { category: string; label: string } | undefined>
+  )[row.action];
   return {
     ...row,
     actionLabel: definition?.label ?? row.action,
@@ -211,7 +218,8 @@ function resolveActorRole(
       ? AuditActorRole.SUPER_ADMIN
       : AuditActorRole.PLATFORM_MODERATOR;
   }
-  if (entry.hostId) return entry.actorId === entry.hostId ? AuditActorRole.HOST : AuditActorRole.MODERATOR;
+  if (entry.hostId)
+    return entry.actorId === entry.hostId ? AuditActorRole.HOST : AuditActorRole.MODERATOR;
   return AuditActorRole.USER;
 }
 

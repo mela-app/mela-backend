@@ -33,7 +33,14 @@ describe('validateEnv', () => {
   });
 
   it('has no built-in address or origin: each one must be set, in development too', () => {
-    for (const key of ['PORT', 'REDIS_URL', 'CORS_ORIGIN', 'APP_URL_SCHEME', 'ANDROID_APP_PACKAGE_NAME', 'S3_REGION']) {
+    for (const key of [
+      'PORT',
+      'REDIS_URL',
+      'CORS_ORIGIN',
+      'APP_URL_SCHEME',
+      'ANDROID_APP_PACKAGE_NAME',
+      'S3_REGION',
+    ]) {
       expect(() => validateEnv({ ...DEV, [key]: ' ' })).toThrow(new RegExp(`${key} is not set`));
     }
   });

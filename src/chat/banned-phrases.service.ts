@@ -28,7 +28,9 @@ function toFuzzyPattern(phrase: string): RegExp {
   const body = phrase
     .toLowerCase()
     .split('')
-    .map((char) => (/[a-z0-9]/.test(char) ? `[${escapeRegExp(LEET_ALTERNATES[char] ?? char)}]` : null))
+    .map((char) =>
+      /[a-z0-9]/.test(char) ? `[${escapeRegExp(LEET_ALTERNATES[char] ?? char)}]` : null,
+    )
     .filter((part): part is string => part !== null)
     .join('[^a-z0-9]*');
   return new RegExp(body, 'gi');
@@ -68,7 +70,11 @@ export class BannedPhrasesService {
     });
     return matches
       .map((entry) => ({ phrase: entry.phrase, severity: entry.severity }))
-      .sort((a, b) => Number(a.severity !== BannedPhraseSeverity.REJECT) - Number(b.severity !== BannedPhraseSeverity.REJECT));
+      .sort(
+        (a, b) =>
+          Number(a.severity !== BannedPhraseSeverity.REJECT) -
+          Number(b.severity !== BannedPhraseSeverity.REJECT),
+      );
   }
 
   /** Blanks out every MASK-severity match. Callers should already have rejected any REJECT-severity one. */
@@ -93,7 +99,9 @@ export class BannedPhrasesService {
   private async phrases(): Promise<CachedPhrase[]> {
     const now = Date.now();
     if (this.cache && now - this.cachedAt < CACHE_TTL_MS) return this.cache;
-    const rows = await this.prisma.bannedPhrase.findMany({ select: { phrase: true, severity: true } });
+    const rows = await this.prisma.bannedPhrase.findMany({
+      select: { phrase: true, severity: true },
+    });
     this.cache = rows.map((row) => ({
       phrase: row.phrase,
       severity: row.severity,

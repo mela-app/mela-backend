@@ -29,15 +29,20 @@ export class StreamPinController {
   ) {
     const result = await this.chat.pin(streamId, dto.messageId, user.id);
     if (result.ok) return { ok: true };
-    if (result.error === 'NOT_ALLOWED') throw new ForbiddenException('Only the host or a moderator can pin a message');
+    if (result.error === 'NOT_ALLOWED')
+      throw new ForbiddenException('Only the host or a moderator can pin a message');
     throw new NotFoundException('Stream or message not found');
   }
 
   @Delete('pin')
-  async unpin(@CurrentUser() user: AuthenticatedUser, @Param('streamId', ParseUUIDPipe) streamId: string) {
+  async unpin(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('streamId', ParseUUIDPipe) streamId: string,
+  ) {
     const result = await this.chat.unpin(streamId, user.id);
     if (result.ok) return { ok: true };
-    if (result.error === 'NOT_ALLOWED') throw new ForbiddenException('Only the host or a moderator can unpin a message');
+    if (result.error === 'NOT_ALLOWED')
+      throw new ForbiddenException('Only the host or a moderator can unpin a message');
     throw new NotFoundException('Stream not found');
   }
 }

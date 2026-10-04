@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -13,8 +22,12 @@ export class ChatController {
   constructor(private readonly chat: ChatService) {}
 
   @Get()
-  history(@Param('streamId', ParseUUIDPipe) streamId: string, @Query() query: ChatHistoryQueryDto) {
-    return this.chat.history(streamId, query);
+  history(
+    @Param('streamId', ParseUUIDPipe) streamId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ChatHistoryQueryDto,
+  ) {
+    return this.chat.history(streamId, query, user.id);
   }
 
   // The host's photo goes straight to storage; the message then names it by `imageKey`.

@@ -78,8 +78,9 @@ export const DomainEvents = {
   // Direct messages between friends (docs/features/messages.md).
   DirectMessageSent: 'direct_message.sent',
   DirectMessagesRead: 'direct_message.read',
+  // A block between a running live's host and someone in it (plan §6.4).
+  LiveAccessRevoked: 'live.access_revoked',
 } as const;
-
 
 export type DomainEventName = (typeof DomainEvents)[keyof typeof DomainEvents];
 
@@ -248,7 +249,13 @@ export interface GuestRequestAcceptedPayload {
   requestId: string;
   userId: string;
   credentials:
-    | { provider: typeof VideoProviderKind.AGORA; appId: string; token: string; uid: number; expiresAt: Date }
+    | {
+        provider: typeof VideoProviderKind.AGORA;
+        appId: string;
+        token: string;
+        uid: number;
+        expiresAt: Date;
+      }
     | { provider: typeof VideoProviderKind.LIVEKIT; url: string; token: string; expiresAt: Date };
 }
 
@@ -339,6 +346,16 @@ export interface UserProfileUpdatedPayload {
 export interface UserBlockedPayload {
   blockerId: string;
   blockedId: string;
+}
+
+/** [userId] is out of the host's running live: one of them blocked the other. */
+export interface LiveAccessRevokedPayload {
+  streamId: string;
+  hostId: string;
+  userId: string;
+  // The host blocked them, so they're told they were removed; someone who
+  // blocked the host is leaving on their own.
+  removedByHost: boolean;
 }
 
 export interface UserRoleChangedPayload {
@@ -476,5 +493,3 @@ export interface DirectMessagesReadPayload {
   readAt: Date;
   readerUnreadCount: number;
 }
-
-

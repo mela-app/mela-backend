@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
-import { GuestRequestInitiator, NotificationType } from '@prisma/client';
+import { GuestRequestInitiator, NotificationType, Prisma } from '@prisma/client';
 import {
   DomainEvents,
   GuestRequestCreatedPayload,
@@ -12,6 +12,7 @@ import {
 } from '../common/events/domain-events';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RedisService } from '../common/redis/redis.service';
+import { notBlockedEitherWayWith } from '../social/block-filters';
 import { SocialService } from '../social/social.service';
 import { MarkNotificationsReadDto } from './dto/mark-notifications-read.dto';
 import { UpdateNotificationSettingsDto } from './dto/notification-settings.dto';
@@ -54,6 +55,12 @@ const NOTIFICATION_LIST_SELECT = {
   actor: { select: PROFILE_SUMMARY_SELECT },
   stream: { select: { id: true, title: true } },
 } as const;
+
+// Someone's inbox, without anything from a person blocked either way (plan
+// §6.4) - a notification with no actor (deleted account) still shows.
+function inboxOf(recipientId: string): Prisma.NotificationWhereInput {
+  return { recipientId, OR: [{ actorId: null }, { actor: notBlockedEitherWayWith(recipientId) }] };
+}
 
 export interface SettingsView {
   pushStreamStarted: boolean;
@@ -108,7 +115,9 @@ export class NotificationsService {
   @OnEvent(DomainEvents.StreamStarted)
   async onStreamStarted(payload: StreamStartedPayload): Promise<void> {
     const cooldownKey = `notif:golive:${payload.hostId}`;
-    const acquired = await this.redis.getClient().set(cooldownKey, '1', 'EX', GOLIVE_COOLDOWN_SECONDS, 'NX');
+    const acquired = await this.redis
+      .getClient()
+      .set(cooldownKey, '1', 'EX', GOLIVE_COOLDOWN_SECONDS, 'NX');
     if (acquired !== 'OK') return;
 
     const followers = await this.prisma.follow.findMany({
@@ -120,7 +129,10 @@ export class NotificationsService {
     const recipientIds = followers.map((row) => row.followerId).filter((id) => !blocked.has(id));
     if (recipientIds.length === 0) return;
 
-    const host = await this.prisma.user.findUnique({ where: { id: payload.hostId }, select: PROFILE_SUMMARY_SELECT });
+    const host = await this.prisma.user.findUnique({
+      where: { id: payload.hostId },
+      select: PROFILE_SUMMARY_SELECT,
+    });
     const hostName = host?.displayName ?? 'Someone you follow';
 
     for (let i = 0; i < recipientIds.length; i += FOLLOWER_FANOUT_CHUNK_SIZE) {
@@ -156,7 +168,10 @@ export class NotificationsService {
 
   @OnEvent(DomainEvents.ModeratorGranted)
   async onModeratorGranted(payload: ModeratorGrantedPayload): Promise<void> {
-    const host = await this.prisma.user.findUnique({ where: { id: payload.hostId }, select: PROFILE_SUMMARY_SELECT });
+    const host = await this.prisma.user.findUnique({
+      where: { id: payload.hostId },
+      select: PROFILE_SUMMARY_SELECT,
+    });
     await this.fanOut([payload.userId], {
       type: NotificationType.MODERATOR_GRANTED,
       actorId: payload.hostId,
@@ -172,7 +187,10 @@ export class NotificationsService {
   @OnEvent(DomainEvents.StreamInviteSent)
   async onStreamInviteSent(payload: StreamInviteSentPayload): Promise<void> {
     const [sender, stream] = await Promise.all([
-      this.prisma.user.findUnique({ where: { id: payload.senderId }, select: PROFILE_SUMMARY_SELECT }),
+      this.prisma.user.findUnique({
+        where: { id: payload.senderId },
+        select: PROFILE_SUMMARY_SELECT,
+      }),
       this.prisma.stream.findUnique({ where: { id: payload.streamId }, select: { title: true } }),
     ]);
     await this.fanOut(payload.recipientIds, {
@@ -198,7 +216,10 @@ export class NotificationsService {
       select: { hostId: true, title: true },
     });
     if (!stream) return;
-    const host = await this.prisma.user.findUnique({ where: { id: stream.hostId }, select: PROFILE_SUMMARY_SELECT });
+    const host = await this.prisma.user.findUnique({
+      where: { id: stream.hostId },
+      select: PROFILE_SUMMARY_SELECT,
+    });
     await this.fanOut([payload.user.id], {
       type: NotificationType.GUEST_INVITE,
       actorId: stream.hostId,
@@ -213,7 +234,7 @@ export class NotificationsService {
   /** Cursor-paginated inbox, newest first (plan §6.11). */
   async list(recipientId: string, cursor?: string, limit = 30): Promise<Page<unknown>> {
     const rows = await this.prisma.notification.findMany({
-      where: { recipientId, ...(cursor ? { id: { lt: cursor } } : {}) },
+      where: { ...inboxOf(recipientId), ...(cursor ? { id: { lt: cursor } } : {}) },
       orderBy: { id: 'desc' },
       take: limit + 1,
       select: NOTIFICATION_LIST_SELECT,
@@ -224,7 +245,9 @@ export class NotificationsService {
   }
 
   async unreadCount(recipientId: string): Promise<{ count: number }> {
-    const count = await this.prisma.notification.count({ where: { recipientId, readAt: null } });
+    const count = await this.prisma.notification.count({
+      where: { ...inboxOf(recipientId), readAt: null },
+    });
     return { count };
   }
 
@@ -253,14 +276,20 @@ export class NotificationsService {
       where: { pushToken: token, id: { not: sessionId } },
       data: { pushToken: null },
     });
-    const result = await this.prisma.userSession.updateMany({ where: { id: sessionId }, data: { pushToken: token } });
+    const result = await this.prisma.userSession.updateMany({
+      where: { id: sessionId },
+      data: { pushToken: token },
+    });
     if (result.count === 0) throw new NotFoundException('Session not found');
     return { ok: true };
   }
 
   async clearPushToken(sessionId: string | undefined): Promise<{ ok: true }> {
     if (!sessionId) return { ok: true };
-    await this.prisma.userSession.updateMany({ where: { id: sessionId }, data: { pushToken: null } });
+    await this.prisma.userSession.updateMany({
+      where: { id: sessionId },
+      data: { pushToken: null },
+    });
     return { ok: true };
   }
 
@@ -303,7 +332,10 @@ export class NotificationsService {
       body: string;
       // Already fetched by the caller for the push text - reused here for the
       // realtime payload too, instead of a second lookup per recipient.
-      actor: { id: string; username: string; displayName: string; avatarUrl: string | null } | null | undefined;
+      actor:
+        | { id: string; username: string; displayName: string; avatarUrl: string | null }
+        | null
+        | undefined;
       streamTitle: string | null;
     },
   ): Promise<void> {
@@ -361,7 +393,9 @@ export class NotificationsService {
               ...(row.actorId ? { actorId: row.actorId } : {}),
             },
           })
-          .catch((error) => this.logger.warn(`Could not queue push for ${row.recipientId}: ${error}`));
+          .catch((error) =>
+            this.logger.warn(`Could not queue push for ${row.recipientId}: ${error}`),
+          );
       }
     }
   }

@@ -28,7 +28,10 @@ describe('S3StorageProvider', () => {
   it('returns a presigned upload url and the eventual public url', async () => {
     (getSignedUrl as jest.Mock).mockResolvedValue('https://signed.example/put');
 
-    const result = await new S3StorageProvider(config()).createUploadUrl('avatars/u1/abc.jpg', 'image/jpeg');
+    const result = await new S3StorageProvider(config()).createUploadUrl(
+      'avatars/u1/abc.jpg',
+      'image/jpeg',
+    );
 
     expect(result).toEqual({
       uploadUrl: 'https://signed.example/put',
@@ -36,11 +39,12 @@ describe('S3StorageProvider', () => {
     });
   });
 
-  it("never double-slashes when the public url base has a trailing slash", async () => {
+  it('never double-slashes when the public url base has a trailing slash', async () => {
     (getSignedUrl as jest.Mock).mockResolvedValue('https://signed.example/put');
 
-    const result = await new S3StorageProvider(config({ S3_PUBLIC_URL_BASE: `${values.S3_PUBLIC_URL_BASE}/` }))
-      .createUploadUrl('a/b.jpg', 'image/jpeg');
+    const result = await new S3StorageProvider(
+      config({ S3_PUBLIC_URL_BASE: `${values.S3_PUBLIC_URL_BASE}/` }),
+    ).createUploadUrl('a/b.jpg', 'image/jpeg');
 
     expect(result.publicUrl).toBe('http://localhost:9000/avatars/a/b.jpg');
   });
@@ -53,7 +57,9 @@ describe('S3StorageProvider', () => {
   });
 
   it('signs an Amazon S3 upload without pinning a body checksum', async () => {
-    const actual = jest.requireActual<{ getSignedUrl: typeof getSignedUrl }>('@aws-sdk/s3-request-presigner');
+    const actual = jest.requireActual<{ getSignedUrl: typeof getSignedUrl }>(
+      '@aws-sdk/s3-request-presigner',
+    );
     (getSignedUrl as jest.Mock).mockImplementationOnce(actual.getSignedUrl);
 
     const { uploadUrl } = await new S3StorageProvider(config({ S3_ENDPOINT: '' })).createUploadUrl(
