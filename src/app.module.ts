@@ -81,4 +81,3 @@ function parseRedisUrl(url: string): { host: string; port: number; password?: st
     ...(parsed.password ? { password: parsed.password } : {}),
   };
 }
-

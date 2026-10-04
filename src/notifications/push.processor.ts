@@ -30,7 +30,9 @@ export class PushProcessor extends WorkerHost {
       where: { userId: recipientId, pushToken: { not: null } },
       select: { pushToken: true },
     });
-    const tokens = sessions.map((session) => session.pushToken).filter((token): token is string => Boolean(token));
+    const tokens = sessions
+      .map((session) => session.pushToken)
+      .filter((token): token is string => Boolean(token));
     if (tokens.length === 0) return;
 
     const { invalidTokens } = await this.pushProvider.send(tokens, { title, body, data });

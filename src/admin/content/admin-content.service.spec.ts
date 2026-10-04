@@ -22,7 +22,13 @@ describe('AdminContentService', () => {
   const prisma = {
     stream: { findUnique: jest.fn(), findMany: jest.fn() },
     adminAlert: { create: jest.fn(), findMany: jest.fn(), count: jest.fn() },
-    bannedPhrase: { create: jest.fn(), update: jest.fn(), delete: jest.fn(), findUnique: jest.fn(), findMany: jest.fn() },
+    bannedPhrase: {
+      create: jest.fn(),
+      update: jest.fn(),
+      delete: jest.fn(),
+      findUnique: jest.fn(),
+      findMany: jest.fn(),
+    },
   };
   const realtime = { connectedCount: jest.fn() };
   const events = { emit: jest.fn() };
@@ -61,10 +67,14 @@ describe('AdminContentService', () => {
 
   describe('alerts', () => {
     it('offers the running lives with how many devices each alert would reach', async () => {
-      prisma.stream.findMany.mockResolvedValue([{ id: LIVE, title: 'Poker night', host: { id: 'h1', username: 'host' } }]);
+      prisma.stream.findMany.mockResolvedValue([
+        { id: LIVE, title: 'Poker night', host: { id: 'h1', username: 'host' } },
+      ]);
 
       await expect(service().alertTargets()).resolves.toEqual({
-        items: [{ id: LIVE, title: 'Poker night', host: { id: 'h1', username: 'host' }, reach: 42 }],
+        items: [
+          { id: LIVE, title: 'Poker night', host: { id: 'h1', username: 'host' }, reach: 42 },
+        ],
       });
       expect(prisma.stream.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { status: StreamStatus.LIVE } }),
@@ -74,7 +84,11 @@ describe('AdminContentService', () => {
 
     it('lets only those given it alert everyone', async () => {
       const error = await service()
-        .sendAlert(moderator, { scope: AlertScope.GLOBAL, message: 'Maintenance', severity: AlertSeverity.INFO })
+        .sendAlert(moderator, {
+          scope: AlertScope.GLOBAL,
+          message: 'Maintenance',
+          severity: AlertSeverity.INFO,
+        })
         .catch((e: unknown) => e);
       expect(error).toBeInstanceOf(ForbiddenException);
       expect((error as ForbiddenException).getResponse()).toEqual(
@@ -82,8 +96,14 @@ describe('AdminContentService', () => {
       );
       expect(prisma.adminAlert.create).not.toHaveBeenCalled();
 
-      const trusted = principal(PlatformRole.PLATFORM_MODERATOR, [AdminPermission.SEND_GLOBAL_ALERTS]);
-      await service().sendAlert(trusted, { scope: AlertScope.GLOBAL, message: 'Maintenance', severity: AlertSeverity.INFO });
+      const trusted = principal(PlatformRole.PLATFORM_MODERATOR, [
+        AdminPermission.SEND_GLOBAL_ALERTS,
+      ]);
+      await service().sendAlert(trusted, {
+        scope: AlertScope.GLOBAL,
+        message: 'Maintenance',
+        severity: AlertSeverity.INFO,
+      });
       expect(prisma.adminAlert.create).toHaveBeenCalledTimes(1);
     });
 
@@ -122,12 +142,22 @@ describe('AdminContentService', () => {
     it('refuses a live that ended or does not exist', async () => {
       prisma.stream.findUnique.mockResolvedValueOnce({ status: StreamStatus.ENDED });
       await expect(
-        service().sendAlert(moderator, { scope: AlertScope.STREAM, streamId: LIVE, message: 'Hi', severity: AlertSeverity.INFO }),
+        service().sendAlert(moderator, {
+          scope: AlertScope.STREAM,
+          streamId: LIVE,
+          message: 'Hi',
+          severity: AlertSeverity.INFO,
+        }),
       ).rejects.toThrow(ConflictException);
 
       prisma.stream.findUnique.mockResolvedValueOnce(null);
       await expect(
-        service().sendAlert(moderator, { scope: AlertScope.STREAM, streamId: LIVE, message: 'Hi', severity: AlertSeverity.INFO }),
+        service().sendAlert(moderator, {
+          scope: AlertScope.STREAM,
+          streamId: LIVE,
+          message: 'Hi',
+          severity: AlertSeverity.INFO,
+        }),
       ).rejects.toThrow(NotFoundException);
       expect(events.emit).not.toHaveBeenCalled();
     });
@@ -149,9 +179,16 @@ describe('AdminContentService', () => {
 
   describe('banned phrases', () => {
     it('adds a phrase and tells the chat filter', async () => {
-      prisma.bannedPhrase.create.mockResolvedValue({ id: 'p1', phrase: 'scam link', severity: BannedPhraseSeverity.REJECT });
+      prisma.bannedPhrase.create.mockResolvedValue({
+        id: 'p1',
+        phrase: 'scam link',
+        severity: BannedPhraseSeverity.REJECT,
+      });
 
-      await service().addPhrase(superAdmin, { phrase: 'scam link', severity: BannedPhraseSeverity.REJECT });
+      await service().addPhrase(superAdmin, {
+        phrase: 'scam link',
+        severity: BannedPhraseSeverity.REJECT,
+      });
 
       expect(prisma.bannedPhrase.create).toHaveBeenCalledWith({
         data: { phrase: 'scam link', severity: BannedPhraseSeverity.REJECT, createdBy: 'admin-1' },
@@ -166,18 +203,31 @@ describe('AdminContentService', () => {
 
     it('explains a duplicate instead of failing', async () => {
       prisma.bannedPhrase.create.mockRejectedValue(
-        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', { code: 'P2002', clientVersion: 'test' }),
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+          code: 'P2002',
+          clientVersion: 'test',
+        }),
       );
 
       await expect(
-        service().addPhrase(superAdmin, { phrase: 'scam link', severity: BannedPhraseSeverity.MASK }),
+        service().addPhrase(superAdmin, {
+          phrase: 'scam link',
+          severity: BannedPhraseSeverity.MASK,
+        }),
       ).rejects.toThrow(new ConflictException('That phrase is already on the list'));
     });
 
     it('removes a phrase, and 404s one that is gone', async () => {
-      prisma.bannedPhrase.findUnique.mockResolvedValueOnce({ id: 'p1', phrase: 'x', severity: BannedPhraseSeverity.MASK });
+      prisma.bannedPhrase.findUnique.mockResolvedValueOnce({
+        id: 'p1',
+        phrase: 'x',
+        severity: BannedPhraseSeverity.MASK,
+      });
       await expect(service().removePhrase(superAdmin, 'p1')).resolves.toEqual({ ok: true });
-      expect(events.emit).toHaveBeenCalledWith('banned_phrase.deleted', expect.objectContaining({ phraseId: 'p1' }));
+      expect(events.emit).toHaveBeenCalledWith(
+        'banned_phrase.deleted',
+        expect.objectContaining({ phraseId: 'p1' }),
+      );
 
       prisma.bannedPhrase.findUnique.mockResolvedValueOnce(null);
       await expect(service().removePhrase(superAdmin, 'p2')).rejects.toThrow(NotFoundException);

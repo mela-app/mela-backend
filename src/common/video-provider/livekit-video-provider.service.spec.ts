@@ -24,9 +24,9 @@ describe('LiveKitVideoProvider', () => {
   afterEach(() => jest.restoreAllMocks());
 
   it('rejects a LIVEKIT_URL that clients could not connect to', () => {
-    expect(() => makeProvider({ ...CONFIGURED, LIVEKIT_URL: 'https://livekit.example.com' })).toThrow(
-      /ws:\/\/ or wss:\/\//,
-    );
+    expect(() =>
+      makeProvider({ ...CONFIGURED, LIVEKIT_URL: 'https://livekit.example.com' }),
+    ).toThrow(/ws:\/\/ or wss:\/\//);
   });
 
   it('reports unconfigured and answers 503 instead of minting unusable tokens', async () => {
@@ -42,7 +42,11 @@ describe('LiveKitVideoProvider', () => {
   it('lets the host publish camera and mic only, in their own room', async () => {
     const provider = makeProvider();
 
-    const result = await provider.mintToken({ channelName: 'stream_s1', userId: 'host-1', role: 'publisher' });
+    const result = await provider.mintToken({
+      channelName: 'stream_s1',
+      userId: 'host-1',
+      role: 'publisher',
+    });
 
     expect(result).toMatchObject({ provider: 'LIVEKIT', url: 'wss://livekit.example.com' });
     const claims = await claimsOf(result.token);
@@ -61,7 +65,11 @@ describe('LiveKitVideoProvider', () => {
   it('gives viewers a subscribe-only, hidden identity', async () => {
     const provider = makeProvider();
 
-    const result = await provider.mintToken({ channelName: 'stream_s1', userId: 'viewer-1', role: 'audience' });
+    const result = await provider.mintToken({
+      channelName: 'stream_s1',
+      userId: 'viewer-1',
+      role: 'audience',
+    });
 
     const claims = await claimsOf(result.token);
     expect(claims.sub).toBe('viewer-1');
@@ -79,7 +87,11 @@ describe('LiveKitVideoProvider', () => {
     const provider = makeProvider();
     const before = Math.floor(Date.now() / 1000);
 
-    const result = await provider.mintToken({ channelName: 'stream_s1', userId: 'viewer-1', role: 'audience' });
+    const result = await provider.mintToken({
+      channelName: 'stream_s1',
+      userId: 'viewer-1',
+      role: 'audience',
+    });
 
     const claims = await claimsOf(result.token);
     expect(claims.exp! - before).toBeGreaterThanOrEqual(15 * 60 - 1);
@@ -87,16 +99,24 @@ describe('LiveKitVideoProvider', () => {
   });
 
   it('creates the room with the reconnect grace before the live starts', async () => {
-    const createRoom = jest.spyOn(RoomServiceClient.prototype, 'createRoom').mockResolvedValue({} as never);
+    const createRoom = jest
+      .spyOn(RoomServiceClient.prototype, 'createRoom')
+      .mockResolvedValue({} as never);
     const provider = makeProvider();
 
     await provider.openChannel('stream_s1');
 
-    expect(createRoom).toHaveBeenCalledWith({ name: 'stream_s1', emptyTimeout: 300, departureTimeout: 90 });
+    expect(createRoom).toHaveBeenCalledWith({
+      name: 'stream_s1',
+      emptyTimeout: 300,
+      departureTimeout: 90,
+    });
   });
 
   it('turns an unreachable server into a 503 for the app', async () => {
-    jest.spyOn(RoomServiceClient.prototype, 'createRoom').mockRejectedValue(new TypeError('fetch failed'));
+    jest
+      .spyOn(RoomServiceClient.prototype, 'createRoom')
+      .mockRejectedValue(new TypeError('fetch failed'));
     const provider = makeProvider();
 
     await expect(provider.openChannel('stream_s1')).rejects.toThrow(ServiceUnavailableException);

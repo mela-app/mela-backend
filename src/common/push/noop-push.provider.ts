@@ -20,7 +20,9 @@ export class NoopPushProvider implements PushProvider {
       );
       this.warned = true;
     }
-    this.logger.debug(`(noop) push to ${tokens.length} device(s): ${message.title} - ${message.body}`);
+    this.logger.debug(
+      `(noop) push to ${tokens.length} device(s): ${message.title} - ${message.body}`,
+    );
     return { invalidTokens: [] };
   }
 }

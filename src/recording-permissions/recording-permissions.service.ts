@@ -3,7 +3,9 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DomainEvents, RecordingPermissionChangedPayload } from '../common/events/domain-events';
 import { PrismaService } from '../common/prisma/prisma.service';
 
-const ALLOWED_USER_SELECT = { select: { id: true, username: true, displayName: true, avatarUrl: true } } as const;
+const ALLOWED_USER_SELECT = {
+  select: { id: true, username: true, displayName: true, avatarUrl: true },
+} as const;
 
 /**
  * Who may record a live: the app keeps it out of screen recordings and
@@ -27,7 +29,9 @@ export class RecordingPermissionsService {
   }
 
   async disallow(streamId: string, userId: string, actorId: string): Promise<void> {
-    const { count } = await this.prisma.recordingPermission.deleteMany({ where: { streamId, userId } });
+    const { count } = await this.prisma.recordingPermission.deleteMany({
+      where: { streamId, userId },
+    });
     if (count > 0) this.emit(streamId, userId, actorId, false);
   }
 

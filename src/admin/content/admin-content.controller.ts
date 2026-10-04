@@ -16,8 +16,19 @@ import { AdminPermission, BannedPhraseSeverity } from '@prisma/client';
 import { Throttle } from '@nestjs/throttler';
 import { IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
 import { PageQueryDto } from '../../common/pagination/page-query.dto';
-import { ADMIN_API_THROTTLE, AdminGuard, AdminPrincipal, CurrentAdmin, RequirePermission } from '../admin.guard';
-import { BannedPhraseDto, SendAlertDto, TestPhraseDto, UpdateBannedPhraseDto } from './admin-content.dto';
+import {
+  ADMIN_API_THROTTLE,
+  AdminGuard,
+  AdminPrincipal,
+  CurrentAdmin,
+  RequirePermission,
+} from '../admin.guard';
+import {
+  BannedPhraseDto,
+  SendAlertDto,
+  TestPhraseDto,
+  UpdateBannedPhraseDto,
+} from './admin-content.dto';
 import { AdminContentService } from './admin-content.service';
 
 class PhrasesQueryDto {

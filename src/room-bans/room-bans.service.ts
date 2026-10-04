@@ -1,7 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RoomBanScope } from '@prisma/client';
-import { DomainEvents, RoomBanCreatedPayload, RoomBanLiftedPayload } from '../common/events/domain-events';
+import {
+  DomainEvents,
+  RoomBanCreatedPayload,
+  RoomBanLiftedPayload,
+} from '../common/events/domain-events';
 import { PrismaService } from '../common/prisma/prisma.service';
 
 /** Host room ban/kick (plan §6.4) - distinct from a personal Block. See docs/features/moderation.md. */
@@ -12,9 +16,20 @@ export class RoomBansService {
     private readonly events: EventEmitter2,
   ) {}
 
-  async ban(hostId: string, bannedUserId: string, scope: RoomBanScope, streamId?: string, actorId?: string) {
+  async ban(
+    hostId: string,
+    bannedUserId: string,
+    scope: RoomBanScope,
+    streamId?: string,
+    actorId?: string,
+  ) {
     await this.prisma.roomBan.create({
-      data: { hostId, bannedUserId, scope, streamId: scope === RoomBanScope.SESSION ? streamId : null },
+      data: {
+        hostId,
+        bannedUserId,
+        scope,
+        streamId: scope === RoomBanScope.SESSION ? streamId : null,
+      },
     });
     this.events.emit(DomainEvents.RoomBanCreated, {
       hostId,

@@ -1,7 +1,16 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { UserStatus } from '@prisma/client';
-import { DomainEvents, UserBlockedPayload, UserUnfollowedPayload } from '../common/events/domain-events';
+import {
+  DomainEvents,
+  UserBlockedPayload,
+  UserUnfollowedPayload,
+} from '../common/events/domain-events';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { canViewProfileDetails, ProfileViewer } from './profile-visibility';
 
@@ -29,7 +38,10 @@ export class SocialService {
   /** Idempotent - following someone you already follow just succeeds again. */
   async follow(followerId: string, followeeId: string): Promise<{ ok: true }> {
     if (followerId === followeeId) throw new BadRequestException("You can't follow yourself");
-    const followee = await this.prisma.user.findUnique({ where: { id: followeeId }, select: { id: true } });
+    const followee = await this.prisma.user.findUnique({
+      where: { id: followeeId },
+      select: { id: true },
+    });
     if (!followee) throw new NotFoundException('User not found');
     if (await this.isBlockedEitherWay(followerId, followeeId)) {
       throw new ForbiddenException("You can't follow this user");
@@ -48,7 +60,10 @@ export class SocialService {
   async unfollow(followerId: string, followeeId: string): Promise<{ ok: true }> {
     const { count } = await this.prisma.follow.deleteMany({ where: { followerId, followeeId } });
     if (count > 0) {
-      this.events.emit(DomainEvents.UserUnfollowed, { followerId, followeeId } satisfies UserUnfollowedPayload);
+      this.events.emit(DomainEvents.UserUnfollowed, {
+        followerId,
+        followeeId,
+      } satisfies UserUnfollowedPayload);
     }
     return { ok: true };
   }
@@ -62,7 +77,10 @@ export class SocialService {
    */
   async block(blockerId: string, blockedId: string): Promise<{ ok: true }> {
     if (blockerId === blockedId) throw new BadRequestException("You can't block yourself");
-    const target = await this.prisma.user.findUnique({ where: { id: blockedId }, select: { id: true } });
+    const target = await this.prisma.user.findUnique({
+      where: { id: blockedId },
+      select: { id: true },
+    });
     if (!target) throw new NotFoundException('User not found');
 
     await this.prisma.$transaction([
@@ -80,7 +98,10 @@ export class SocialService {
         },
       }),
     ]);
-    this.events.emit(DomainEvents.UserBlocked, { blockerId, blockedId } satisfies UserBlockedPayload);
+    this.events.emit(DomainEvents.UserBlocked, {
+      blockerId,
+      blockedId,
+    } satisfies UserBlockedPayload);
     return { ok: true };
   }
 
@@ -88,7 +109,10 @@ export class SocialService {
   async unblock(blockerId: string, blockedId: string): Promise<{ ok: true }> {
     const { count } = await this.prisma.block.deleteMany({ where: { blockerId, blockedId } });
     if (count > 0) {
-      this.events.emit(DomainEvents.UserUnblocked, { blockerId, blockedId } satisfies UserBlockedPayload);
+      this.events.emit(DomainEvents.UserUnblocked, {
+        blockerId,
+        blockedId,
+      } satisfies UserBlockedPayload);
     }
     return { ok: true };
   }
@@ -100,7 +124,10 @@ export class SocialService {
    */
   async muteInChat(userId: string, mutedUserId: string): Promise<{ ok: true }> {
     if (userId === mutedUserId) throw new BadRequestException("You can't mute yourself");
-    const target = await this.prisma.user.findUnique({ where: { id: mutedUserId }, select: { id: true } });
+    const target = await this.prisma.user.findUnique({
+      where: { id: mutedUserId },
+      select: { id: true },
+    });
     if (!target) throw new NotFoundException('User not found');
 
     await this.prisma.personalChatMute.upsert({
@@ -172,12 +199,19 @@ export class SocialService {
   /** Mutual follows both ways - gates who can be sent a live invite (plan §6.12). */
   async isFriend(userId: string, otherUserId: string): Promise<boolean> {
     if (userId === otherUserId) return false;
-    const [a, b] = await Promise.all([this.isFollowing(userId, otherUserId), this.isFollowing(otherUserId, userId)]);
+    const [a, b] = await Promise.all([
+      this.isFollowing(userId, otherUserId),
+      this.isFollowing(otherUserId, userId),
+    ]);
     return a && b;
   }
 
   /** The bell on a profile (plan §6.10) - only meaningful while already following. */
-  async setNotifyOnLive(followerId: string, followeeId: string, notifyOnLive: boolean): Promise<{ ok: true }> {
+  async setNotifyOnLive(
+    followerId: string,
+    followeeId: string,
+    notifyOnLive: boolean,
+  ): Promise<{ ok: true }> {
     const result = await this.prisma.follow.updateMany({
       where: { followerId, followeeId },
       data: { notifyOnLive },
@@ -209,7 +243,8 @@ export class SocialService {
     const isFollowing = relation.some((row) => row.followerId === requesterId);
     const isFollowedBy = relation.some((row) => row.followerId === profileId);
     // Only meaningful while isFollowing - the bell toggle on a profile (plan §6.10).
-    const notifyOnLive = relation.find((row) => row.followerId === requesterId)?.notifyOnLive ?? false;
+    const notifyOnLive =
+      relation.find((row) => row.followerId === requesterId)?.notifyOnLive ?? false;
     return {
       followerCount,
       followingCount,
@@ -259,7 +294,10 @@ export class SocialService {
   // Who someone follows, and who follows them, are profile details too - and
   // like the profile itself, they don't exist for someone its owner blocked.
   private async assertCanViewDetails(profileId: string, requesterId?: string): Promise<void> {
-    const owner = await this.prisma.user.findUnique({ where: { id: profileId }, select: { profileVisibility: true } });
+    const owner = await this.prisma.user.findUnique({
+      where: { id: profileId },
+      select: { profileVisibility: true },
+    });
     if (!owner) throw new NotFoundException('User not found');
     const viewer = await this.profileViewer(profileId, requesterId);
     if (viewer.blockedByOwner) throw new NotFoundException('User not found');
@@ -277,7 +315,11 @@ export class SocialService {
     await this.assertCanViewDetails(userId, requesterId);
     const hidden = await this.hiddenFrom(requesterId);
     const rows = await this.prisma.follow.findMany({
-      where: { followeeId: userId, ...(hidden && { followerId: hidden }), ...(cursor ? { id: { lt: cursor } } : {}) },
+      where: {
+        followeeId: userId,
+        ...(hidden && { followerId: hidden }),
+        ...(cursor ? { id: { lt: cursor } } : {}),
+      },
       orderBy: { id: 'desc' },
       take: limit + 1,
       select: { id: true, follower: { select: PROFILE_SUMMARY_SELECT } },
@@ -292,7 +334,11 @@ export class SocialService {
     await this.assertCanViewDetails(userId, requesterId);
     const hidden = await this.hiddenFrom(requesterId);
     const rows = await this.prisma.follow.findMany({
-      where: { followerId: userId, ...(hidden && { followeeId: hidden }), ...(cursor ? { id: { lt: cursor } } : {}) },
+      where: {
+        followerId: userId,
+        ...(hidden && { followeeId: hidden }),
+        ...(cursor ? { id: { lt: cursor } } : {}),
+      },
       orderBy: { id: 'desc' },
       take: limit + 1,
       select: { id: true, followee: { select: PROFILE_SUMMARY_SELECT } },
@@ -329,7 +375,9 @@ export class SocialService {
     // Both exclusions key on `id`, so they must merge into one `notIn` list -
     // two separate `id` filters spread into the same object would just have
     // the second silently overwrite the first.
-    const excludedIds = requesterId ? [requesterId, ...(await this.blockedEitherWayUserIds(requesterId))] : [];
+    const excludedIds = requesterId
+      ? [requesterId, ...(await this.blockedEitherWayUserIds(requesterId))]
+      : [];
     const rows = await this.prisma.user.findMany({
       where: {
         status: UserStatus.ACTIVE,

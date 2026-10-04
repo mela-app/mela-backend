@@ -36,7 +36,7 @@ describe('SocialService', () => {
   beforeEach(() => jest.clearAllMocks());
 
   describe('follow', () => {
-    it("refuses to let a user follow themselves", async () => {
+    it('refuses to let a user follow themselves', async () => {
       await expect(service().follow('u1', 'u1')).rejects.toThrow(BadRequestException);
       expect(prisma.follow.upsert).not.toHaveBeenCalled();
     });
@@ -56,7 +56,10 @@ describe('SocialService', () => {
         create: { followerId: 'u1', followeeId: 'u2' },
         update: {},
       });
-      expect(events.emit).toHaveBeenCalledWith('user.followed', { followerId: 'u1', followeeId: 'u2' });
+      expect(events.emit).toHaveBeenCalledWith('user.followed', {
+        followerId: 'u1',
+        followeeId: 'u2',
+      });
     });
 
     it('refuses to follow someone blocked either way', async () => {
@@ -108,7 +111,7 @@ describe('SocialService', () => {
   });
 
   describe('muteInChat', () => {
-    it("refuses to mute yourself", async () => {
+    it('refuses to mute yourself', async () => {
       await expect(service().muteInChat('u1', 'u1')).rejects.toThrow(BadRequestException);
       expect(prisma.personalChatMute.upsert).not.toHaveBeenCalled();
     });
@@ -137,19 +140,30 @@ describe('SocialService', () => {
     it('succeeds even when there was nothing to unmute', async () => {
       prisma.personalChatMute.deleteMany.mockResolvedValue({ count: 0 });
       await expect(service().unmuteInChat('u1', 'u2')).resolves.toEqual({ ok: true });
-      expect(prisma.personalChatMute.deleteMany).toHaveBeenCalledWith({ where: { userId: 'u1', mutedUserId: 'u2' } });
+      expect(prisma.personalChatMute.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'u1', mutedUserId: 'u2' },
+      });
     });
   });
 
   describe('chatFilter', () => {
-    it("lists who this user muted in chat and who they blocked - not who blocked them", async () => {
+    it('lists who this user muted in chat and who they blocked - not who blocked them', async () => {
       prisma.personalChatMute.findMany.mockResolvedValue([{ mutedUserId: 'm1' }]);
       prisma.block.findMany.mockResolvedValue([{ blockedId: 'b1' }]);
 
-      await expect(service().chatFilter('u1')).resolves.toEqual({ mutedUserIds: ['m1'], blockedUserIds: ['b1'] });
+      await expect(service().chatFilter('u1')).resolves.toEqual({
+        mutedUserIds: ['m1'],
+        blockedUserIds: ['b1'],
+      });
 
-      expect(prisma.personalChatMute.findMany).toHaveBeenCalledWith({ where: { userId: 'u1' }, select: { mutedUserId: true } });
-      expect(prisma.block.findMany).toHaveBeenCalledWith({ where: { blockerId: 'u1' }, select: { blockedId: true } });
+      expect(prisma.personalChatMute.findMany).toHaveBeenCalledWith({
+        where: { userId: 'u1' },
+        select: { mutedUserId: true },
+      });
+      expect(prisma.block.findMany).toHaveBeenCalledWith({
+        where: { blockerId: 'u1' },
+        select: { blockedId: true },
+      });
     });
   });
 
@@ -189,7 +203,7 @@ describe('SocialService', () => {
   });
 
   describe('unfollow', () => {
-    it("succeeds even when there was nothing to unfollow", async () => {
+    it('succeeds even when there was nothing to unfollow', async () => {
       prisma.follow.deleteMany.mockResolvedValue({ count: 0 });
       await expect(service().unfollow('u1', 'u2')).resolves.toEqual({ ok: true });
       expect(events.emit).not.toHaveBeenCalled();
@@ -198,7 +212,10 @@ describe('SocialService', () => {
     it('announces an unfollow that happened, for the audit trail', async () => {
       prisma.follow.deleteMany.mockResolvedValue({ count: 1 });
       await service().unfollow('u1', 'u2');
-      expect(events.emit).toHaveBeenCalledWith('user.unfollowed', { followerId: 'u1', followeeId: 'u2' });
+      expect(events.emit).toHaveBeenCalledWith('user.unfollowed', {
+        followerId: 'u1',
+        followeeId: 'u2',
+      });
     });
   });
 
@@ -209,7 +226,9 @@ describe('SocialService', () => {
     });
 
     it('is false when only one side follows', async () => {
-      prisma.follow.findUnique.mockResolvedValueOnce({ followerId: 'u1' }).mockResolvedValueOnce(null);
+      prisma.follow.findUnique
+        .mockResolvedValueOnce({ followerId: 'u1' })
+        .mockResolvedValueOnce(null);
       await expect(service().isFriend('u1', 'u2')).resolves.toBe(false);
     });
 
@@ -282,7 +301,7 @@ describe('SocialService', () => {
       });
     });
 
-    it("skips the relation and block lookups for a signed-out viewer or your own profile", async () => {
+    it('skips the relation and block lookups for a signed-out viewer or your own profile', async () => {
       prisma.follow.count.mockResolvedValue(0);
 
       await service().getRelationshipSummary('me', undefined);
@@ -316,8 +335,13 @@ describe('SocialService', () => {
   });
 
   describe('lists', () => {
-    const row = (id: string, userId: string) => ({ id, follower: { id: userId }, followee: { id: userId } });
-    const owner = (profileVisibility: ProfileVisibility) => prisma.user.findUnique.mockResolvedValueOnce({ profileVisibility });
+    const row = (id: string, userId: string) => ({
+      id,
+      follower: { id: userId },
+      followee: { id: userId },
+    });
+    const owner = (profileVisibility: ProfileVisibility) =>
+      prisma.user.findUnique.mockResolvedValueOnce({ profileVisibility });
 
     beforeEach(() => prisma.block.findMany.mockResolvedValue([]));
 
@@ -358,41 +382,58 @@ describe('SocialService', () => {
 
       expect(prisma.follow.findMany).toHaveBeenNthCalledWith(
         1,
-        expect.objectContaining({ where: { followeeId: 'host', followerId: { notIn: ['x', 'y'] } } }),
+        expect.objectContaining({
+          where: { followeeId: 'host', followerId: { notIn: ['x', 'y'] } },
+        }),
       );
       expect(prisma.follow.findMany).toHaveBeenNthCalledWith(
         2,
-        expect.objectContaining({ where: { followerId: 'host', followeeId: { notIn: ['x', 'y'] } } }),
+        expect.objectContaining({
+          where: { followerId: 'host', followeeId: { notIn: ['x', 'y'] } },
+        }),
       );
     });
 
-    it('keeps a friends-only profile\'s lists from someone who is only a follower', async () => {
+    it("keeps a friends-only profile's lists from someone who is only a follower", async () => {
       owner(ProfileVisibility.FRIENDS);
       // me -> host, but not back.
-      prisma.follow.findUnique.mockImplementation(({ where }: { where: { followerId_followeeId: { followerId: string } } }) =>
-        Promise.resolve(where.followerId_followeeId.followerId === 'me' ? { followerId: 'me' } : null),
+      prisma.follow.findUnique.mockImplementation(
+        ({ where }: { where: { followerId_followeeId: { followerId: string } } }) =>
+          Promise.resolve(
+            where.followerId_followeeId.followerId === 'me' ? { followerId: 'me' } : null,
+          ),
       );
 
-      const error = await service().listFollowers('host', 'me').catch((e: unknown) => e);
+      const error = await service()
+        .listFollowers('host', 'me')
+        .catch((e: unknown) => e);
 
       expect(error).toBeInstanceOf(ForbiddenException);
-      expect((error as ForbiddenException).getResponse()).toEqual(expect.objectContaining({ code: 'PROFILE_PRIVATE' }));
+      expect((error as ForbiddenException).getResponse()).toEqual(
+        expect.objectContaining({ code: 'PROFILE_PRIVATE' }),
+      );
       expect(prisma.follow.findMany).not.toHaveBeenCalled();
     });
 
-    it('shows a friends-only profile\'s lists to a friend', async () => {
+    it("shows a friends-only profile's lists to a friend", async () => {
       owner(ProfileVisibility.FRIENDS);
       prisma.follow.findUnique.mockResolvedValue({ followerId: 'x' });
       prisma.follow.findMany.mockResolvedValue([]);
 
-      await expect(service().listFollowing('host', 'me')).resolves.toEqual(expect.objectContaining({ items: [] }));
+      await expect(service().listFollowing('host', 'me')).resolves.toEqual(
+        expect.objectContaining({ items: [] }),
+      );
     });
 
     it('always shows people their own lists, even when only they can see their profile', async () => {
-      prisma.user.findUnique.mockResolvedValueOnce({ profileVisibility: ProfileVisibility.ONLY_ME });
+      prisma.user.findUnique.mockResolvedValueOnce({
+        profileVisibility: ProfileVisibility.ONLY_ME,
+      });
       prisma.follow.findMany.mockResolvedValue([]);
 
-      await expect(service().listFollowers('me', 'me')).resolves.toEqual(expect.objectContaining({ items: [] }));
+      await expect(service().listFollowers('me', 'me')).resolves.toEqual(
+        expect.objectContaining({ items: [] }),
+      );
     });
 
     it('treats a signed-out visitor as a stranger', async () => {
@@ -433,16 +474,27 @@ describe('SocialService', () => {
 
   describe('search', () => {
     it('returns an empty page for a blank query without touching the database', async () => {
-      await expect(service().search('   ', 'me')).resolves.toEqual({ items: [], hasMore: false, nextCursor: null });
+      await expect(service().search('   ', 'me')).resolves.toEqual({
+        items: [],
+        hasMore: false,
+        nextCursor: null,
+      });
       expect(prisma.user.findMany).not.toHaveBeenCalled();
     });
 
     it('excludes the requester and only active accounts, paging by username', async () => {
-      prisma.user.findMany.mockResolvedValue([{ id: '1', username: 'ann' }, { id: '2', username: 'anna' }]);
+      prisma.user.findMany.mockResolvedValue([
+        { id: '1', username: 'ann' },
+        { id: '2', username: 'anna' },
+      ]);
 
       const page = await service().search('an', 'me', undefined, 1);
 
-      expect(page).toEqual({ items: [{ id: '1', username: 'ann' }], hasMore: true, nextCursor: 'ann' });
+      expect(page).toEqual({
+        items: [{ id: '1', username: 'ann' }],
+        hasMore: true,
+        nextCursor: 'ann',
+      });
       expect(prisma.user.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({

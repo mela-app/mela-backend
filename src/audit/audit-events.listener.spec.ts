@@ -19,7 +19,8 @@ describe('AuditEventsListener', () => {
     stream: { findUnique: jest.fn() },
     chatMessage: { findUnique: jest.fn() },
   };
-  const listener = () => new AuditEventsListener(audit as unknown as AuditService, prisma as unknown as PrismaService);
+  const listener = () =>
+    new AuditEventsListener(audit as unknown as AuditService, prisma as unknown as PrismaService);
   const entry = () => audit.record.mock.calls[0][0];
 
   beforeEach(() => {
@@ -47,7 +48,11 @@ describe('AuditEventsListener', () => {
 
   describe('lives', () => {
     it('leaves a locked live to the lock entry', async () => {
-      await listener().onStreamEnded({ streamId: 's1', reason: StreamEndReason.LOCKED, message: 'Graphic' });
+      await listener().onStreamEnded({
+        streamId: 's1',
+        reason: StreamEndReason.LOCKED,
+        message: 'Graphic',
+      });
       expect(audit.record).not.toHaveBeenCalled();
     });
 
@@ -68,7 +73,11 @@ describe('AuditEventsListener', () => {
         expect.objectContaining({
           actorId: null,
           actorRole: AuditActorRole.SYSTEM,
-          metadata: { reason: StreamEndReason.HOST_DISCONNECTED, peakViewerCount: 12, durationSeconds: 90 },
+          metadata: {
+            reason: StreamEndReason.HOST_DISCONNECTED,
+            peakViewerCount: 12,
+            durationSeconds: 90,
+          },
         }),
       );
       expect(audit.record.mock.calls[1][0]).toEqual(
@@ -77,7 +86,12 @@ describe('AuditEventsListener', () => {
     });
 
     it('records a lock with the admin, the reason and the host', async () => {
-      await listener().onStreamLocked({ streamId: 's1', hostId: 'host-1', actorId: 'admin-1', reason: 'Graphic' });
+      await listener().onStreamLocked({
+        streamId: 's1',
+        hostId: 'host-1',
+        actorId: 'admin-1',
+        reason: 'Graphic',
+      });
 
       expect(entry()).toEqual(
         expect.objectContaining({
@@ -124,13 +138,22 @@ describe('AuditEventsListener', () => {
         wasRemovedByHostOrModerator: true,
         actorId: 'mod-1',
       });
-      await listener().onGuestRemoved({ streamId: 's1', hostId: 'host-1', userId: 'g1', wasRemovedByHostOrModerator: false });
+      await listener().onGuestRemoved({
+        streamId: 's1',
+        hostId: 'host-1',
+        userId: 'g1',
+        wasRemovedByHostOrModerator: false,
+      });
 
       expect(audit.record.mock.calls[0][0]).toEqual(
         expect.objectContaining({ action: 'guest.removed', actorId: 'mod-1', hostId: 'host-1' }),
       );
       expect(audit.record.mock.calls[1][0]).toEqual(
-        expect.objectContaining({ action: 'guest.left', actorId: 'g1', actorRole: AuditActorRole.USER }),
+        expect.objectContaining({
+          action: 'guest.left',
+          actorId: 'g1',
+          actorRole: AuditActorRole.USER,
+        }),
       );
     });
 
@@ -152,7 +175,9 @@ describe('AuditEventsListener', () => {
         recipientIds: [],
       });
 
-      expect(audit.record.mock.calls[0][0]).toEqual(expect.objectContaining({ action: 'guest.requested', actorId: 'v1' }));
+      expect(audit.record.mock.calls[0][0]).toEqual(
+        expect.objectContaining({ action: 'guest.requested', actorId: 'v1' }),
+      );
       expect(audit.record.mock.calls[1][0]).toEqual(
         expect.objectContaining({
           action: 'guest.invited',
@@ -226,7 +251,10 @@ describe('AuditEventsListener', () => {
         expect.objectContaining({
           action: 'user.permissions_changed',
           actorId: 'admin-1',
-          metadata: { from: [AdminPermission.VIEW_LIVES], to: [AdminPermission.VIEW_LIVES, AdminPermission.MANAGE_LIVES] },
+          metadata: {
+            from: [AdminPermission.VIEW_LIVES],
+            to: [AdminPermission.VIEW_LIVES, AdminPermission.MANAGE_LIVES],
+          },
         }),
       );
     });
@@ -235,7 +263,9 @@ describe('AuditEventsListener', () => {
   it('logs, rather than throws, when building an entry fails', async () => {
     prisma.user.findUnique.mockRejectedValue(new Error('db down'));
 
-    await expect(listener().onFollowed({ followerId: 'u1', followeeId: 'u2' })).resolves.toBeUndefined();
+    await expect(
+      listener().onFollowed({ followerId: 'u1', followeeId: 'u2' }),
+    ).resolves.toBeUndefined();
     expect(audit.record).not.toHaveBeenCalled();
   });
 });

@@ -82,7 +82,6 @@ export const DomainEvents = {
   LiveAccessRevoked: 'live.access_revoked',
 } as const;
 
-
 export type DomainEventName = (typeof DomainEvents)[keyof typeof DomainEvents];
 
 export interface UserRegisteredPayload {
@@ -250,7 +249,13 @@ export interface GuestRequestAcceptedPayload {
   requestId: string;
   userId: string;
   credentials:
-    | { provider: typeof VideoProviderKind.AGORA; appId: string; token: string; uid: number; expiresAt: Date }
+    | {
+        provider: typeof VideoProviderKind.AGORA;
+        appId: string;
+        token: string;
+        uid: number;
+        expiresAt: Date;
+      }
     | { provider: typeof VideoProviderKind.LIVEKIT; url: string; token: string; expiresAt: Date };
 }
 
@@ -488,5 +493,3 @@ export interface DirectMessagesReadPayload {
   readAt: Date;
   readerUnreadCount: number;
 }
-
-

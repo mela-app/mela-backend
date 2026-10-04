@@ -10,7 +10,10 @@ import { AdminGuard } from './admin.guard';
 import { AdminAuditController } from './audit/admin-audit.controller';
 import { AdminAccountController, AdminAuthController } from './auth/admin-auth.controller';
 import { AdminAuthService } from './auth/admin-auth.service';
-import { AdminAlertsController, AdminBannedPhrasesController } from './content/admin-content.controller';
+import {
+  AdminAlertsController,
+  AdminBannedPhrasesController,
+} from './content/admin-content.controller';
 import { AdminContentService } from './content/admin-content.service';
 import { AdminMessagesController } from './messages/admin-messages.controller';
 import { AdminMessagesService } from './messages/admin-messages.service';

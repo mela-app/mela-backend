@@ -1,4 +1,10 @@
-import { BadRequestException, ConflictException, HttpException, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  HttpException,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { JwtService } from '@nestjs/jwt';
@@ -13,7 +19,12 @@ import { AdminAuthService, DEFAULT_ADMIN_SESSION_MAX_AGE_SECONDS } from './admin
 
 describe('AdminAuthService', () => {
   const prisma = {
-    user: { findFirst: jest.fn(), findUnique: jest.fn(), findUniqueOrThrow: jest.fn(), update: jest.fn() },
+    user: {
+      findFirst: jest.fn(),
+      findUnique: jest.fn(),
+      findUniqueOrThrow: jest.fn(),
+      update: jest.fn(),
+    },
     userSession: { findUnique: jest.fn(), findMany: jest.fn(), deleteMany: jest.fn() },
   };
   const auth = {
@@ -87,12 +98,17 @@ describe('AdminAuthService', () => {
     it('starts a web session for active staff and records the sign-in', async () => {
       prisma.user.findFirst.mockResolvedValue(account());
 
-      const session = await (await makeService()).signIn({ email: 'Admin@Example.com', password: 'Current-password-1' });
+      const session = await (
+        await makeService()
+      ).signIn({ email: 'Admin@Example.com', password: 'Current-password-1' });
 
       expect(prisma.user.findFirst).toHaveBeenCalledWith({
         where: { email: { equals: 'Admin@Example.com', mode: 'insensitive' } },
       });
-      expect(auth.startSessionFor).toHaveBeenCalledWith(expect.objectContaining({ id: 'admin-1' }), SessionPlatform.WEB);
+      expect(auth.startSessionFor).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'admin-1' }),
+        SessionPlatform.WEB,
+      );
       expect(prisma.user.update).toHaveBeenCalledWith({
         where: { id: 'admin-1' },
         data: { lastLoginAt: expect.any(Date) },
@@ -111,38 +127,61 @@ describe('AdminAuthService', () => {
       prisma.user.findFirst.mockResolvedValue(moderator);
       prisma.user.update.mockResolvedValue(moderator);
 
-      const session = await (await makeService()).signIn({ email: 'admin@example.com', password: 'Current-password-1' });
+      const session = await (
+        await makeService()
+      ).signIn({ email: 'admin@example.com', password: 'Current-password-1' });
 
-      expect(session.admin.permissions).toEqual([AdminPermission.VIEW_USERS, AdminPermission.MANAGE_USERS]);
+      expect(session.admin.permissions).toEqual([
+        AdminPermission.VIEW_USERS,
+        AdminPermission.MANAGE_USERS,
+      ]);
     });
 
     it.each([
       ['a wrong password', () => account(), 'wrong-password-1'],
-      ['a regular app user', () => account({ platformRole: PlatformRole.USER }), 'Current-password-1'],
-      ['a suspended staff member', () => account({ status: UserStatus.SUSPENDED }), 'Current-password-1'],
+      [
+        'a regular app user',
+        () => account({ platformRole: PlatformRole.USER }),
+        'Current-password-1',
+      ],
+      [
+        'a suspended staff member',
+        () => account({ status: UserStatus.SUSPENDED }),
+        'Current-password-1',
+      ],
       ['an unknown email', () => null, 'Current-password-1'],
     ])('gives %s the same generic refusal', async (_case, row, password) => {
       prisma.user.findFirst.mockResolvedValue(row());
 
-      await expect((await makeService()).signIn({ email: 'admin@example.com', password })).rejects.toThrow(
-        new UnauthorizedException('Incorrect email or password'),
-      );
+      await expect(
+        (await makeService()).signIn({ email: 'admin@example.com', password }),
+      ).rejects.toThrow(new UnauthorizedException('Incorrect email or password'));
       expect(auth.startSessionFor).not.toHaveBeenCalled();
-      expect(events.emit).toHaveBeenCalledWith('admin.sign_in_failed', { email: 'admin@example.com' });
+      expect(events.emit).toHaveBeenCalledWith('admin.sign_in_failed', {
+        email: 'admin@example.com',
+      });
     });
 
     it('slows down repeated attempts on one account without checking the password', async () => {
       rateLimit.take.mockResolvedValue(150_000);
 
-      const error = await (await makeService())
+      const error = await (
+        await makeService()
+      )
         .signIn({ email: 'Admin@Example.com', password: 'anything' })
         .catch((e: unknown) => e);
 
-      expect(rateLimit.take).toHaveBeenCalledWith('admin-sign-in:admin@example.com', expect.any(Object));
+      expect(rateLimit.take).toHaveBeenCalledWith(
+        'admin-sign-in:admin@example.com',
+        expect.any(Object),
+      );
       expect(error).toBeInstanceOf(HttpException);
       expect((error as HttpException).getStatus()).toBe(429);
       expect((error as HttpException).getResponse()).toEqual(
-        expect.objectContaining({ code: 'TOO_MANY_ATTEMPTS', message: expect.stringContaining('3 minutes') }),
+        expect.objectContaining({
+          code: 'TOO_MANY_ATTEMPTS',
+          message: expect.stringContaining('3 minutes'),
+        }),
       );
       expect(prisma.user.findFirst).not.toHaveBeenCalled();
       expect(events.emit).toHaveBeenCalledWith('admin.sign_in_failed', {
@@ -156,7 +195,10 @@ describe('AdminAuthService', () => {
       prisma.user.findFirst.mockResolvedValue(account());
 
       await expect(
-        (await makeService()).signIn({ email: 'admin@example.com', password: 'Current-password-1' }),
+        (await makeService()).signIn({
+          email: 'admin@example.com',
+          password: 'Current-password-1',
+        }),
       ).resolves.toEqual(expect.objectContaining({ tokens }));
     });
   });
@@ -171,7 +213,10 @@ describe('AdminAuthService', () => {
     });
 
     it("won't turn an app session into a console session", async () => {
-      prisma.userSession.findUnique.mockResolvedValue({ createdAt: new Date(), platform: SessionPlatform.ANDROID });
+      prisma.userSession.findUnique.mockResolvedValue({
+        createdAt: new Date(),
+        platform: SessionPlatform.ANDROID,
+      });
 
       await expect((await makeService()).refresh('refresh')).rejects.toThrow(UnauthorizedException);
       expect(auth.refresh).not.toHaveBeenCalled();
@@ -179,7 +224,10 @@ describe('AdminAuthService', () => {
 
     it('ends a console session past its maximum age, however active', async () => {
       const tooOld = new Date(Date.now() - (DEFAULT_ADMIN_SESSION_MAX_AGE_SECONDS + 60) * 1000);
-      prisma.userSession.findUnique.mockResolvedValue({ createdAt: tooOld, platform: SessionPlatform.WEB });
+      prisma.userSession.findUnique.mockResolvedValue({
+        createdAt: tooOld,
+        platform: SessionPlatform.WEB,
+      });
 
       await expect((await makeService()).refresh('refresh')).rejects.toThrow(/expired/);
       expect(auth.endSession).toHaveBeenCalledWith('refresh');
@@ -187,7 +235,10 @@ describe('AdminAuthService', () => {
     });
 
     it('rotates a live console session', async () => {
-      prisma.userSession.findUnique.mockResolvedValue({ createdAt: new Date(), platform: SessionPlatform.WEB });
+      prisma.userSession.findUnique.mockResolvedValue({
+        createdAt: new Date(),
+        platform: SessionPlatform.WEB,
+      });
       prisma.user.findUnique.mockResolvedValue(account());
 
       const session = await (await makeService()).refresh('refresh');
@@ -197,7 +248,10 @@ describe('AdminAuthService', () => {
     });
 
     it('ends the session of someone no longer staff', async () => {
-      prisma.userSession.findUnique.mockResolvedValue({ createdAt: new Date(), platform: SessionPlatform.WEB });
+      prisma.userSession.findUnique.mockResolvedValue({
+        createdAt: new Date(),
+        platform: SessionPlatform.WEB,
+      });
       prisma.user.findUnique.mockResolvedValue(account({ platformRole: PlatformRole.USER }));
 
       await expect((await makeService()).refresh('refresh')).rejects.toThrow(UnauthorizedException);
@@ -208,14 +262,20 @@ describe('AdminAuthService', () => {
   describe('changing credentials', () => {
     it('needs the current password', async () => {
       await expect(
-        (await makeService()).changePassword(admin, { currentPassword: 'nope', newPassword: 'A-new-password-2' }),
+        (await makeService()).changePassword(admin, {
+          currentPassword: 'nope',
+          newPassword: 'A-new-password-2',
+        }),
       ).rejects.toThrow(new BadRequestException('Your current password is incorrect'));
       expect(prisma.user.update).not.toHaveBeenCalled();
     });
 
     it('explains what is wrong with a weak new password', async () => {
       await expect(
-        (await makeService()).changePassword(admin, { currentPassword: 'Current-password-1', newPassword: 'short1' }),
+        (await makeService()).changePassword(admin, {
+          currentPassword: 'Current-password-1',
+          newPassword: 'short1',
+        }),
       ).rejects.toThrow(/at least 12 characters/);
     });
 
@@ -231,7 +291,9 @@ describe('AdminAuthService', () => {
     it('replaces the password, clears the first-sign-in flag and signs other devices out', async () => {
       prisma.user.findUniqueOrThrow.mockResolvedValue(account({ passwordChangeRequired: true }));
 
-      const view = await (await makeService()).changePassword(admin, {
+      const view = await (
+        await makeService()
+      ).changePassword(admin, {
         currentPassword: 'Current-password-1',
         newPassword: 'A-new-password-2',
       });
@@ -248,19 +310,27 @@ describe('AdminAuthService', () => {
       prisma.user.findFirst.mockResolvedValue({ id: 'someone-else' });
 
       await expect(
-        (await makeService()).changeEmail(admin, { email: 'taken@example.com', currentPassword: 'Current-password-1' }),
+        (await makeService()).changeEmail(admin, {
+          email: 'taken@example.com',
+          currentPassword: 'Current-password-1',
+        }),
       ).rejects.toThrow(ConflictException);
     });
 
     it('changes the email after checking the password', async () => {
       prisma.user.findFirst.mockResolvedValue(null);
 
-      const view = await (await makeService()).changeEmail(admin, {
+      const view = await (
+        await makeService()
+      ).changeEmail(admin, {
         email: 'new@example.com',
         currentPassword: 'Current-password-1',
       });
 
-      expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: 'admin-1' }, data: { email: 'new@example.com' } });
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'admin-1' },
+        data: { email: 'new@example.com' },
+      });
       expect(events.emit).toHaveBeenCalledWith('account.email_changed', { userId: 'admin-1' });
       expect(view.email).toBe('new@example.com');
     });
@@ -287,7 +357,9 @@ describe('AdminAuthService', () => {
 
       prisma.userSession.deleteMany.mockResolvedValue({ count: 1 });
       await expect(service.revokeSession(admin, 'session-2')).resolves.toEqual({ ok: true });
-      expect(prisma.userSession.deleteMany).toHaveBeenLastCalledWith({ where: { id: 'session-2', userId: 'admin-1' } });
+      expect(prisma.userSession.deleteMany).toHaveBeenLastCalledWith({
+        where: { id: 'session-2', userId: 'admin-1' },
+      });
     });
   });
 });

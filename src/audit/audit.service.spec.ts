@@ -20,7 +20,10 @@ describe('AuditService', () => {
 
   describe('record', () => {
     it('files the entry under its category, with who, from where', async () => {
-      prisma.user.findUnique.mockResolvedValue({ username: 'admin', platformRole: PlatformRole.SUPER_ADMIN });
+      prisma.user.findUnique.mockResolvedValue({
+        username: 'admin',
+        platformRole: PlatformRole.SUPER_ADMIN,
+      });
 
       await RequestContext.run({ ip: '203.0.113.9', userAgent: 'Firefox', surface: 'admin' }, () =>
         service().record({
@@ -49,17 +52,31 @@ describe('AuditService', () => {
     });
 
     it('tells the host of a live apart from their moderators', async () => {
-      prisma.user.findUnique.mockResolvedValue({ username: 'ana', platformRole: PlatformRole.USER });
+      prisma.user.findUnique.mockResolvedValue({
+        username: 'ana',
+        platformRole: PlatformRole.USER,
+      });
 
-      await service().record({ action: 'moderation.chat_muted', actorId: 'host-1', hostId: 'host-1' });
-      await service().record({ action: 'moderation.chat_muted', actorId: 'mod-1', hostId: 'host-1' });
+      await service().record({
+        action: 'moderation.chat_muted',
+        actorId: 'host-1',
+        hostId: 'host-1',
+      });
+      await service().record({
+        action: 'moderation.chat_muted',
+        actorId: 'mod-1',
+        hostId: 'host-1',
+      });
 
       expect(prisma.auditLog.create.mock.calls[0][0].data.actorRole).toBe(AuditActorRole.HOST);
       expect(prisma.auditLog.create.mock.calls[1][0].data.actorRole).toBe(AuditActorRole.MODERATOR);
     });
 
     it("doesn't credit an app action to staff powers just because the actor is staff", async () => {
-      prisma.user.findUnique.mockResolvedValue({ username: 'admin', platformRole: PlatformRole.SUPER_ADMIN });
+      prisma.user.findUnique.mockResolvedValue({
+        username: 'admin',
+        platformRole: PlatformRole.SUPER_ADMIN,
+      });
 
       await RequestContext.run({ surface: 'app' }, () =>
         service().record({ action: 'social.followed', actorId: 'admin-1' }),
@@ -73,7 +90,9 @@ describe('AuditService', () => {
 
       await service().record({ action: 'stream.ended', actorId: 'deleted-user' });
 
-      expect(written()).toEqual(expect.objectContaining({ actorId: null, actorRole: AuditActorRole.SYSTEM }));
+      expect(written()).toEqual(
+        expect.objectContaining({ actorId: null, actorRole: AuditActorRole.SYSTEM }),
+      );
     });
 
     it('keeps long free text within bounds', async () => {
@@ -86,7 +105,9 @@ describe('AuditService', () => {
     it('never fails the action it describes', async () => {
       prisma.auditLog.create.mockRejectedValue(new Error('db down'));
 
-      await expect(service().record({ action: 'auth.signed_in', actorId: null })).resolves.toBeUndefined();
+      await expect(
+        service().record({ action: 'auth.signed_in', actorId: null }),
+      ).resolves.toBeUndefined();
     });
   });
 
@@ -115,7 +136,9 @@ describe('AuditService', () => {
           },
         ],
       });
-      expect(prisma.auditLog.findMany).toHaveBeenCalledWith(expect.objectContaining({ skip: 50, take: 50 }));
+      expect(prisma.auditLog.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ skip: 50, take: 50 }),
+      );
     });
 
     it('searches the words people see, not just the stored codes', async () => {
@@ -131,7 +154,9 @@ describe('AuditService', () => {
     });
 
     it('labels each entry for display', async () => {
-      prisma.auditLog.findMany.mockResolvedValue([{ id: 'a1', action: 'stream.locked', category: AuditCategory.STREAM }]);
+      prisma.auditLog.findMany.mockResolvedValue([
+        { id: 'a1', action: 'stream.locked', category: AuditCategory.STREAM },
+      ]);
 
       const page = await service().list({ page: 1, pageSize: 25 });
 

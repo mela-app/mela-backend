@@ -120,9 +120,13 @@ export class AgoraVideoProvider implements VideoProvider {
   async closeChannel(): Promise<void> {}
 
   private buildPlaceholderToken(params: MintTokenParams, expiresAt: Date): string {
-    const payload = [params.channelName, params.userId, params.role, expiresAt.getTime(), randomBytes(8).toString('hex')].join(
-      ':',
-    );
+    const payload = [
+      params.channelName,
+      params.userId,
+      params.role,
+      expiresAt.getTime(),
+      randomBytes(8).toString('hex'),
+    ].join(':');
     const encodedPayload = Buffer.from(payload).toString('base64url');
 
     if (!this.appCertificate) {

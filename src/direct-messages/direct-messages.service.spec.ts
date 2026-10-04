@@ -393,7 +393,10 @@ describe('DirectMessagesService', () => {
       where: {
         recipientId: ANA,
         readAt: null,
-        sender: { blockedBy: { none: { blockerId: ANA } }, blocksMade: { none: { blockedId: ANA } } },
+        sender: {
+          blockedBy: { none: { blockerId: ANA } },
+          blocksMade: { none: { blockedId: ANA } },
+        },
       },
     });
   });

@@ -28,7 +28,12 @@ describe('AuthService', () => {
   };
   const config = { get: () => undefined };
   const events = { emit: jest.fn() };
-  const activeUser = { id: 'u1', username: 'alice', platformRole: PlatformRole.USER, status: UserStatus.ACTIVE };
+  const activeUser = {
+    id: 'u1',
+    username: 'alice',
+    platformRole: PlatformRole.USER,
+    status: UserStatus.ACTIVE,
+  };
 
   function makeService() {
     return new AuthService(
@@ -54,7 +59,11 @@ describe('AuthService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     signed = 0;
-    prisma.user.create.mockResolvedValue({ id: 'new-user', username: 'a', platformRole: PlatformRole.USER });
+    prisma.user.create.mockResolvedValue({
+      id: 'new-user',
+      username: 'a',
+      platformRole: PlatformRole.USER,
+    });
     prisma.user.update.mockResolvedValue({});
     prisma.userSession.create.mockResolvedValue({});
     prisma.userSession.updateMany.mockResolvedValue({ count: 1 });
@@ -66,7 +75,12 @@ describe('AuthService', () => {
     prisma.user.findFirst.mockResolvedValue({ id: 'existing' });
 
     await expect(
-      makeService().signup({ username: 'a', displayName: 'A', email: 'a@a.com', password: 'password123' }),
+      makeService().signup({
+        username: 'a',
+        displayName: 'A',
+        email: 'a@a.com',
+        password: 'password123',
+      }),
     ).rejects.toThrow(ConflictException);
   });
 
@@ -82,7 +96,10 @@ describe('AuthService', () => {
     });
 
     expect(result).toEqual({ accessToken: expect.any(String), refreshToken: expect.any(String) });
-    expect(events.emit).toHaveBeenCalledWith('user.registered', expect.objectContaining({ userId: 'new-user' }));
+    expect(events.emit).toHaveBeenCalledWith(
+      'user.registered',
+      expect.objectContaining({ userId: 'new-user' }),
+    );
     expect(prisma.userSession.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         userId: 'new-user',
@@ -118,32 +135,58 @@ describe('AuthService', () => {
     expect(prisma.userSession.create).not.toHaveBeenCalled();
 
     // A wrong password must not reveal that the account exists, suspended or not.
-    await expect(makeService().login({ usernameOrEmail: 'alice', password: 'wrong-password' })).rejects.toThrow(
-      UnauthorizedException,
-    );
+    await expect(
+      makeService().login({ usernameOrEmail: 'alice', password: 'wrong-password' }),
+    ).rejects.toThrow(UnauthorizedException);
   });
 
   it('records the sign-in time and announces the login', async () => {
-    prisma.user.findFirst.mockResolvedValue({ ...activeUser, passwordHash: await argon2.hash('password123') });
+    prisma.user.findFirst.mockResolvedValue({
+      ...activeUser,
+      passwordHash: await argon2.hash('password123'),
+    });
 
-    await makeService().login({ usernameOrEmail: 'alice', password: 'password123', platform: SessionPlatform.IOS });
+    await makeService().login({
+      usernameOrEmail: 'alice',
+      password: 'password123',
+      platform: SessionPlatform.IOS,
+    });
 
-    expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: 'u1' }, data: { lastLoginAt: expect.any(Date) } });
-    expect(events.emit).toHaveBeenCalledWith('user.logged_in', { userId: 'u1', platform: SessionPlatform.IOS });
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'u1' },
+      data: { lastLoginAt: expect.any(Date) },
+    });
+    expect(events.emit).toHaveBeenCalledWith('user.logged_in', {
+      userId: 'u1',
+      platform: SessionPlatform.IOS,
+    });
   });
 
   it('gives each login its own session, so a second device never signs the first out', async () => {
-    prisma.user.findFirst.mockResolvedValue({ ...activeUser, passwordHash: await argon2.hash('password123') });
+    prisma.user.findFirst.mockResolvedValue({
+      ...activeUser,
+      passwordHash: await argon2.hash('password123'),
+    });
     const service = makeService();
 
-    await service.login({ usernameOrEmail: 'alice', password: 'password123', platform: SessionPlatform.ANDROID });
-    await service.login({ usernameOrEmail: 'alice', password: 'password123', platform: SessionPlatform.IOS });
+    await service.login({
+      usernameOrEmail: 'alice',
+      password: 'password123',
+      platform: SessionPlatform.ANDROID,
+    });
+    await service.login({
+      usernameOrEmail: 'alice',
+      password: 'password123',
+      platform: SessionPlatform.IOS,
+    });
 
     const created = prisma.userSession.create.mock.calls.map(([args]) => args.data);
     expect(created).toHaveLength(2);
     expect(created[0].id).not.toBe(created[1].id);
     expect(prisma.userSession.updateMany).not.toHaveBeenCalled();
-    expect(prisma.userSession.deleteMany).not.toHaveBeenCalledWith({ where: { id: created[0].id } });
+    expect(prisma.userSession.deleteMany).not.toHaveBeenCalledWith({
+      where: { id: created[0].id },
+    });
   });
 
   it('rotates the refresh token and remembers the previous one for the grace window', async () => {
@@ -163,7 +206,10 @@ describe('AuthService', () => {
 
   it('accepts the just-rotated token again within the grace window (lost response on a flaky network)', async () => {
     prisma.userSession.findUnique.mockResolvedValue(
-      sessionRow({ refreshTokenHash: hashToken('newer-token'), previousRefreshTokenHash: hashToken('current-token') }),
+      sessionRow({
+        refreshTokenHash: hashToken('newer-token'),
+        previousRefreshTokenHash: hashToken('current-token'),
+      }),
     );
 
     await expect(makeService().refresh('current-token')).resolves.toEqual(
@@ -207,12 +253,15 @@ describe('AuthService', () => {
   });
 
   it('when two refreshes race, the loser retries against the rotated row instead of failing', async () => {
-    prisma.userSession.findUnique
-      .mockResolvedValueOnce(sessionRow())
-      .mockResolvedValueOnce(
-        sessionRow({ refreshTokenHash: hashToken('winner-token'), previousRefreshTokenHash: hashToken('current-token') }),
-      );
-    prisma.userSession.updateMany.mockResolvedValueOnce({ count: 0 }).mockResolvedValueOnce({ count: 1 });
+    prisma.userSession.findUnique.mockResolvedValueOnce(sessionRow()).mockResolvedValueOnce(
+      sessionRow({
+        refreshTokenHash: hashToken('winner-token'),
+        previousRefreshTokenHash: hashToken('current-token'),
+      }),
+    );
+    prisma.userSession.updateMany
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 1 });
 
     await expect(makeService().refresh('current-token')).resolves.toEqual(
       expect.objectContaining({ accessToken: expect.any(String) }),
@@ -223,8 +272,13 @@ describe('AuthService', () => {
   it('logout ends only the session behind that refresh token, even if it has expired', async () => {
     await makeService().logout('current-token');
 
-    expect(jwtService.verifyAsync).toHaveBeenCalledWith('current-token', expect.objectContaining({ ignoreExpiration: true }));
-    expect(prisma.userSession.deleteMany).toHaveBeenCalledWith({ where: { id: 's1', userId: 'u1' } });
+    expect(jwtService.verifyAsync).toHaveBeenCalledWith(
+      'current-token',
+      expect.objectContaining({ ignoreExpiration: true }),
+    );
+    expect(prisma.userSession.deleteMany).toHaveBeenCalledWith({
+      where: { id: 's1', userId: 'u1' },
+    });
   });
 
   it('logout with a garbage token quietly does nothing', async () => {

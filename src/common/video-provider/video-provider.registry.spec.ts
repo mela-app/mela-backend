@@ -8,7 +8,10 @@ describe('VideoProviderRegistry', () => {
 
   function makeRegistry(videoProvider: string | undefined, livekitConfigured = true) {
     const config = { get: () => videoProvider } as unknown as ConfigService;
-    const livekit = { kind: 'LIVEKIT', isConfigured: livekitConfigured } as unknown as LiveKitVideoProvider;
+    const livekit = {
+      kind: 'LIVEKIT',
+      isConfigured: livekitConfigured,
+    } as unknown as LiveKitVideoProvider;
     return new VideoProviderRegistry(config, agora, livekit);
   }
 

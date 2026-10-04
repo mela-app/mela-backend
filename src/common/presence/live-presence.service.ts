@@ -13,7 +13,8 @@ export const ARRIVAL_NOTICE_TTL_SECONDS = 600;
 /** Ids of the share page's viewers without an account: counted as viewers, never listed. */
 export const ANONYMOUS_VIEWER_PREFIX = 'web-';
 
-export const isAnonymousViewer = (viewerId: string): boolean => viewerId.startsWith(ANONYMOUS_VIEWER_PREFIX);
+export const isAnonymousViewer = (viewerId: string): boolean =>
+  viewerId.startsWith(ANONYMOUS_VIEWER_PREFIX);
 
 // A paused host gets the longer window, so pausing to step away doesn't end the live.
 const TOUCH_HOST = `
@@ -214,4 +215,5 @@ const hostAliveKey = (streamId: string) => `stream:${streamId}:host_alive`;
 const hostAwayKey = (streamId: string) => `stream:${streamId}:host_away`;
 const pausedKey = (streamId: string) => `stream:${streamId}:paused`;
 const likesKey = (streamId: string) => `stream:${streamId}:likes`;
-const arrivalNoticeKey = (streamId: string, userId: string) => `stream:${streamId}:arrival_notice:${userId}`;
+const arrivalNoticeKey = (streamId: string, userId: string) =>
+  `stream:${streamId}:arrival_notice:${userId}`;

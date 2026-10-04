@@ -18,7 +18,13 @@ export interface MintTokenParams {
  * *is* `userId` already - see `agoraUidFor()`).
  */
 export type VideoCredentials =
-  | { provider: typeof VideoProviderKind.AGORA; appId: string; token: string; uid: number; expiresAt: Date }
+  | {
+      provider: typeof VideoProviderKind.AGORA;
+      appId: string;
+      token: string;
+      uid: number;
+      expiresAt: Date;
+    }
   | { provider: typeof VideoProviderKind.LIVEKIT; url: string; token: string; expiresAt: Date };
 
 /** What a client needs before joining anything (the pre-live camera preview). */
@@ -46,4 +52,3 @@ export interface VideoProvider {
   // Ends all media in the channel (stream ended or locked).
   closeChannel(channelName: string): Promise<void>;
 }
-

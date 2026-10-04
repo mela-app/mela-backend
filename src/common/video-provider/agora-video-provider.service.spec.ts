@@ -80,9 +80,21 @@ describe('AgoraVideoProvider', () => {
   it('mints the same uid for the same user every time, and different uids for different users', async () => {
     const provider = makeProvider();
 
-    const first = await provider.mintToken({ channelName: 's1', userId: 'user-1', role: 'audience' });
-    const again = await provider.mintToken({ channelName: 's2', userId: 'user-1', role: 'publisher' });
-    const other = await provider.mintToken({ channelName: 's1', userId: 'user-2', role: 'audience' });
+    const first = await provider.mintToken({
+      channelName: 's1',
+      userId: 'user-1',
+      role: 'audience',
+    });
+    const again = await provider.mintToken({
+      channelName: 's2',
+      userId: 'user-1',
+      role: 'publisher',
+    });
+    const other = await provider.mintToken({
+      channelName: 's1',
+      userId: 'user-2',
+      role: 'audience',
+    });
 
     expect(first.uid).toBe(again.uid);
     expect(first.uid).not.toBe(other.uid);

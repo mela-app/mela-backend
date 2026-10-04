@@ -3,11 +3,17 @@ import { RoomChatMutesService } from './room-chat-mutes.service';
 
 describe('RoomChatMutesService', () => {
   const prisma = {
-    roomChatMute: { upsert: jest.fn(), deleteMany: jest.fn(), findFirst: jest.fn(), findMany: jest.fn() },
+    roomChatMute: {
+      upsert: jest.fn(),
+      deleteMany: jest.fn(),
+      findFirst: jest.fn(),
+      findMany: jest.fn(),
+    },
   };
   const events = { emit: jest.fn() };
 
-  const service = () => new RoomChatMutesService(prisma as unknown as PrismaService, events as never);
+  const service = () =>
+    new RoomChatMutesService(prisma as unknown as PrismaService, events as never);
 
   beforeEach(() => jest.clearAllMocks());
 
@@ -37,7 +43,10 @@ describe('RoomChatMutesService', () => {
       expect(prisma.roomChatMute.upsert).toHaveBeenCalledWith(
         expect.objectContaining({ create: expect.objectContaining({ expiresAt: null }) }),
       );
-      expect(events.emit).toHaveBeenCalledWith('room_chat_mute.changed', expect.objectContaining({ mutedUntil: null }));
+      expect(events.emit).toHaveBeenCalledWith(
+        'room_chat_mute.changed',
+        expect.objectContaining({ mutedUntil: null }),
+      );
     });
   });
 
@@ -47,7 +56,9 @@ describe('RoomChatMutesService', () => {
 
       await service().unmute('s1', 'troll-1', 'host-1');
 
-      expect(prisma.roomChatMute.deleteMany).toHaveBeenCalledWith({ where: { streamId: 's1', userId: 'troll-1' } });
+      expect(prisma.roomChatMute.deleteMany).toHaveBeenCalledWith({
+        where: { streamId: 's1', userId: 'troll-1' },
+      });
       expect(events.emit).toHaveBeenCalledWith('room_chat_mute.changed', {
         streamId: 's1',
         userId: 'troll-1',
@@ -89,7 +100,15 @@ describe('RoomChatMutesService', () => {
       ]);
 
       await expect(service().listActive('s1')).resolves.toEqual({
-        items: [{ id: 'troll-1', username: 'troll', displayName: 'Troll', avatarUrl: null, mutedUntil: until }],
+        items: [
+          {
+            id: 'troll-1',
+            username: 'troll',
+            displayName: 'Troll',
+            avatarUrl: null,
+            mutedUntil: until,
+          },
+        ],
       });
       expect(prisma.roomChatMute.findMany.mock.calls[0][0].where.OR).toHaveLength(2);
     });

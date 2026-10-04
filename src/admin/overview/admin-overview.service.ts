@@ -35,17 +35,27 @@ export class AdminOverviewService {
         host: { select: { id: true, username: true, displayName: true, avatarUrl: true } },
       },
     });
-    const [viewerCounts, users, newUsers, suspendedUsers, messages, streamsStarted, alertsSent, daily] =
-      await Promise.all([
-        this.presence.viewerCounts(lives.map((live) => live.id)).catch(() => new Map<string, number>()),
-        this.prisma.user.count(),
-        this.prisma.user.count({ where: { createdAt: { gte: since } } }),
-        this.prisma.user.count({ where: { status: UserStatus.SUSPENDED } }),
-        this.prisma.chatMessage.count({ where: { createdAt: { gte: since } } }),
-        this.prisma.stream.count({ where: { startedAt: { gte: since } } }),
-        this.prisma.adminAlert.count({ where: { createdAt: { gte: since } } }),
-        this.dailySeries(),
-      ]);
+    const [
+      viewerCounts,
+      users,
+      newUsers,
+      suspendedUsers,
+      messages,
+      streamsStarted,
+      alertsSent,
+      daily,
+    ] = await Promise.all([
+      this.presence
+        .viewerCounts(lives.map((live) => live.id))
+        .catch(() => new Map<string, number>()),
+      this.prisma.user.count(),
+      this.prisma.user.count({ where: { createdAt: { gte: since } } }),
+      this.prisma.user.count({ where: { status: UserStatus.SUSPENDED } }),
+      this.prisma.chatMessage.count({ where: { createdAt: { gte: since } } }),
+      this.prisma.stream.count({ where: { startedAt: { gte: since } } }),
+      this.prisma.adminAlert.count({ where: { createdAt: { gte: since } } }),
+      this.dailySeries(),
+    ]);
 
     const liveNow = lives
       .map((live) => ({ ...live, viewerCount: viewerCounts.get(live.id) ?? 0 }))

@@ -1,6 +1,12 @@
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { AlertScope, AlertSeverity, RoomBanScope, StreamEndReason, StreamLayout } from '@prisma/client';
+import {
+  AlertScope,
+  AlertSeverity,
+  RoomBanScope,
+  StreamEndReason,
+  StreamLayout,
+} from '@prisma/client';
 import { Server } from 'socket.io';
 import { AuthService } from '../auth/auth.service';
 import { WatchTicketService } from '../auth/watch-ticket.service';
@@ -24,7 +30,12 @@ type EventMiddleware = (packet: unknown[], next: () => void) => void;
 
 interface FakeSocket {
   id: string;
-  data: { userId: string; viewingStreamId?: string; hostingStreamId?: string; watchOnly?: { streamId: string } };
+  data: {
+    userId: string;
+    viewingStreamId?: string;
+    hostingStreamId?: string;
+    watchOnly?: { streamId: string };
+  };
   handshake: { auth: { token?: string; watchTicket?: string }; headers: Record<string, string> };
   rooms: Set<string>;
   join: jest.Mock;
@@ -199,7 +210,10 @@ describe('RealtimeGateway', () => {
       const middleware = socket.use.mock.calls[0][0] as EventMiddleware;
       return (event, ack) => {
         let passed = false;
-        middleware(ack ? [event, { streamId: LIVE }, ack] : [event, { streamId: LIVE }], () => (passed = true));
+        middleware(
+          ack ? [event, { streamId: LIVE }, ack] : [event, { streamId: LIVE }],
+          () => (passed = true),
+        );
         return passed;
       };
     }
@@ -212,7 +226,13 @@ describe('RealtimeGateway', () => {
       expect(socket.join).not.toHaveBeenCalled();
       expect(allows('stream:watch')).toBe(true);
       expect(allows('stream:leave')).toBe(true);
-      for (const event of ['stream:join', 'chat:send', 'like:send', 'chat:delete', 'stream:host_join']) {
+      for (const event of [
+        'stream:join',
+        'chat:send',
+        'like:send',
+        'chat:delete',
+        'stream:host_join',
+      ]) {
         expect(allows(event, ack)).toBe(false);
       }
       expect(ack).toHaveBeenLastCalledWith({ ok: false, error: 'NOT_ALLOWED' });
@@ -242,7 +262,9 @@ describe('RealtimeGateway', () => {
     });
 
     it('are held to the live their ticket is for', async () => {
-      const ack = await makeGateway().onStreamWatch(watchSocket(OTHER_LIVE) as never, { streamId: LIVE });
+      const ack = await makeGateway().onStreamWatch(watchSocket(OTHER_LIVE) as never, {
+        streamId: LIVE,
+      });
 
       expect(ack).toEqual({ ok: false, error: 'NOT_ALLOWED' });
       expect(streams.findLive).not.toHaveBeenCalled();
@@ -294,7 +316,7 @@ describe('RealtimeGateway', () => {
       expect(recordingPermissions.isAllowed).toHaveBeenCalledWith(LIVE, 'viewer-1');
     });
 
-    it("tells a joiner about their own chat mute, so a reconnect catches up on one it missed", async () => {
+    it('tells a joiner about their own chat mute, so a reconnect catches up on one it missed', async () => {
       const until = new Date('2026-09-27T12:05:00Z');
       roomChatMutes.findActive.mockResolvedValueOnce({ expiresAt: until });
 
@@ -358,7 +380,9 @@ describe('RealtimeGateway', () => {
       social.isBlockedEitherWay.mockResolvedValueOnce(true);
       const socket = fakeSocket();
 
-      await expect(makeGateway().onStreamJoin(socket as never, { streamId: LIVE })).resolves.toEqual({
+      await expect(
+        makeGateway().onStreamJoin(socket as never, { streamId: LIVE }),
+      ).resolves.toEqual({
         ok: false,
         error: 'NOT_ALLOWED',
       });
@@ -406,10 +430,17 @@ describe('RealtimeGateway', () => {
   });
 
   describe('arrivals', () => {
-    const person = (id: string) => ({ id, username: id, displayName: id.toUpperCase(), avatarUrl: null });
+    const person = (id: string) => ({
+      id,
+      username: id,
+      displayName: id.toUpperCase(),
+      avatarUrl: null,
+    });
 
     beforeEach(() => {
-      streams.participantSummaries.mockImplementation((ids: string[]) => Promise.resolve(ids.map(person)));
+      streams.participantSummaries.mockImplementation((ids: string[]) =>
+        Promise.resolve(ids.map(person)),
+      );
     });
 
     it("announces someone's first arrival in a live to its room", async () => {
@@ -420,7 +451,11 @@ describe('RealtimeGateway', () => {
 
       expect(presence.claimArrivalNotice).toHaveBeenCalledWith(LIVE, 'kebede');
       expect(server.to).toHaveBeenCalledWith(`stream:${LIVE}`);
-      expect(roomEmit).toHaveBeenCalledWith('viewer:joined', { streamId: LIVE, user: person('kebede'), others: 0 });
+      expect(roomEmit).toHaveBeenCalledWith('viewer:joined', {
+        streamId: LIVE,
+        user: person('kebede'),
+        others: 0,
+      });
     });
 
     it('keeps an arrival from anyone blocked either way with them', async () => {
@@ -432,7 +467,11 @@ describe('RealtimeGateway', () => {
 
       expect(social.blockedEitherWayUserIds).toHaveBeenCalledWith('kebede');
       expect(roomExcept).toHaveBeenCalledWith(['user:ex-1']);
-      expect(roomEmit).toHaveBeenCalledWith('viewer:joined', { streamId: LIVE, user: person('kebede'), others: 0 });
+      expect(roomEmit).toHaveBeenCalledWith('viewer:joined', {
+        streamId: LIVE,
+        user: person('kebede'),
+        others: 0,
+      });
     });
 
     it('stays quiet for another device or a reconnect, and for someone announced recently', async () => {
@@ -449,13 +488,16 @@ describe('RealtimeGateway', () => {
     });
 
     it('rolls a burst into one notice at a time: the latest arrival, and how many came with them', async () => {
-      const notices = () => roomEmit.mock.calls.filter(([event]) => event === 'viewer:joined').map(([, body]) => body);
+      const notices = () =>
+        roomEmit.mock.calls.filter(([event]) => event === 'viewer:joined').map(([, body]) => body);
       jest.useFakeTimers();
       try {
         const gateway = makeGateway();
         for (const [index, userId] of ['a', 'b', 'c'].entries()) {
           presence.addViewer.mockResolvedValueOnce({ viewerCount: index + 1, arrived: true });
-          await gateway.onStreamJoin(fakeSocket(userId, `socket-${userId}`) as never, { streamId: LIVE });
+          await gateway.onStreamJoin(fakeSocket(userId, `socket-${userId}`) as never, {
+            streamId: LIVE,
+          });
           await settle();
         }
         expect(notices()).toEqual([{ streamId: LIVE, user: person('a'), others: 0 }]);
@@ -668,7 +710,11 @@ describe('RealtimeGateway', () => {
       chat.send.mockResolvedValue({ ok: true, message, resent: false });
       social.blockedEitherWayUserIds.mockResolvedValueOnce(['ex-1', 'ex-2']);
 
-      await makeGateway().onChatSend(inLive(fakeSocket()) as never, { streamId: LIVE, text: 'gg', clientId: 'c1' });
+      await makeGateway().onChatSend(inLive(fakeSocket()) as never, {
+        streamId: LIVE,
+        text: 'gg',
+        clientId: 'c1',
+      });
 
       expect(social.blockedEitherWayUserIds).toHaveBeenCalledWith('viewer-1');
       expect(othersExcept).toHaveBeenCalledWith(['user:ex-1', 'user:ex-2']);
@@ -739,7 +785,10 @@ describe('RealtimeGateway', () => {
       chat.delete.mockResolvedValue({ ok: true });
       const socket = inLive(fakeSocket());
 
-      const ack = await makeGateway().onChatDelete(socket as never, { streamId: LIVE, messageId: MESSAGE });
+      const ack = await makeGateway().onChatDelete(socket as never, {
+        streamId: LIVE,
+        messageId: MESSAGE,
+      });
 
       expect(ack).toEqual({ ok: true });
       expect(chat.delete).toHaveBeenCalledWith(LIVE, MESSAGE, 'viewer-1');
@@ -747,7 +796,10 @@ describe('RealtimeGateway', () => {
     });
 
     it('refuses a delete from outside the live', async () => {
-      const ack = await makeGateway().onChatDelete(fakeSocket() as never, { streamId: LIVE, messageId: MESSAGE });
+      const ack = await makeGateway().onChatDelete(fakeSocket() as never, {
+        streamId: LIVE,
+        messageId: MESSAGE,
+      });
 
       expect(ack).toEqual({ ok: false, error: 'NOT_IN_ROOM' });
       expect(chat.delete).not.toHaveBeenCalled();
@@ -757,7 +809,10 @@ describe('RealtimeGateway', () => {
       chat.delete.mockResolvedValue({ ok: false, error: 'NOT_FOUND' });
 
       await expect(
-        makeGateway().onChatDelete(inLive(fakeSocket()) as never, { streamId: LIVE, messageId: MESSAGE }),
+        makeGateway().onChatDelete(inLive(fakeSocket()) as never, {
+          streamId: LIVE,
+          messageId: MESSAGE,
+        }),
       ).resolves.toEqual({ ok: false, error: 'NOT_FOUND' });
       expect(roomEmit).not.toHaveBeenCalled();
     });
@@ -766,13 +821,19 @@ describe('RealtimeGateway', () => {
       chat.delete.mockRejectedValue(new Error('db down'));
 
       await expect(
-        makeGateway().onChatDelete(inLive(fakeSocket()) as never, { streamId: LIVE, messageId: MESSAGE }),
+        makeGateway().onChatDelete(inLive(fakeSocket()) as never, {
+          streamId: LIVE,
+          messageId: MESSAGE,
+        }),
       ).resolves.toEqual({ ok: false, error: 'UNAVAILABLE' });
     });
 
     it('rejects a malformed payload', async () => {
       await expect(
-        makeGateway().onChatDelete(inLive(fakeSocket()) as never, { streamId: LIVE, messageId: 42 }),
+        makeGateway().onChatDelete(inLive(fakeSocket()) as never, {
+          streamId: LIVE,
+          messageId: 42,
+        }),
       ).resolves.toEqual({ ok: false, error: 'INVALID_PAYLOAD' });
     });
   });
@@ -849,14 +910,24 @@ describe('RealtimeGateway', () => {
   });
 
   it('broadcasts a chat delete to the room once the domain event fires', () => {
-    makeGateway().handleChatMessageDeleted({ streamId: LIVE, messageId: MESSAGE, actorId: 'host-1' });
+    makeGateway().handleChatMessageDeleted({
+      streamId: LIVE,
+      messageId: MESSAGE,
+      actorId: 'host-1',
+    });
 
     expect(server.to).toHaveBeenCalledWith(`stream:${LIVE}`);
     expect(roomEmit).toHaveBeenCalledWith('chat:deleted', { streamId: LIVE, messageId: MESSAGE });
   });
 
   it('broadcasts a pinned message to the room', () => {
-    const payload = { streamId: LIVE, messageId: MESSAGE, actorId: 'host-1', text: 'hi', senderName: 'Ann' };
+    const payload = {
+      streamId: LIVE,
+      messageId: MESSAGE,
+      actorId: 'host-1',
+      text: 'hi',
+      senderName: 'Ann',
+    };
 
     makeGateway().handleChatMessagePinned(payload);
 
@@ -872,7 +943,12 @@ describe('RealtimeGateway', () => {
   });
 
   it("tells the new moderator's own sockets about a grant, and the room who moderates now", async () => {
-    const payload = { hostId: 'host-1', streamId: LIVE, userId: 'mod-1', capabilities: ['DELETE_MESSAGES'] as never };
+    const payload = {
+      hostId: 'host-1',
+      streamId: LIVE,
+      userId: 'mod-1',
+      capabilities: ['DELETE_MESSAGES'] as never,
+    };
 
     makeGateway().handleModeratorGranted(payload);
     await settle();
@@ -880,7 +956,10 @@ describe('RealtimeGateway', () => {
     expect(server.to).toHaveBeenCalledWith('user:mod-1');
     expect(roomEmit).toHaveBeenCalledWith('moderator:granted', payload);
     expect(server.to).toHaveBeenCalledWith(`stream:${LIVE}`);
-    expect(roomEmit).toHaveBeenCalledWith('stream:moderators', { streamId: LIVE, moderatorIds: ['mod-1'] });
+    expect(roomEmit).toHaveBeenCalledWith('stream:moderators', {
+      streamId: LIVE,
+      moderatorIds: ['mod-1'],
+    });
   });
 
   it("tells only the moderator's own sockets about a capability update", async () => {
@@ -902,7 +981,10 @@ describe('RealtimeGateway', () => {
 
     expect(server.to).toHaveBeenCalledWith('user:mod-1');
     expect(roomEmit).toHaveBeenCalledWith('moderator:revoked', payload);
-    expect(roomEmit).toHaveBeenCalledWith('stream:moderators', { streamId: LIVE, moderatorIds: [] });
+    expect(roomEmit).toHaveBeenCalledWith('stream:moderators', {
+      streamId: LIVE,
+      moderatorIds: [],
+    });
   });
 
   describe('notification created', () => {
@@ -984,7 +1066,13 @@ describe('RealtimeGateway', () => {
     const user = { id: 'g1', username: 'guest', displayName: 'Guest', avatarUrl: null };
 
     it('sends a new request or invite privately to each recipient the emitter computed', () => {
-      const payload = { streamId: LIVE, requestId: 'req-1', initiatedBy: 'VIEWER' as never, user, recipientIds: ['host-1', 'mod-1'] };
+      const payload = {
+        streamId: LIVE,
+        requestId: 'req-1',
+        initiatedBy: 'VIEWER' as never,
+        user,
+        recipientIds: ['host-1', 'mod-1'],
+      };
 
       makeGateway().handleGuestRequestCreated(payload);
 
@@ -1000,7 +1088,12 @@ describe('RealtimeGateway', () => {
         streamId: LIVE,
         requestId: 'req-1',
         userId: 'g1',
-        credentials: { provider: 'LIVEKIT' as const, url: 'wss://lk', token: 't', expiresAt: new Date() },
+        credentials: {
+          provider: 'LIVEKIT' as const,
+          url: 'wss://lk',
+          token: 't',
+          expiresAt: new Date(),
+        },
       };
 
       makeGateway().handleGuestRequestAccepted(payload);
@@ -1020,7 +1113,12 @@ describe('RealtimeGateway', () => {
     });
 
     it('sends a cancellation to each recipient of the original request', () => {
-      const payload = { streamId: LIVE, requestId: 'req-1', initiatedBy: 'HOST' as never, recipientIds: ['g1'] };
+      const payload = {
+        streamId: LIVE,
+        requestId: 'req-1',
+        initiatedBy: 'HOST' as never,
+        recipientIds: ['g1'],
+      };
 
       makeGateway().handleGuestRequestCancelled(payload);
 
@@ -1038,18 +1136,31 @@ describe('RealtimeGateway', () => {
     });
 
     it('announces a removal to the room and tells the removed guest privately', () => {
-      const payload = { streamId: LIVE, hostId: 'host-1', userId: 'g1', wasRemovedByHostOrModerator: true };
+      const payload = {
+        streamId: LIVE,
+        hostId: 'host-1',
+        userId: 'g1',
+        wasRemovedByHostOrModerator: true,
+      };
 
       makeGateway().handleGuestRemoved(payload);
 
       expect(server.to).toHaveBeenCalledWith(`stream:${LIVE}`);
       expect(roomEmit).toHaveBeenCalledWith('guest:removed', payload);
       expect(server.to).toHaveBeenCalledWith('user:g1');
-      expect(roomEmit).toHaveBeenCalledWith('you_were_removed', { streamId: LIVE, hostId: 'host-1' });
+      expect(roomEmit).toHaveBeenCalledWith('you_were_removed', {
+        streamId: LIVE,
+        hostId: 'host-1',
+      });
     });
 
     it('does not privately notify a guest who left on their own', () => {
-      const payload = { streamId: LIVE, hostId: 'host-1', userId: 'g1', wasRemovedByHostOrModerator: false };
+      const payload = {
+        streamId: LIVE,
+        hostId: 'host-1',
+        userId: 'g1',
+        wasRemovedByHostOrModerator: false,
+      };
 
       makeGateway().handleGuestRemoved(payload);
 
@@ -1089,20 +1200,38 @@ describe('RealtimeGateway', () => {
     });
 
     it("tells the guest to turn their mic off and shows everyone it's muted", () => {
-      makeGateway().handleGuestMicForceMuteChanged({ streamId: LIVE, userId: 'g1', actorId: 'host-1', forceMuted: true });
+      makeGateway().handleGuestMicForceMuteChanged({
+        streamId: LIVE,
+        userId: 'g1',
+        actorId: 'host-1',
+        forceMuted: true,
+      });
 
       expect(server.to).toHaveBeenCalledWith('user:g1');
       expect(roomEmit).toHaveBeenCalledWith('force_mute_audio', { streamId: LIVE });
       expect(server.to).toHaveBeenCalledWith(`stream:${LIVE}`);
-      expect(roomEmit).toHaveBeenCalledWith('presence:audio_state', { streamId: LIVE, userId: 'g1', forceMuted: true });
+      expect(roomEmit).toHaveBeenCalledWith('presence:audio_state', {
+        streamId: LIVE,
+        userId: 'g1',
+        forceMuted: true,
+      });
     });
 
     it('only updates everyone when the mic is allowed again - never turns it on', () => {
-      makeGateway().handleGuestMicForceMuteChanged({ streamId: LIVE, userId: 'g1', actorId: 'host-1', forceMuted: false });
+      makeGateway().handleGuestMicForceMuteChanged({
+        streamId: LIVE,
+        userId: 'g1',
+        actorId: 'host-1',
+        forceMuted: false,
+      });
 
       expect(server.to).not.toHaveBeenCalledWith('user:g1');
       expect(roomEmit).toHaveBeenCalledTimes(1);
-      expect(roomEmit).toHaveBeenCalledWith('presence:audio_state', { streamId: LIVE, userId: 'g1', forceMuted: false });
+      expect(roomEmit).toHaveBeenCalledWith('presence:audio_state', {
+        streamId: LIVE,
+        userId: 'g1',
+        forceMuted: false,
+      });
     });
   });
 
@@ -1110,8 +1239,18 @@ describe('RealtimeGateway', () => {
     it('tells only that viewer when the host lets them record, or takes it back', () => {
       const gateway = makeGateway();
 
-      gateway.handleRecordingPermissionChanged({ streamId: LIVE, userId: 'fan-1', actorId: 'host-1', allowed: true });
-      gateway.handleRecordingPermissionChanged({ streamId: LIVE, userId: 'fan-1', actorId: 'host-1', allowed: false });
+      gateway.handleRecordingPermissionChanged({
+        streamId: LIVE,
+        userId: 'fan-1',
+        actorId: 'host-1',
+        allowed: true,
+      });
+      gateway.handleRecordingPermissionChanged({
+        streamId: LIVE,
+        userId: 'fan-1',
+        actorId: 'host-1',
+        allowed: false,
+      });
 
       expect(server.to.mock.calls).toEqual([['user:fan-1'], ['user:fan-1']]);
       expect(roomEmit.mock.calls).toEqual([
@@ -1165,7 +1304,12 @@ describe('RealtimeGateway', () => {
       const socketsLeave = jest.fn();
       server.in.mockReturnValueOnce({ socketsLeave, disconnectSockets: jest.fn() });
 
-      makeGateway().handleLiveAccessRevoked({ streamId: LIVE, hostId: 'host-1', userId: 'ex-1', removedByHost: true });
+      makeGateway().handleLiveAccessRevoked({
+        streamId: LIVE,
+        hostId: 'host-1',
+        userId: 'ex-1',
+        removedByHost: true,
+      });
 
       expect(server.in).toHaveBeenCalledWith('user:ex-1');
       expect(socketsLeave).toHaveBeenCalledWith(`stream:${LIVE}`);
@@ -1181,7 +1325,12 @@ describe('RealtimeGateway', () => {
       const socketsLeave = jest.fn();
       server.in.mockReturnValueOnce({ socketsLeave, disconnectSockets: jest.fn() });
 
-      makeGateway().handleLiveAccessRevoked({ streamId: LIVE, hostId: 'host-1', userId: 'ex-1', removedByHost: false });
+      makeGateway().handleLiveAccessRevoked({
+        streamId: LIVE,
+        hostId: 'host-1',
+        userId: 'ex-1',
+        removedByHost: false,
+      });
 
       expect(socketsLeave).toHaveBeenCalledWith(`stream:${LIVE}`);
       expect(roomEmit).not.toHaveBeenCalled();
@@ -1199,7 +1348,10 @@ describe('RealtimeGateway', () => {
 
       expect(server.to).toHaveBeenCalledWith(`stream:${LIVE}`);
       // Who locked it stays in the console.
-      expect(roomEmit).toHaveBeenCalledWith('stream:locked', { streamId: LIVE, reason: 'Graphic violence' });
+      expect(roomEmit).toHaveBeenCalledWith('stream:locked', {
+        streamId: LIVE,
+        reason: 'Graphic violence',
+      });
     });
 
     it('tells only the host that a locked live was unlocked', () => {
@@ -1249,7 +1401,10 @@ describe('RealtimeGateway', () => {
       });
 
       expect(server.to).not.toHaveBeenCalled();
-      expect(emit).toHaveBeenCalledWith('admin:alert', expect.objectContaining({ id: 'alert-2', scope: 'GLOBAL' }));
+      expect(emit).toHaveBeenCalledWith(
+        'admin:alert',
+        expect.objectContaining({ id: 'alert-2', scope: 'GLOBAL' }),
+      );
     });
 
     it('disconnects every device of a user signed out everywhere', () => {

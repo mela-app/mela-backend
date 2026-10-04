@@ -46,7 +46,9 @@ export class LiveKitVideoProvider implements VideoProvider {
     // The backend can reach LiveKit privately (e.g. http://127.0.0.1:7880 on
     // the same server) while apps use the public wss:// address.
     const apiUrl = config.get<string>('LIVEKIT_API_URL')?.trim() || this.url;
-    this.rooms = this.isConfigured ? new RoomServiceClient(apiUrl, this.apiKey, this.apiSecret) : null;
+    this.rooms = this.isConfigured
+      ? new RoomServiceClient(apiUrl, this.apiKey, this.apiSecret)
+      : null;
   }
 
   get isConfigured(): boolean {
@@ -105,13 +107,19 @@ export class LiveKitVideoProvider implements VideoProvider {
   }
 
   async revokeToken(channelName: string, userId: string): Promise<void> {
-    await this.callRoomService('removeParticipant', (rooms) => rooms.removeParticipant(channelName, userId), {
-      ignoreNotFound: true,
-    });
+    await this.callRoomService(
+      'removeParticipant',
+      (rooms) => rooms.removeParticipant(channelName, userId),
+      {
+        ignoreNotFound: true,
+      },
+    );
   }
 
   async closeChannel(channelName: string): Promise<void> {
-    await this.callRoomService('deleteRoom', (rooms) => rooms.deleteRoom(channelName), { ignoreNotFound: true });
+    await this.callRoomService('deleteRoom', (rooms) => rooms.deleteRoom(channelName), {
+      ignoreNotFound: true,
+    });
   }
 
   private assertConfigured(): void {
@@ -133,7 +141,9 @@ export class LiveKitVideoProvider implements VideoProvider {
       if (ignoreNotFound && error instanceof ServerError && error.code === 'not_found') {
         return;
       }
-      this.logger.error(`LiveKit ${action} failed: ${error instanceof Error ? error.message : error}`);
+      this.logger.error(
+        `LiveKit ${action} failed: ${error instanceof Error ? error.message : error}`,
+      );
       throw new ServiceUnavailableException(UNAVAILABLE_MESSAGE);
     }
   }

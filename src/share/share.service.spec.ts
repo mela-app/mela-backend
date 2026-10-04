@@ -14,7 +14,11 @@ describe('ShareService', () => {
   const prisma = { stream: { findUnique: jest.fn() } };
   const social = { isFriend: jest.fn() };
   const rateLimit = { take: jest.fn().mockResolvedValue(0) };
-  const redisClient = { smembers: jest.fn().mockResolvedValue([]), sadd: jest.fn(), expire: jest.fn() };
+  const redisClient = {
+    smembers: jest.fn().mockResolvedValue([]),
+    sadd: jest.fn(),
+    expire: jest.fn(),
+  };
   const redis = { getClient: () => redisClient } as unknown as RedisService;
   const events = { emit: jest.fn() };
 
@@ -43,7 +47,9 @@ describe('ShareService', () => {
   it('rejects when the per-sender rate limit is hit', async () => {
     rateLimit.take.mockResolvedValue(5000);
 
-    await expect(service().sendInvites(STREAM, SENDER, ['u1'])).rejects.toThrow(BadRequestException);
+    await expect(service().sendInvites(STREAM, SENDER, ['u1'])).rejects.toThrow(
+      BadRequestException,
+    );
   });
 
   it('drops non-friends and never invites yourself, silently', async () => {
@@ -72,7 +78,9 @@ describe('ShareService', () => {
     social.isFriend.mockResolvedValue(true);
     redisClient.smembers.mockResolvedValue(Array.from({ length: 20 }, (_, i) => `already-${i}`));
 
-    await expect(service().sendInvites(STREAM, SENDER, ['new-friend'])).rejects.toThrow(ForbiddenException);
+    await expect(service().sendInvites(STREAM, SENDER, ['new-friend'])).rejects.toThrow(
+      ForbiddenException,
+    );
   });
 
   it('only invites up to the remaining room under the cap', async () => {

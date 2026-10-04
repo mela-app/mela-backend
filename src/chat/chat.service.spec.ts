@@ -40,12 +40,18 @@ describe('ChatService', () => {
   const rateLimit = { take: jest.fn() };
   const streams = { findLive: jest.fn() };
   const realPermissions = new PermissionsService();
-  const permissions = { isHost: jest.fn(), hasChannelCapability: jest.fn(), moderationTargetRefusal: jest.fn() };
+  const permissions = {
+    isHost: jest.fn(),
+    hasChannelCapability: jest.fn(),
+    moderationTargetRefusal: jest.fn(),
+  };
   const moderators = { findActiveGrant: jest.fn(), isActiveModerator: jest.fn() };
   const bannedPhrases = { match: jest.fn(), mask: jest.fn() };
   const events = { emit: jest.fn() };
   const roomChatMutes = { findActive: jest.fn() };
-  const config = { get: (key: string) => (key === 'CHAT_LINK_DOMAINS' ? 'mela.example' : undefined) };
+  const config = {
+    get: (key: string) => (key === 'CHAT_LINK_DOMAINS' ? 'mela.example' : undefined),
+  };
   const storage = {
     publicUrl: jest.fn((key: string) => `https://media.example/${key}`),
     createUploadUrl: jest.fn(),
@@ -75,7 +81,9 @@ describe('ChatService', () => {
       Promise.resolve(row('m1', data.text)),
     );
     streams.findLive.mockResolvedValue({ id: LIVE, hostId: 'host-1' });
-    permissions.isHost.mockImplementation((requesterId: string, hostId: string) => requesterId === hostId);
+    permissions.isHost.mockImplementation(
+      (requesterId: string, hostId: string) => requesterId === hostId,
+    );
     permissions.hasChannelCapability.mockReturnValue(false);
     permissions.moderationTargetRefusal.mockImplementation(
       (requesterId: string, hostId: string, targetId: string, targetIsModerator: boolean) =>
@@ -115,7 +123,11 @@ describe('ChatService', () => {
         { id: 'u-sara', username: 'sara_99' },
       ]);
 
-      const result = await service().send(LIVE, 'user-1', '@kebede and @sara_99 - ask @nobody, not me@home');
+      const result = await service().send(
+        LIVE,
+        'user-1',
+        '@kebede and @sara_99 - ask @nobody, not me@home',
+      );
 
       expect(prisma.user.findMany).toHaveBeenCalledWith({
         where: { username: { in: ['kebede', 'sara_99', 'nobody'], mode: 'insensitive' } },
@@ -167,7 +179,10 @@ describe('ChatService', () => {
     it('refuses someone muted until the live ends with no retry time', async () => {
       roomChatMutes.findActive.mockResolvedValue({ expiresAt: null });
 
-      await expect(service().send(LIVE, 'user-1', 'hello?')).resolves.toEqual({ ok: false, error: 'CHAT_MUTED' });
+      await expect(service().send(LIVE, 'user-1', 'hello?')).resolves.toEqual({
+        ok: false,
+        error: 'CHAT_MUTED',
+      });
     });
 
     it('still answers a resend of a message that went through before the mute', async () => {
@@ -225,9 +240,9 @@ describe('ChatService', () => {
     });
 
     it('lets through links to the platform domains in CHAT_LINK_DOMAINS, subdomains included', async () => {
-      await expect(service().send(LIVE, 'user-1', 'watch at https://share.mela.example/live/1')).resolves.toMatchObject(
-        { ok: true },
-      );
+      await expect(
+        service().send(LIVE, 'user-1', 'watch at https://share.mela.example/live/1'),
+      ).resolves.toMatchObject({ ok: true });
       await expect(service().send(LIVE, 'user-1', 'or mela.example.evil.test')).resolves.toEqual({
         ok: false,
         error: 'LINK_NOT_ALLOWED',
@@ -250,8 +265,9 @@ describe('ChatService', () => {
 
   describe("the host's photos", () => {
     const withPhoto = () =>
-      prisma.chatMessage.create.mockImplementationOnce(({ data }: { data: { text: string; imageUrl?: string } }) =>
-        Promise.resolve({ ...row('m1', data.text), imageUrl: data.imageUrl ?? null }),
+      prisma.chatMessage.create.mockImplementationOnce(
+        ({ data }: { data: { text: string; imageUrl?: string } }) =>
+          Promise.resolve({ ...row('m1', data.text), imageUrl: data.imageUrl ?? null }),
       );
 
     it('posts a photo from the host, with or without a caption', async () => {
@@ -260,14 +276,24 @@ describe('ChatService', () => {
 
       expect(prisma.chatMessage.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: { streamId: LIVE, userId: 'host-1', text: '', imageUrl: `https://media.example/${PHOTO_KEY}` },
+          data: {
+            streamId: LIVE,
+            userId: 'host-1',
+            text: '',
+            imageUrl: `https://media.example/${PHOTO_KEY}`,
+          },
         }),
       );
-      expect(result).toMatchObject({ ok: true, message: { text: '', imageUrl: `https://media.example/${PHOTO_KEY}` } });
+      expect(result).toMatchObject({
+        ok: true,
+        message: { text: '', imageUrl: `https://media.example/${PHOTO_KEY}` },
+      });
       expect(bannedPhrases.match).not.toHaveBeenCalled();
 
       withPhoto();
-      await expect(service().send(LIVE, 'host-1', ' tonight\n', 'c2', PHOTO_KEY)).resolves.toMatchObject({
+      await expect(
+        service().send(LIVE, 'host-1', ' tonight\n', 'c2', PHOTO_KEY),
+      ).resolves.toMatchObject({
         ok: true,
         message: { text: 'tonight' },
       });
@@ -303,14 +329,19 @@ describe('ChatService', () => {
     });
 
     it('still holds a caption to the usual length', async () => {
-      await expect(service().send(LIVE, 'host-1', 'ab'.repeat(101), undefined, PHOTO_KEY)).resolves.toEqual({
+      await expect(
+        service().send(LIVE, 'host-1', 'ab'.repeat(101), undefined, PHOTO_KEY),
+      ).resolves.toEqual({
         ok: false,
         error: 'MESSAGE_TOO_LONG',
       });
     });
 
     it('hands the host an upload for a new photo in this live, and no one else', async () => {
-      storage.createUploadUrl.mockResolvedValue({ uploadUrl: 'https://put.example', publicUrl: 'https://get.example' });
+      storage.createUploadUrl.mockResolvedValue({
+        uploadUrl: 'https://put.example',
+        publicUrl: 'https://get.example',
+      });
 
       const upload = await service().createImageUploadUrl(LIVE, 'host-1', 'image/png');
 
@@ -321,9 +352,13 @@ describe('ChatService', () => {
       });
       expect(storage.createUploadUrl).toHaveBeenCalledWith(upload.imageKey, 'image/png');
 
-      await expect(service().createImageUploadUrl(LIVE, 'user-1', 'image/jpeg')).rejects.toThrow(ForbiddenException);
+      await expect(service().createImageUploadUrl(LIVE, 'user-1', 'image/jpeg')).rejects.toThrow(
+        ForbiddenException,
+      );
       streams.findLive.mockResolvedValueOnce(null);
-      await expect(service().createImageUploadUrl(LIVE, 'host-1', 'image/jpeg')).rejects.toThrow(NotFoundException);
+      await expect(service().createImageUploadUrl(LIVE, 'host-1', 'image/jpeg')).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('pins a photo as one', async () => {
@@ -336,7 +371,10 @@ describe('ChatService', () => {
 
       await service().pin(LIVE, 'm1', 'host-1');
 
-      expect(events.emit).toHaveBeenCalledWith('chat_message.pinned', expect.objectContaining({ text: '📷 Photo' }));
+      expect(events.emit).toHaveBeenCalledWith(
+        'chat_message.pinned',
+        expect.objectContaining({ text: '📷 Photo' }),
+      );
     });
   });
 
@@ -400,14 +438,19 @@ describe('ChatService', () => {
     });
 
     it("looks up every page's mentions in one go", async () => {
-      prisma.chatMessage.findMany.mockResolvedValue([row('m2', 'thanks @ana'), row('m1', '@Ana @bo hi')]);
+      prisma.chatMessage.findMany.mockResolvedValue([
+        row('m2', 'thanks @ana'),
+        row('m1', '@Ana @bo hi'),
+      ]);
       prisma.user.findMany.mockResolvedValue([{ id: 'u-ana', username: 'ana' }]);
 
       const page = await service().history(LIVE, { limit: 50 });
 
       expect(prisma.user.findMany).toHaveBeenCalledTimes(1);
       expect(prisma.user.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { username: { in: ['ana', 'bo'], mode: 'insensitive' } } }),
+        expect.objectContaining({
+          where: { username: { in: ['ana', 'bo'], mode: 'insensitive' } },
+        }),
       );
       expect(page.messages.map((message) => message.mentions)).toEqual([
         [{ id: 'u-ana', username: 'ana' }],
@@ -458,10 +501,16 @@ describe('ChatService', () => {
       canDelete();
       prisma.chatMessage.findFirst.mockResolvedValueOnce({ userId: 'mod-2' });
       moderators.isActiveModerator.mockResolvedValueOnce(true);
-      await expect(service().delete(LIVE, 'm1', 'mod-1')).resolves.toEqual({ ok: false, error: 'NOT_ALLOWED' });
+      await expect(service().delete(LIVE, 'm1', 'mod-1')).resolves.toEqual({
+        ok: false,
+        error: 'NOT_ALLOWED',
+      });
 
       prisma.chatMessage.findFirst.mockResolvedValueOnce({ userId: 'host-1' });
-      await expect(service().delete(LIVE, 'm2', 'mod-1')).resolves.toEqual({ ok: false, error: 'NOT_ALLOWED' });
+      await expect(service().delete(LIVE, 'm2', 'mod-1')).resolves.toEqual({
+        ok: false,
+        error: 'NOT_ALLOWED',
+      });
       expect(prisma.chatMessage.updateMany).not.toHaveBeenCalled();
       expect(events.emit).not.toHaveBeenCalled();
     });
@@ -476,7 +525,10 @@ describe('ChatService', () => {
     });
 
     it('never lets a viewer delete a message, not even their own', async () => {
-      await expect(service().delete(LIVE, 'm1', 'user-1')).resolves.toEqual({ ok: false, error: 'NOT_ALLOWED' });
+      await expect(service().delete(LIVE, 'm1', 'user-1')).resolves.toEqual({
+        ok: false,
+        error: 'NOT_ALLOWED',
+      });
       expect(prisma.chatMessage.findFirst).not.toHaveBeenCalled();
       expect(prisma.chatMessage.updateMany).not.toHaveBeenCalled();
       expect(events.emit).not.toHaveBeenCalled();
@@ -484,11 +536,17 @@ describe('ChatService', () => {
 
     it('answers NOT_FOUND for a message already deleted or that never existed', async () => {
       prisma.chatMessage.updateMany.mockResolvedValue({ count: 0 });
-      await expect(service().delete(LIVE, 'ghost', 'host-1')).resolves.toEqual({ ok: false, error: 'NOT_FOUND' });
+      await expect(service().delete(LIVE, 'ghost', 'host-1')).resolves.toEqual({
+        ok: false,
+        error: 'NOT_FOUND',
+      });
 
       canDelete();
       prisma.chatMessage.findFirst.mockResolvedValue(null);
-      await expect(service().delete(LIVE, 'ghost', 'mod-1')).resolves.toEqual({ ok: false, error: 'NOT_FOUND' });
+      await expect(service().delete(LIVE, 'ghost', 'mod-1')).resolves.toEqual({
+        ok: false,
+        error: 'NOT_FOUND',
+      });
     });
 
     it("keeps an ended live's chat private from deletes too", async () => {
@@ -504,7 +562,11 @@ describe('ChatService', () => {
 
   describe('pin', () => {
     it('lets the host pin a visible message', async () => {
-      prisma.chatMessage.findFirst.mockResolvedValue({ id: 'm1', text: 'hi', user: { displayName: 'Ann' } });
+      prisma.chatMessage.findFirst.mockResolvedValue({
+        id: 'm1',
+        text: 'hi',
+        user: { displayName: 'Ann' },
+      });
 
       await expect(service().pin(LIVE, 'm1', 'host-1')).resolves.toEqual({ ok: true });
       expect(prisma.stream.update).toHaveBeenCalledWith({
@@ -521,25 +583,37 @@ describe('ChatService', () => {
     });
 
     it('refuses a plain viewer', async () => {
-      await expect(service().pin(LIVE, 'm1', 'viewer-2')).resolves.toEqual({ ok: false, error: 'NOT_ALLOWED' });
+      await expect(service().pin(LIVE, 'm1', 'viewer-2')).resolves.toEqual({
+        ok: false,
+        error: 'NOT_ALLOWED',
+      });
       expect(prisma.stream.update).not.toHaveBeenCalled();
     });
 
     it('404s pinning a message that is not visible in this stream', async () => {
       prisma.chatMessage.findFirst.mockResolvedValue(null);
 
-      await expect(service().pin(LIVE, 'ghost', 'host-1')).resolves.toEqual({ ok: false, error: 'NOT_FOUND' });
+      await expect(service().pin(LIVE, 'ghost', 'host-1')).resolves.toEqual({
+        ok: false,
+        error: 'NOT_FOUND',
+      });
     });
   });
 
   describe('unpin', () => {
     it('lets the host unpin', async () => {
       await expect(service().unpin(LIVE, 'host-1')).resolves.toEqual({ ok: true });
-      expect(prisma.stream.update).toHaveBeenCalledWith({ where: { id: LIVE }, data: { pinnedMessageId: null } });
+      expect(prisma.stream.update).toHaveBeenCalledWith({
+        where: { id: LIVE },
+        data: { pinnedMessageId: null },
+      });
     });
 
     it('refuses a plain viewer', async () => {
-      await expect(service().unpin(LIVE, 'viewer-2')).resolves.toEqual({ ok: false, error: 'NOT_ALLOWED' });
+      await expect(service().unpin(LIVE, 'viewer-2')).resolves.toEqual({
+        ok: false,
+        error: 'NOT_ALLOWED',
+      });
       expect(prisma.stream.update).not.toHaveBeenCalled();
     });
   });

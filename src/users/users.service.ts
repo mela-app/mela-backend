@@ -5,7 +5,11 @@ import { randomUUID } from 'crypto';
 import { DomainEvents, UserProfileUpdatedPayload } from '../common/events/domain-events';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { STORAGE_PROVIDER, StorageProvider } from '../common/storage/storage-provider.interface';
-import { canViewProfileDetails, ProfileViewer, visibilityShownTo } from '../social/profile-visibility';
+import {
+  canViewProfileDetails,
+  ProfileViewer,
+  visibilityShownTo,
+} from '../social/profile-visibility';
 import { SocialService } from '../social/social.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 
@@ -44,8 +48,13 @@ export class UsersService {
     const isSelf = requesterId === id;
     const [relationship, liveStream, blockedByOwner] = await Promise.all([
       this.social.getRelationshipSummary(id, requesterId),
-      this.prisma.stream.findFirst({ where: { hostId: id, status: StreamStatus.LIVE }, select: { id: true } }),
-      requesterId && !isSelf ? this.social.isBlockedByViewer(id, requesterId) : Promise.resolve(false),
+      this.prisma.stream.findFirst({
+        where: { hostId: id, status: StreamStatus.LIVE },
+        select: { id: true },
+      }),
+      requesterId && !isSelf
+        ? this.social.isBlockedByViewer(id, requesterId)
+        : Promise.resolve(false),
     ]);
     if (blockedByOwner) {
       throw new NotFoundException('User not found');
@@ -78,9 +87,14 @@ export class UsersService {
       data: dto,
       select: PUBLIC_PROFILE_SELECT,
     });
-    const fields = Object.keys(dto).filter((key) => dto[key as keyof UpdateProfileDto] !== undefined);
+    const fields = Object.keys(dto).filter(
+      (key) => dto[key as keyof UpdateProfileDto] !== undefined,
+    );
     if (fields.length > 0) {
-      this.events.emit(DomainEvents.UserProfileUpdated, { userId: id, fields } satisfies UserProfileUpdatedPayload);
+      this.events.emit(DomainEvents.UserProfileUpdated, {
+        userId: id,
+        fields,
+      } satisfies UserProfileUpdatedPayload);
     }
     return updated;
   }

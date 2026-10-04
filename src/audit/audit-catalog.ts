@@ -43,7 +43,10 @@ export const AUDIT_ACTIONS = {
   'moderation.chat_muted': { category: 'MODERATION', label: 'Muted someone in chat' },
   'moderation.chat_unmuted': { category: 'MODERATION', label: 'Unmuted someone in chat' },
   'moderation.moderator_added': { category: 'MODERATION', label: 'Added a moderator' },
-  'moderation.moderator_updated': { category: 'MODERATION', label: "Changed a moderator's abilities" },
+  'moderation.moderator_updated': {
+    category: 'MODERATION',
+    label: "Changed a moderator's abilities",
+  },
   'moderation.moderator_removed': { category: 'MODERATION', label: 'Removed a moderator' },
   'moderation.guest_mic_locked': { category: 'MODERATION', label: "Turned off a guest's mic" },
   'moderation.guest_mic_unlocked': { category: 'MODERATION', label: "Allowed a guest's mic again" },

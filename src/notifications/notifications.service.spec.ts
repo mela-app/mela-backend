@@ -15,7 +15,12 @@ describe('NotificationsService', () => {
     user: { findUnique: jest.fn() },
     stream: { findUnique: jest.fn() },
     follow: { findMany: jest.fn() },
-    notification: { createManyAndReturn: jest.fn(), findMany: jest.fn(), count: jest.fn(), updateMany: jest.fn() },
+    notification: {
+      createManyAndReturn: jest.fn(),
+      findMany: jest.fn(),
+      count: jest.fn(),
+      updateMany: jest.fn(),
+    },
     notificationSettings: { findMany: jest.fn(), findUnique: jest.fn(), upsert: jest.fn() },
     userSession: { updateMany: jest.fn() },
   };
@@ -38,8 +43,16 @@ describe('NotificationsService', () => {
     jest.clearAllMocks();
     social.blockedEitherWayUserIds.mockResolvedValue([]);
     prisma.notificationSettings.findMany.mockResolvedValue([]);
-    prisma.notification.createManyAndReturn.mockImplementation(({ data }: { data: Array<Record<string, unknown>> }) =>
-      Promise.resolve(data.map((row, index) => ({ id: `n${index}`, readAt: null, createdAt: new Date(), ...row }))),
+    prisma.notification.createManyAndReturn.mockImplementation(
+      ({ data }: { data: Array<Record<string, unknown>> }) =>
+        Promise.resolve(
+          data.map((row, index) => ({
+            id: `n${index}`,
+            readAt: null,
+            createdAt: new Date(),
+            ...row,
+          })),
+        ),
     );
   });
 
@@ -65,7 +78,14 @@ describe('NotificationsService', () => {
       expect(redisClient.set).toHaveBeenCalledWith(`notif:golive:${HOST}`, '1', 'EX', 300, 'NX');
       expect(prisma.notification.createManyAndReturn).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: [{ recipientId: 'f1', type: NotificationType.STREAM_STARTED, actorId: HOST, streamId: STREAM }],
+          data: [
+            {
+              recipientId: 'f1',
+              type: NotificationType.STREAM_STARTED,
+              actorId: HOST,
+              streamId: STREAM,
+            },
+          ],
         }),
       );
       expect(events.emit).toHaveBeenCalledWith(
@@ -98,7 +118,14 @@ describe('NotificationsService', () => {
 
     expect(prisma.notification.createManyAndReturn).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: [{ recipientId: 'host-2', type: NotificationType.NEW_FOLLOWER, actorId: 'f1', streamId: null }],
+        data: [
+          {
+            recipientId: 'host-2',
+            type: NotificationType.NEW_FOLLOWER,
+            actorId: 'f1',
+            streamId: null,
+          },
+        ],
       }),
     );
   });
@@ -106,11 +133,23 @@ describe('NotificationsService', () => {
   it('onModeratorGranted notifies the newly granted moderator', async () => {
     prisma.user.findUnique.mockResolvedValue({ displayName: 'Abebe' });
 
-    await service().onModeratorGranted({ hostId: HOST, streamId: STREAM, userId: 'mod-1', capabilities: [] });
+    await service().onModeratorGranted({
+      hostId: HOST,
+      streamId: STREAM,
+      userId: 'mod-1',
+      capabilities: [],
+    });
 
     expect(prisma.notification.createManyAndReturn).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: [{ recipientId: 'mod-1', type: NotificationType.MODERATOR_GRANTED, actorId: HOST, streamId: STREAM }],
+        data: [
+          {
+            recipientId: 'mod-1',
+            type: NotificationType.MODERATOR_GRANTED,
+            actorId: HOST,
+            streamId: STREAM,
+          },
+        ],
       }),
     );
   });
@@ -119,13 +158,27 @@ describe('NotificationsService', () => {
     prisma.user.findUnique.mockResolvedValue({ displayName: 'Abebe' });
     prisma.stream.findUnique.mockResolvedValue({ title: 'Poker night' });
 
-    await service().onStreamInviteSent({ streamId: STREAM, senderId: HOST, recipientIds: ['f1', 'f2'] });
+    await service().onStreamInviteSent({
+      streamId: STREAM,
+      senderId: HOST,
+      recipientIds: ['f1', 'f2'],
+    });
 
     expect(prisma.notification.createManyAndReturn).toHaveBeenCalledWith(
       expect.objectContaining({
         data: [
-          { recipientId: 'f1', type: NotificationType.STREAM_INVITE, actorId: HOST, streamId: STREAM },
-          { recipientId: 'f2', type: NotificationType.STREAM_INVITE, actorId: HOST, streamId: STREAM },
+          {
+            recipientId: 'f1',
+            type: NotificationType.STREAM_INVITE,
+            actorId: HOST,
+            streamId: STREAM,
+          },
+          {
+            recipientId: 'f2',
+            type: NotificationType.STREAM_INVITE,
+            actorId: HOST,
+            streamId: STREAM,
+          },
         ],
       }),
     );
@@ -133,7 +186,9 @@ describe('NotificationsService', () => {
 
   it('does not queue a push for a recipient who turned that type off, but still writes the row', async () => {
     prisma.user.findUnique.mockResolvedValue({ displayName: 'Abebe' });
-    prisma.notificationSettings.findMany.mockResolvedValue([{ userId: 'f1', pushNewFollower: false }]);
+    prisma.notificationSettings.findMany.mockResolvedValue([
+      { userId: 'f1', pushNewFollower: false },
+    ]);
 
     await service().onUserFollowed({ followerId: HOST, followeeId: 'f1' });
 
@@ -146,7 +201,12 @@ describe('NotificationsService', () => {
 
     it("notifies the invitee of a host's stage invite", async () => {
       prisma.stream.findUnique.mockResolvedValue({ hostId: HOST, title: 'Poker night' });
-      prisma.user.findUnique.mockResolvedValue({ id: HOST, username: 'kebede', displayName: 'Kebede', avatarUrl: null });
+      prisma.user.findUnique.mockResolvedValue({
+        id: HOST,
+        username: 'kebede',
+        displayName: 'Kebede',
+        avatarUrl: null,
+      });
 
       await service().onGuestRequestCreated({
         streamId: STREAM,
@@ -158,7 +218,14 @@ describe('NotificationsService', () => {
 
       expect(prisma.notification.createManyAndReturn).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: [{ recipientId: 'g1', type: NotificationType.GUEST_INVITE, actorId: HOST, streamId: STREAM }],
+          data: [
+            {
+              recipientId: 'g1',
+              type: NotificationType.GUEST_INVITE,
+              actorId: HOST,
+              streamId: STREAM,
+            },
+          ],
         }),
       );
       expect(pushQueue.enqueue).toHaveBeenCalledWith(
@@ -186,7 +253,12 @@ describe('NotificationsService', () => {
       recipientId: 'u1',
       OR: [
         { actorId: null },
-        { actor: { blockedBy: { none: { blockerId: 'u1' } }, blocksMade: { none: { blockedId: 'u1' } } } },
+        {
+          actor: {
+            blockedBy: { none: { blockerId: 'u1' } },
+            blocksMade: { none: { blockedId: 'u1' } },
+          },
+        },
       ],
     };
 
@@ -198,7 +270,7 @@ describe('NotificationsService', () => {
       expect(page).toEqual({ items: [{ id: 'n1' }], hasMore: false, nextCursor: null });
     });
 
-    it("leaves out what came from anyone blocked either way, in the inbox and its count", async () => {
+    it('leaves out what came from anyone blocked either way, in the inbox and its count', async () => {
       prisma.notification.findMany.mockResolvedValue([]);
       prisma.notification.count.mockResolvedValue(0);
 

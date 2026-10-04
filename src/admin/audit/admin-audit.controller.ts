@@ -3,7 +3,13 @@ import { Throttle } from '@nestjs/throttler';
 import { AdminPermission } from '@prisma/client';
 import { AuditLogQueryDto } from '../../audit/audit-log-query.dto';
 import { AuditService } from '../../audit/audit.service';
-import { ADMIN_API_THROTTLE, AdminGuard, AdminPrincipal, CurrentAdmin, RequirePermission } from '../admin.guard';
+import {
+  ADMIN_API_THROTTLE,
+  AdminGuard,
+  AdminPrincipal,
+  CurrentAdmin,
+  RequirePermission,
+} from '../admin.guard';
 
 @Controller('admin/audit-logs')
 @UseGuards(AdminGuard)

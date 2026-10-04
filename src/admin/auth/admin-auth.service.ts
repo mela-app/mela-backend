@@ -27,7 +27,12 @@ import { effectiveAdminPermissions } from '../../common/permissions/admin-permis
 import { RateLimit, RateLimitService } from '../../common/rate-limit/rate-limit.service';
 import { AdminPrincipal } from '../admin.guard';
 import { adminPasswordProblem } from '../password-policy';
-import { AdminSignInDto, ChangeEmailDto, ChangePasswordDto, UpdateAdminProfileDto } from './admin-auth.dto';
+import {
+  AdminSignInDto,
+  ChangeEmailDto,
+  ChangePasswordDto,
+  UpdateAdminProfileDto,
+} from './admin-auth.dto';
 
 export const DEFAULT_ADMIN_SESSION_MAX_AGE_SECONDS = 12 * 60 * 60;
 
@@ -77,7 +82,10 @@ export class AdminAuthService implements OnModuleInit {
   }
 
   sessionMaxAgeSeconds(): number {
-    return Number(this.config.get('ADMIN_SESSION_MAX_AGE_SECONDS')) || DEFAULT_ADMIN_SESSION_MAX_AGE_SECONDS;
+    return (
+      Number(this.config.get('ADMIN_SESSION_MAX_AGE_SECONDS')) ||
+      DEFAULT_ADMIN_SESSION_MAX_AGE_SECONDS
+    );
   }
 
   async signIn(dto: AdminSignInDto): Promise<AdminSession> {
@@ -100,16 +108,30 @@ export class AdminAuthService implements OnModuleInit {
       );
     }
 
-    const user = await this.prisma.user.findFirst({ where: { email: { equals: dto.email, mode: 'insensitive' } } });
+    const user = await this.prisma.user.findFirst({
+      where: { email: { equals: dto.email, mode: 'insensitive' } },
+    });
     const passwordValid = await argon2.verify(user?.passwordHash ?? this.dummyHash, dto.password);
-    if (!user || !passwordValid || user.platformRole === PlatformRole.USER || user.status !== UserStatus.ACTIVE) {
-      this.events.emit(DomainEvents.AdminSignInFailed, { email: dto.email } satisfies AdminSignInFailedPayload);
+    if (
+      !user ||
+      !passwordValid ||
+      user.platformRole === PlatformRole.USER ||
+      user.status !== UserStatus.ACTIVE
+    ) {
+      this.events.emit(DomainEvents.AdminSignInFailed, {
+        email: dto.email,
+      } satisfies AdminSignInFailedPayload);
       throw new UnauthorizedException(SIGN_IN_FAILED);
     }
 
     const tokens = await this.auth.startSessionFor(user, SessionPlatform.WEB);
-    const signedIn = await this.prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
-    this.events.emit(DomainEvents.AdminSignedIn, { userId: user.id } satisfies AdminSignedInPayload);
+    const signedIn = await this.prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date() },
+    });
+    this.events.emit(DomainEvents.AdminSignedIn, {
+      userId: user.id,
+    } satisfies AdminSignedInPayload);
     return { tokens, admin: toAdminView(signedIn) };
   }
 
@@ -170,7 +192,9 @@ export class AdminAuthService implements OnModuleInit {
       data: { passwordHash: await argon2.hash(dto.newPassword), passwordChangeRequired: false },
     });
     await this.auth.revokeOtherSessions(admin.id, admin.sessionId);
-    this.events.emit(DomainEvents.AccountPasswordChanged, { userId: admin.id } satisfies AccountCredentialChangedPayload);
+    this.events.emit(DomainEvents.AccountPasswordChanged, {
+      userId: admin.id,
+    } satisfies AccountCredentialChangedPayload);
     return toAdminView(updated);
   }
 
@@ -186,13 +210,21 @@ export class AdminAuthService implements OnModuleInit {
     });
     if (taken) throw new ConflictException('That email address is already in use');
 
-    const updated = await this.prisma.user.update({ where: { id: admin.id }, data: { email: dto.email } });
-    this.events.emit(DomainEvents.AccountEmailChanged, { userId: admin.id } satisfies AccountCredentialChangedPayload);
+    const updated = await this.prisma.user.update({
+      where: { id: admin.id },
+      data: { email: dto.email },
+    });
+    this.events.emit(DomainEvents.AccountEmailChanged, {
+      userId: admin.id,
+    } satisfies AccountCredentialChangedPayload);
     return toAdminView(updated);
   }
 
   async updateProfile(admin: AdminPrincipal, dto: UpdateAdminProfileDto): Promise<AdminView> {
-    const updated = await this.prisma.user.update({ where: { id: admin.id }, data: { displayName: dto.displayName } });
+    const updated = await this.prisma.user.update({
+      where: { id: admin.id },
+      data: { displayName: dto.displayName },
+    });
     this.events.emit(DomainEvents.UserProfileUpdated, {
       userId: admin.id,
       fields: ['displayName'],
@@ -207,12 +239,17 @@ export class AdminAuthService implements OnModuleInit {
       orderBy: { lastSeenAt: 'desc' },
       select: { id: true, platform: true, createdAt: true, lastSeenAt: true },
     });
-    return { items: sessions.map((session) => ({ ...session, current: session.id === admin.sessionId })) };
+    return {
+      items: sessions.map((session) => ({ ...session, current: session.id === admin.sessionId })),
+    };
   }
 
   async revokeSession(admin: AdminPrincipal, sessionId: string): Promise<{ ok: true }> {
-    if (sessionId === admin.sessionId) throw new BadRequestException('Use sign out to end this session');
-    const { count } = await this.prisma.userSession.deleteMany({ where: { id: sessionId, userId: admin.id } });
+    if (sessionId === admin.sessionId)
+      throw new BadRequestException('Use sign out to end this session');
+    const { count } = await this.prisma.userSession.deleteMany({
+      where: { id: sessionId, userId: admin.id },
+    });
     if (count === 0) throw new NotFoundException('Session not found');
     return { ok: true };
   }

@@ -79,10 +79,10 @@ export class WebFallbackController {
   private playerCsp(): string {
     return this.config.get<string>('NODE_ENV') === 'production'
       ? PLAYER_CSP
-      : PLAYER_CSP.replace("connect-src 'self' https: wss:", "connect-src 'self' https: wss: http: ws:").replace(
-          "img-src 'self' data: blob: https:",
-          "img-src 'self' data: blob: https: http:",
-        );
+      : PLAYER_CSP.replace(
+          "connect-src 'self' https: wss:",
+          "connect-src 'self' https: wss: http: ws:",
+        ).replace("img-src 'self' data: blob: https:", "img-src 'self' data: blob: https: http:");
   }
 }
 
@@ -92,7 +92,12 @@ interface StreamPreview {
   host: { displayName: string };
 }
 
-function renderPage(stream: StreamPreview | null, id: string, scheme: string, player: PlayerConfig | null): string {
+function renderPage(
+  stream: StreamPreview | null,
+  id: string,
+  scheme: string,
+  player: PlayerConfig | null,
+): string {
   const deepLink = `${scheme}://live/${encodeURIComponent(id)}`;
   const isLive = stream?.status === StreamStatus.LIVE;
   const title = stream ? escapeHtml(stream.title) : 'This live has ended';
@@ -149,7 +154,13 @@ ${isLive ? '<div class="live">LIVE</div>' : ''}
 }
 
 function escapeHtml(value: string): string {
-  const entities: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  const entities: Record<string, string> = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  };
   return value.replace(/[&<>"']/g, (char) => entities[char]);
 }
 

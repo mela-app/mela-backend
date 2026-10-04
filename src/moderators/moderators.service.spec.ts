@@ -32,10 +32,16 @@ describe('ModeratorsService', () => {
     });
 
     it('counts only an active grant as being a moderator', async () => {
-      prisma.moderator.findUnique.mockResolvedValueOnce({ capabilities: [], status: ModeratorStatus.ACTIVE });
+      prisma.moderator.findUnique.mockResolvedValueOnce({
+        capabilities: [],
+        status: ModeratorStatus.ACTIVE,
+      });
       await expect(service().isActiveModerator(STREAM, 'u1')).resolves.toBe(true);
 
-      prisma.moderator.findUnique.mockResolvedValueOnce({ capabilities: [], status: ModeratorStatus.REVOKED });
+      prisma.moderator.findUnique.mockResolvedValueOnce({
+        capabilities: [],
+        status: ModeratorStatus.REVOKED,
+      });
       await expect(service().isActiveModerator(STREAM, 'u1')).resolves.toBe(false);
     });
   });
@@ -173,7 +179,9 @@ describe('ModeratorsService', () => {
       ).resolves.toEqual({ ok: true });
 
       expect(prisma.moderator.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { streamId: STREAM, userId: 'u1', status: ModeratorStatus.ACTIVE } }),
+        expect.objectContaining({
+          where: { streamId: STREAM, userId: 'u1', status: ModeratorStatus.ACTIVE },
+        }),
       );
       expect(events.emit).toHaveBeenCalledWith('moderator.updated', {
         streamId: STREAM,
@@ -196,7 +204,10 @@ describe('ModeratorsService', () => {
 
       await expect(service().revoke(STREAM, 'u1')).resolves.toEqual({ ok: true });
 
-      expect(events.emit).toHaveBeenCalledWith('moderator.revoked', { streamId: STREAM, userId: 'u1' });
+      expect(events.emit).toHaveBeenCalledWith('moderator.revoked', {
+        streamId: STREAM,
+        userId: 'u1',
+      });
     });
   });
 });

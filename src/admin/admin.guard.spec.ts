@@ -4,7 +4,12 @@ import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { AdminPermission, PlatformRole, UserStatus } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
-import { AdminGuard, AllowPendingPasswordChange, RequirePermission, SuperAdminOnly } from './admin.guard';
+import {
+  AdminGuard,
+  AllowPendingPasswordChange,
+  RequirePermission,
+  SuperAdminOnly,
+} from './admin.guard';
 
 class Routes {
   plain() {}
@@ -75,44 +80,72 @@ describe('AdminGuard', () => {
       expect.objectContaining({ where: { id: 'session-1', userId: 'admin-1' } }),
     );
     expect(request.admin).toEqual(
-      expect.objectContaining({ id: 'admin-1', platformRole: PlatformRole.PLATFORM_MODERATOR, sessionId: 'session-1' }),
+      expect.objectContaining({
+        id: 'admin-1',
+        platformRole: PlatformRole.PLATFORM_MODERATOR,
+        sessionId: 'session-1',
+      }),
     );
   });
 
   it('needs a bearer token', async () => {
-    await expect(guard().canActivate(contextFor('plain', null).context)).rejects.toThrow(UnauthorizedException);
+    await expect(guard().canActivate(contextFor('plain', null).context)).rejects.toThrow(
+      UnauthorizedException,
+    );
   });
 
   it('refuses an expired or forged token', async () => {
     jwt.verifyAsync.mockRejectedValue(new Error('jwt expired'));
-    await expect(guard().canActivate(contextFor('plain').context)).rejects.toThrow(UnauthorizedException);
+    await expect(guard().canActivate(contextFor('plain').context)).rejects.toThrow(
+      UnauthorizedException,
+    );
   });
 
   it('refuses a token whose session was signed out or revoked', async () => {
     prisma.userSession.findFirst.mockResolvedValue(null);
-    await expect(guard().canActivate(contextFor('plain').context)).rejects.toThrow(UnauthorizedException);
+    await expect(guard().canActivate(contextFor('plain').context)).rejects.toThrow(
+      UnauthorizedException,
+    );
   });
 
   it('refuses a suspended staff member at once', async () => {
-    prisma.userSession.findFirst.mockResolvedValue({ user: staff({ status: UserStatus.SUSPENDED }) });
-    await expect(guard().canActivate(contextFor('plain').context)).rejects.toThrow(UnauthorizedException);
+    prisma.userSession.findFirst.mockResolvedValue({
+      user: staff({ status: UserStatus.SUSPENDED }),
+    });
+    await expect(guard().canActivate(contextFor('plain').context)).rejects.toThrow(
+      UnauthorizedException,
+    );
   });
 
   it('refuses a regular app user, whatever the token says', async () => {
-    jwt.verifyAsync.mockResolvedValue({ sub: 'admin-1', sid: 'session-1', platformRole: PlatformRole.SUPER_ADMIN });
-    prisma.userSession.findFirst.mockResolvedValue({ user: staff({ platformRole: PlatformRole.USER }) });
-    await expect(guard().canActivate(contextFor('plain').context)).rejects.toThrow(ForbiddenException);
+    jwt.verifyAsync.mockResolvedValue({
+      sub: 'admin-1',
+      sid: 'session-1',
+      platformRole: PlatformRole.SUPER_ADMIN,
+    });
+    prisma.userSession.findFirst.mockResolvedValue({
+      user: staff({ platformRole: PlatformRole.USER }),
+    });
+    await expect(guard().canActivate(contextFor('plain').context)).rejects.toThrow(
+      ForbiddenException,
+    );
   });
 
   it('keeps super-admin routes to super admins', async () => {
-    await expect(guard().canActivate(contextFor('superAdminOnly').context)).rejects.toThrow(ForbiddenException);
+    await expect(guard().canActivate(contextFor('superAdminOnly').context)).rejects.toThrow(
+      ForbiddenException,
+    );
 
-    prisma.userSession.findFirst.mockResolvedValue({ user: staff({ platformRole: PlatformRole.SUPER_ADMIN }) });
+    prisma.userSession.findFirst.mockResolvedValue({
+      user: staff({ platformRole: PlatformRole.SUPER_ADMIN }),
+    });
     await expect(guard().canActivate(contextFor('superAdminOnly').context)).resolves.toBe(true);
   });
 
   it('allows only the password change until a temporary password is replaced', async () => {
-    prisma.userSession.findFirst.mockResolvedValue({ user: staff({ passwordChangeRequired: true }) });
+    prisma.userSession.findFirst.mockResolvedValue({
+      user: staff({ passwordChangeRequired: true }),
+    });
 
     const error = await guard()
       .canActivate(contextFor('plain').context)
@@ -145,17 +178,25 @@ describe('AdminGuard', () => {
       await expect(guard().canActivate(context)).resolves.toBe(true);
       await expect(guard().canActivate(contextFor('editUser').context)).resolves.toBe(true);
       expect(request.admin).toEqual(
-        expect.objectContaining({ permissions: [AdminPermission.VIEW_USERS, AdminPermission.MANAGE_USERS] }),
+        expect.objectContaining({
+          permissions: [AdminPermission.VIEW_USERS, AdminPermission.MANAGE_USERS],
+        }),
       );
     });
 
     it('stops a moderator who can only look from changing anything', async () => {
-      prisma.userSession.findFirst.mockResolvedValue({ user: staff({ adminPermissions: [AdminPermission.VIEW_USERS] }) });
-      await expect(guard().canActivate(contextFor('editUser').context)).rejects.toThrow(ForbiddenException);
+      prisma.userSession.findFirst.mockResolvedValue({
+        user: staff({ adminPermissions: [AdminPermission.VIEW_USERS] }),
+      });
+      await expect(guard().canActivate(contextFor('editUser').context)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
     it('gives a super admin every permission', async () => {
-      prisma.userSession.findFirst.mockResolvedValue({ user: staff({ platformRole: PlatformRole.SUPER_ADMIN }) });
+      prisma.userSession.findFirst.mockResolvedValue({
+        user: staff({ platformRole: PlatformRole.SUPER_ADMIN }),
+      });
       await expect(guard().canActivate(contextFor('editUser').context)).resolves.toBe(true);
     });
   });

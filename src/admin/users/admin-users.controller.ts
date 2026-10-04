@@ -1,4 +1,16 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AdminPermission } from '@prisma/client';
 import {
@@ -44,7 +56,11 @@ export class AdminUsersController {
   @Post(':id/suspend')
   @HttpCode(HttpStatus.OK)
   @RequirePermission(AdminPermission.MANAGE_USERS)
-  suspend(@CurrentAdmin() admin: AdminPrincipal, @Param('id', ParseUUIDPipe) id: string, @Body() dto: SuspendUserDto) {
+  suspend(
+    @CurrentAdmin() admin: AdminPrincipal,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SuspendUserDto,
+  ) {
     return this.users.suspend(admin, id, dto.reason);
   }
 
@@ -74,7 +90,11 @@ export class AdminUsersController {
 
   @Patch(':id/role')
   @SuperAdminOnly()
-  changeRole(@CurrentAdmin() admin: AdminPrincipal, @Param('id', ParseUUIDPipe) id: string, @Body() dto: ChangeRoleDto) {
+  changeRole(
+    @CurrentAdmin() admin: AdminPrincipal,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ChangeRoleDto,
+  ) {
     return this.users.changeRole(admin, id, dto.platformRole, dto.permissions);
   }
 

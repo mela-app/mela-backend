@@ -11,20 +11,33 @@ describe('PermissionsService', () => {
   });
 
   it('lets the host do anything channel-scoped on their own channel', () => {
-    expect(service.hasChannelCapability(hostId, hostId, null, ModeratorCapability.DELETE_MESSAGES)).toBe(true);
+    expect(
+      service.hasChannelCapability(hostId, hostId, null, ModeratorCapability.DELETE_MESSAGES),
+    ).toBe(true);
   });
 
-  it("lets an active moderator use only the capabilities they were granted", () => {
+  it('lets an active moderator use only the capabilities they were granted', () => {
     const grant = { capabilities: [ModeratorCapability.DELETE_MESSAGES] };
-    expect(service.hasChannelCapability(viewer.id, hostId, grant, ModeratorCapability.DELETE_MESSAGES)).toBe(true);
-    expect(service.hasChannelCapability(viewer.id, hostId, grant, ModeratorCapability.BAN_USERS)).toBe(false);
+    expect(
+      service.hasChannelCapability(viewer.id, hostId, grant, ModeratorCapability.DELETE_MESSAGES),
+    ).toBe(true);
+    expect(
+      service.hasChannelCapability(viewer.id, hostId, grant, ModeratorCapability.BAN_USERS),
+    ).toBe(false);
   });
 
   it('refuses a random viewer with no grant at all', () => {
-    expect(service.hasChannelCapability(viewer.id, hostId, null, ModeratorCapability.DELETE_MESSAGES)).toBe(false);
-    expect(service.hasChannelCapability(viewer.id, hostId, undefined, ModeratorCapability.DELETE_MESSAGES)).toBe(
-      false,
-    );
+    expect(
+      service.hasChannelCapability(viewer.id, hostId, null, ModeratorCapability.DELETE_MESSAGES),
+    ).toBe(false);
+    expect(
+      service.hasChannelCapability(
+        viewer.id,
+        hostId,
+        undefined,
+        ModeratorCapability.DELETE_MESSAGES,
+      ),
+    ).toBe(false);
   });
 
   it('never lets a moderator start/end the stream, edit details, or manage moderators', () => {
@@ -44,8 +57,12 @@ describe('PermissionsService', () => {
     });
 
     it('never lets a moderator act on another moderator, or on the host', () => {
-      expect(service.moderationTargetRefusal('mod-1', hostId, 'mod-2', true)).toBe('TARGET_IS_MODERATOR');
-      expect(service.moderationTargetRefusal('mod-1', hostId, hostId, false)).toBe('TARGET_IS_HOST');
+      expect(service.moderationTargetRefusal('mod-1', hostId, 'mod-2', true)).toBe(
+        'TARGET_IS_MODERATOR',
+      );
+      expect(service.moderationTargetRefusal('mod-1', hostId, hostId, false)).toBe(
+        'TARGET_IS_HOST',
+      );
     });
 
     it('leaves acting on yourself to each action', () => {

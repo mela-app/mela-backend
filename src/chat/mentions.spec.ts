@@ -1,4 +1,9 @@
-import { mentionedUsernames, mentionLookup, MAX_MENTIONS_PER_MESSAGE, resolveMentions } from './mentions';
+import {
+  mentionedUsernames,
+  mentionLookup,
+  MAX_MENTIONS_PER_MESSAGE,
+  resolveMentions,
+} from './mentions';
 
 describe('chat mentions', () => {
   it('finds @usernames anywhere in a message, first mention first, each once', () => {

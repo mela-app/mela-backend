@@ -43,8 +43,14 @@ export class S3StorageProvider implements StorageProvider {
   }
 
   async createUploadUrl(key: string, contentType: string): Promise<UploadUrl> {
-    const command = new PutObjectCommand({ Bucket: this.bucket, Key: key, ContentType: contentType });
-    const uploadUrl = await getSignedUrl(this.client, command, { expiresIn: UPLOAD_URL_TTL_SECONDS });
+    const command = new PutObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+      ContentType: contentType,
+    });
+    const uploadUrl = await getSignedUrl(this.client, command, {
+      expiresIn: UPLOAD_URL_TTL_SECONDS,
+    });
     return { uploadUrl, publicUrl: this.publicUrl(key) };
   }
 

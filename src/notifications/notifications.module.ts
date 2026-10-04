@@ -12,7 +12,12 @@ import { PushProcessor } from './push.processor';
   // AuthModule: the JWT guard. SocialModule: follower fan-out + block checks.
   // PushProviderModule: the vendor behind PushProcessor. Everything else
   // reaches this module only through the domain-event bus (plan §4.1).
-  imports: [AuthModule, SocialModule, PushProviderModule, BullModule.registerQueue({ name: PUSH_QUEUE })],
+  imports: [
+    AuthModule,
+    SocialModule,
+    PushProviderModule,
+    BullModule.registerQueue({ name: PUSH_QUEUE }),
+  ],
   controllers: [NotificationsController],
   providers: [NotificationsService, PushQueueService, PushProcessor],
   exports: [NotificationsService],

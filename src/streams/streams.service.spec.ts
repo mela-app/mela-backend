@@ -124,7 +124,9 @@ describe('StreamsService', () => {
     listActive: jest.fn(),
   };
   const watchTickets = {
-    issue: jest.fn().mockResolvedValue({ viewerId: 'web-anon-1', streamId: 's1', ticket: 'ticket-1' }),
+    issue: jest
+      .fn()
+      .mockResolvedValue({ viewerId: 'web-anon-1', streamId: 's1', ticket: 'ticket-1' }),
   };
   const recordingPermissions = {
     allow: jest.fn(),
@@ -349,7 +351,9 @@ describe('StreamsService', () => {
       channelName: 'stream_s1',
       pinnedMessageId: 'm1',
     });
-    moderators.findActiveGrant.mockResolvedValueOnce({ capabilities: [ModeratorCapability.PIN_MESSAGES] });
+    moderators.findActiveGrant.mockResolvedValueOnce({
+      capabilities: [ModeratorCapability.PIN_MESSAGES],
+    });
     prisma.chatMessage.findUnique.mockResolvedValueOnce({
       id: 'm1',
       text: 'Welcome!',
@@ -447,7 +451,11 @@ describe('StreamsService', () => {
         userId: 'web-anon-1',
         role: 'audience',
       });
-      expect(result).toMatchObject({ watchTicket: 'ticket-1', isFollowingHost: false, activeGuests: [] });
+      expect(result).toMatchObject({
+        watchTicket: 'ticket-1',
+        isFollowingHost: false,
+        activeGuests: [],
+      });
       expect(roomBans.isBanned).not.toHaveBeenCalled();
       expect(social.isFollowing).not.toHaveBeenCalled();
     });
@@ -459,12 +467,14 @@ describe('StreamsService', () => {
 
       const result = await service.watch('s1', 'viewer-1');
 
-      expect(videoProvider.mintToken).toHaveBeenCalledWith(expect.objectContaining({ userId: 'web-anon-1' }));
+      expect(videoProvider.mintToken).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'web-anon-1' }),
+      );
       expect(social.isFollowing).toHaveBeenCalledWith('viewer-1', 'host-1');
       expect(result.isFollowingHost).toBe(true);
     });
 
-    it("keeps a banned viewer out, even on the web", async () => {
+    it('keeps a banned viewer out, even on the web', async () => {
       prisma.stream.findUnique.mockResolvedValue(live);
       roomBans.isBanned.mockResolvedValueOnce(true);
       const service = makeService();
@@ -914,7 +924,10 @@ describe('StreamsService', () => {
           lockedAt: expect.any(Date),
         }),
       });
-      expect(events.emit.mock.calls.map(([name]) => name)).toEqual(['stream.locked', 'stream.ended']);
+      expect(events.emit.mock.calls.map(([name]) => name)).toEqual([
+        'stream.locked',
+        'stream.ended',
+      ]);
       expect(events.emit).toHaveBeenCalledWith('stream.locked', {
         streamId: 's1',
         hostId: 'host-1',
@@ -971,12 +984,18 @@ describe('StreamsService', () => {
       expect(events.emit).not.toHaveBeenCalled();
     });
 
-    it("locks every running live of a suspended host and counts them", async () => {
+    it('locks every running live of a suspended host and counts them', async () => {
       prisma.stream.findMany.mockResolvedValue([{ id: 's1' }, { id: 's2' }]);
       prisma.stream.findUnique.mockResolvedValue(live);
-      prisma.stream.updateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
+      prisma.stream.updateMany
+        .mockResolvedValueOnce({ count: 1 })
+        .mockResolvedValueOnce({ count: 0 });
 
-      const locked = await makeService().lockLiveStreamsOfHost('host-1', 'admin-1', 'Account suspended');
+      const locked = await makeService().lockLiveStreamsOfHost(
+        'host-1',
+        'admin-1',
+        'Account suspended',
+      );
 
       expect(prisma.stream.findMany).toHaveBeenCalledWith({
         where: { hostId: 'host-1', status: StreamStatus.LIVE },
@@ -996,7 +1015,13 @@ describe('StreamsService', () => {
 
       await service.banFromRoom('s1', 'host-1', 'troll-1', RoomBanScope.SESSION);
 
-      expect(roomBans.ban).toHaveBeenCalledWith('host-1', 'troll-1', RoomBanScope.SESSION, 's1', 'host-1');
+      expect(roomBans.ban).toHaveBeenCalledWith(
+        'host-1',
+        'troll-1',
+        RoomBanScope.SESSION,
+        's1',
+        'host-1',
+      );
     });
 
     it('lets a moderator holding BAN_USERS ban a participant', async () => {
@@ -1043,38 +1068,56 @@ describe('StreamsService', () => {
     });
 
     it('never lets a moderator ban or unban another moderator - only the host can', async () => {
-      moderators.findActiveGrant.mockResolvedValue({ capabilities: [ModeratorCapability.BAN_USERS] });
+      moderators.findActiveGrant.mockResolvedValue({
+        capabilities: [ModeratorCapability.BAN_USERS],
+      });
       moderators.isActiveModerator.mockResolvedValue(true);
 
-      await expect(makeService().banFromRoom('s1', 'mod-1', 'mod-2', RoomBanScope.SESSION)).rejects.toMatchObject({
+      await expect(
+        makeService().banFromRoom('s1', 'mod-1', 'mod-2', RoomBanScope.SESSION),
+      ).rejects.toMatchObject({
         response: { code: 'TARGET_IS_MODERATOR' },
       });
-      await expect(makeService().unbanFromRoom('s1', 'mod-1', 'mod-2')).rejects.toThrow(ForbiddenException);
+      await expect(makeService().unbanFromRoom('s1', 'mod-1', 'mod-2')).rejects.toThrow(
+        ForbiddenException,
+      );
       expect(moderators.isActiveModerator).toHaveBeenCalledWith('s1', 'mod-2');
       expect(roomBans.ban).not.toHaveBeenCalled();
       expect(roomBans.unban).not.toHaveBeenCalled();
 
       await makeService().banFromRoom('s1', 'host-1', 'mod-2', RoomBanScope.SESSION);
-      expect(roomBans.ban).toHaveBeenCalledWith('host-1', 'mod-2', RoomBanScope.SESSION, 's1', 'host-1');
+      expect(roomBans.ban).toHaveBeenCalledWith(
+        'host-1',
+        'mod-2',
+        RoomBanScope.SESSION,
+        's1',
+        'host-1',
+      );
       moderators.findActiveGrant.mockResolvedValue(null);
       moderators.isActiveModerator.mockResolvedValue(false);
     });
 
     it('refuses to ban the host, or yourself', async () => {
-      await expect(makeService().banFromRoom('s1', 'host-1', 'host-1', RoomBanScope.SESSION)).rejects.toThrow(
-        BadRequestException,
-      );
-      moderators.findActiveGrant.mockResolvedValueOnce({ capabilities: [ModeratorCapability.BAN_USERS] });
-      await expect(makeService().banFromRoom('s1', 'mod-1', 'mod-1', RoomBanScope.SESSION)).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(
+        makeService().banFromRoom('s1', 'host-1', 'host-1', RoomBanScope.SESSION),
+      ).rejects.toThrow(BadRequestException);
+      moderators.findActiveGrant.mockResolvedValueOnce({
+        capabilities: [ModeratorCapability.BAN_USERS],
+      });
+      await expect(
+        makeService().banFromRoom('s1', 'mod-1', 'mod-1', RoomBanScope.SESSION),
+      ).rejects.toThrow(BadRequestException);
       expect(roomBans.ban).not.toHaveBeenCalled();
     });
   });
 
   describe('room chat mute (plan §6.7)', () => {
     beforeEach(() => {
-      prisma.stream.findUnique.mockResolvedValue({ id: 's1', hostId: 'host-1', status: StreamStatus.LIVE });
+      prisma.stream.findUnique.mockResolvedValue({
+        id: 's1',
+        hostId: 'host-1',
+        status: StreamStatus.LIVE,
+      });
       prisma.user.findUnique.mockResolvedValue({ id: 'troll-1' });
       moderators.findActiveGrant.mockReset().mockResolvedValue(null);
     });
@@ -1099,27 +1142,45 @@ describe('StreamsService', () => {
     });
 
     it('lets a MUTE_CHAT moderator mute, but not a moderator without it', async () => {
-      moderators.findActiveGrant.mockResolvedValueOnce({ capabilities: [ModeratorCapability.MUTE_CHAT] });
+      moderators.findActiveGrant.mockResolvedValueOnce({
+        capabilities: [ModeratorCapability.MUTE_CHAT],
+      });
       await makeService().muteChat('s1', 'mod-1', 'troll-1');
       expect(roomChatMutes.mute).toHaveBeenCalledWith('s1', 'troll-1', 'mod-1', null);
 
-      moderators.findActiveGrant.mockResolvedValueOnce({ capabilities: [ModeratorCapability.BAN_USERS] });
-      await expect(makeService().muteChat('s1', 'mod-2', 'troll-1')).rejects.toThrow(ForbiddenException);
+      moderators.findActiveGrant.mockResolvedValueOnce({
+        capabilities: [ModeratorCapability.BAN_USERS],
+      });
+      await expect(makeService().muteChat('s1', 'mod-2', 'troll-1')).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
     it('refuses to mute the host, or yourself', async () => {
-      await expect(makeService().muteChat('s1', 'host-1', 'host-1')).rejects.toThrow(BadRequestException);
-      moderators.findActiveGrant.mockResolvedValueOnce({ capabilities: [ModeratorCapability.MUTE_CHAT] });
-      await expect(makeService().muteChat('s1', 'mod-1', 'mod-1')).rejects.toThrow(BadRequestException);
+      await expect(makeService().muteChat('s1', 'host-1', 'host-1')).rejects.toThrow(
+        BadRequestException,
+      );
+      moderators.findActiveGrant.mockResolvedValueOnce({
+        capabilities: [ModeratorCapability.MUTE_CHAT],
+      });
+      await expect(makeService().muteChat('s1', 'mod-1', 'mod-1')).rejects.toThrow(
+        BadRequestException,
+      );
       expect(roomChatMutes.mute).not.toHaveBeenCalled();
     });
 
     it('never lets a moderator mute or unmute another moderator', async () => {
-      moderators.findActiveGrant.mockResolvedValue({ capabilities: [ModeratorCapability.MUTE_CHAT] });
+      moderators.findActiveGrant.mockResolvedValue({
+        capabilities: [ModeratorCapability.MUTE_CHAT],
+      });
       moderators.isActiveModerator.mockResolvedValueOnce(true).mockResolvedValueOnce(true);
 
-      await expect(makeService().muteChat('s1', 'mod-1', 'mod-2')).rejects.toThrow(ForbiddenException);
-      await expect(makeService().unmuteChat('s1', 'mod-1', 'mod-2')).rejects.toThrow(ForbiddenException);
+      await expect(makeService().muteChat('s1', 'mod-1', 'mod-2')).rejects.toThrow(
+        ForbiddenException,
+      );
+      await expect(makeService().unmuteChat('s1', 'mod-1', 'mod-2')).rejects.toThrow(
+        ForbiddenException,
+      );
       expect(roomChatMutes.mute).not.toHaveBeenCalled();
       expect(roomChatMutes.unmute).not.toHaveBeenCalled();
     });
@@ -1127,7 +1188,9 @@ describe('StreamsService', () => {
     it('404s for a user that does not exist', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
 
-      await expect(makeService().muteChat('s1', 'host-1', 'ghost')).rejects.toThrow(NotFoundException);
+      await expect(makeService().muteChat('s1', 'host-1', 'ghost')).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('lets the host lift a mute and see who is muted - a plain viewer can do neither', async () => {
@@ -1137,14 +1200,22 @@ describe('StreamsService', () => {
       expect(roomChatMutes.unmute).toHaveBeenCalledWith('s1', 'troll-1', 'host-1');
       await expect(makeService().listChatMutes('s1', 'host-1')).resolves.toEqual({ items: [] });
 
-      await expect(makeService().unmuteChat('s1', 'viewer-1', 'troll-1')).rejects.toThrow(ForbiddenException);
-      await expect(makeService().listChatMutes('s1', 'viewer-1')).rejects.toThrow(ForbiddenException);
+      await expect(makeService().unmuteChat('s1', 'viewer-1', 'troll-1')).rejects.toThrow(
+        ForbiddenException,
+      );
+      await expect(makeService().listChatMutes('s1', 'viewer-1')).rejects.toThrow(
+        ForbiddenException,
+      );
     });
   });
 
   describe('recording permission', () => {
     beforeEach(() => {
-      prisma.stream.findUnique.mockResolvedValue({ id: 's1', hostId: 'host-1', status: StreamStatus.LIVE });
+      prisma.stream.findUnique.mockResolvedValue({
+        id: 's1',
+        hostId: 'host-1',
+        status: StreamStatus.LIVE,
+      });
       prisma.user.findUnique.mockResolvedValue({ id: 'fan-1' });
       moderators.findActiveGrant.mockReset().mockResolvedValue(null);
     });
@@ -1152,38 +1223,66 @@ describe('StreamsService', () => {
     it('lets the host allow a viewer to record, take it back, and see who may', async () => {
       recordingPermissions.list.mockResolvedValue({ items: [] });
 
-      await expect(makeService().allowRecording('s1', 'host-1', 'fan-1')).resolves.toEqual({ ok: true });
+      await expect(makeService().allowRecording('s1', 'host-1', 'fan-1')).resolves.toEqual({
+        ok: true,
+      });
       expect(recordingPermissions.allow).toHaveBeenCalledWith('s1', 'fan-1', 'host-1');
-      await expect(makeService().disallowRecording('s1', 'host-1', 'fan-1')).resolves.toEqual({ ok: true });
+      await expect(makeService().disallowRecording('s1', 'host-1', 'fan-1')).resolves.toEqual({
+        ok: true,
+      });
       expect(recordingPermissions.disallow).toHaveBeenCalledWith('s1', 'fan-1', 'host-1');
-      await expect(makeService().listRecordingPermissions('s1', 'host-1')).resolves.toEqual({ items: [] });
+      await expect(makeService().listRecordingPermissions('s1', 'host-1')).resolves.toEqual({
+        items: [],
+      });
     });
 
     it('is the host alone - not even a moderator may', async () => {
-      moderators.findActiveGrant.mockResolvedValue({ capabilities: Object.values(ModeratorCapability) });
+      moderators.findActiveGrant.mockResolvedValue({
+        capabilities: Object.values(ModeratorCapability),
+      });
 
-      await expect(makeService().allowRecording('s1', 'mod-1', 'fan-1')).rejects.toThrow(ForbiddenException);
-      await expect(makeService().disallowRecording('s1', 'mod-1', 'fan-1')).rejects.toThrow(ForbiddenException);
-      await expect(makeService().listRecordingPermissions('s1', 'viewer-1')).rejects.toThrow(ForbiddenException);
+      await expect(makeService().allowRecording('s1', 'mod-1', 'fan-1')).rejects.toThrow(
+        ForbiddenException,
+      );
+      await expect(makeService().disallowRecording('s1', 'mod-1', 'fan-1')).rejects.toThrow(
+        ForbiddenException,
+      );
+      await expect(makeService().listRecordingPermissions('s1', 'viewer-1')).rejects.toThrow(
+        ForbiddenException,
+      );
       expect(recordingPermissions.allow).not.toHaveBeenCalled();
       expect(recordingPermissions.disallow).not.toHaveBeenCalled();
     });
 
     it('needs no permission for the host, a live that is on, and someone real', async () => {
-      await expect(makeService().allowRecording('s1', 'host-1', 'host-1')).rejects.toThrow(BadRequestException);
+      await expect(makeService().allowRecording('s1', 'host-1', 'host-1')).rejects.toThrow(
+        BadRequestException,
+      );
 
       prisma.user.findUnique.mockResolvedValueOnce(null);
-      await expect(makeService().allowRecording('s1', 'host-1', 'ghost')).rejects.toThrow(NotFoundException);
+      await expect(makeService().allowRecording('s1', 'host-1', 'ghost')).rejects.toThrow(
+        NotFoundException,
+      );
 
-      prisma.stream.findUnique.mockResolvedValueOnce({ id: 's1', hostId: 'host-1', status: StreamStatus.ENDED });
-      await expect(makeService().allowRecording('s1', 'host-1', 'fan-1')).rejects.toThrow(NotFoundException);
+      prisma.stream.findUnique.mockResolvedValueOnce({
+        id: 's1',
+        hostId: 'host-1',
+        status: StreamStatus.ENDED,
+      });
+      await expect(makeService().allowRecording('s1', 'host-1', 'fan-1')).rejects.toThrow(
+        NotFoundException,
+      );
       expect(recordingPermissions.allow).not.toHaveBeenCalled();
     });
   });
 
   describe('guest mic mute (plan §6.7)', () => {
     beforeEach(() => {
-      prisma.stream.findUnique.mockResolvedValue({ id: 's1', hostId: 'host-1', status: StreamStatus.LIVE });
+      prisma.stream.findUnique.mockResolvedValue({
+        id: 's1',
+        hostId: 'host-1',
+        status: StreamStatus.LIVE,
+      });
       moderators.findActiveGrant.mockReset().mockResolvedValue(null);
     });
 
@@ -1191,25 +1290,29 @@ describe('StreamsService', () => {
       await makeService().setGuestMicForceMuted('s1', 'host-1', 'g1', true);
       expect(guests.setMicForceMuted).toHaveBeenCalledWith('s1', 'g1', 'host-1', true);
 
-      moderators.findActiveGrant.mockResolvedValueOnce({ capabilities: [ModeratorCapability.FORCE_MUTE_GUESTS] });
+      moderators.findActiveGrant.mockResolvedValueOnce({
+        capabilities: [ModeratorCapability.FORCE_MUTE_GUESTS],
+      });
       await makeService().setGuestMicForceMuted('s1', 'mod-1', 'g1', false);
       expect(guests.setMicForceMuted).toHaveBeenCalledWith('s1', 'g1', 'mod-1', false);
     });
 
     it('refuses anyone else', async () => {
-      await expect(makeService().setGuestMicForceMuted('s1', 'viewer-1', 'g1', true)).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(
+        makeService().setGuestMicForceMuted('s1', 'viewer-1', 'g1', true),
+      ).rejects.toThrow(ForbiddenException);
       expect(guests.setMicForceMuted).not.toHaveBeenCalled();
     });
 
     it("never lets a moderator lock another moderator's mic", async () => {
-      moderators.findActiveGrant.mockResolvedValueOnce({ capabilities: [ModeratorCapability.FORCE_MUTE_GUESTS] });
+      moderators.findActiveGrant.mockResolvedValueOnce({
+        capabilities: [ModeratorCapability.FORCE_MUTE_GUESTS],
+      });
       moderators.isActiveModerator.mockResolvedValueOnce(true);
 
-      await expect(makeService().setGuestMicForceMuted('s1', 'mod-1', 'mod-2', true)).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(
+        makeService().setGuestMicForceMuted('s1', 'mod-1', 'mod-2', true),
+      ).rejects.toThrow(ForbiddenException);
       expect(guests.setMicForceMuted).not.toHaveBeenCalled();
     });
 
@@ -1223,13 +1326,15 @@ describe('StreamsService', () => {
     });
 
     it("but a plain guest can't, and a moderator can't lock their own or lift anyone else's without the capability", async () => {
-      await expect(makeService().setGuestMicForceMuted('s1', 'g1', 'g1', false)).rejects.toThrow(ForbiddenException);
+      await expect(makeService().setGuestMicForceMuted('s1', 'g1', 'g1', false)).rejects.toThrow(
+        ForbiddenException,
+      );
 
       const chatOnly = { capabilities: [ModeratorCapability.DELETE_MESSAGES] };
       moderators.findActiveGrant.mockResolvedValueOnce(chatOnly).mockResolvedValueOnce(chatOnly);
-      await expect(makeService().setGuestMicForceMuted('s1', 'mod-1', 'mod-1', true)).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(
+        makeService().setGuestMicForceMuted('s1', 'mod-1', 'mod-1', true),
+      ).rejects.toThrow(ForbiddenException);
       await expect(makeService().setGuestMicForceMuted('s1', 'mod-1', 'g1', false)).rejects.toThrow(
         ForbiddenException,
       );
@@ -1308,7 +1413,11 @@ describe('StreamsService', () => {
 
   describe('moderator management (scoped to one stream, plan §6.9)', () => {
     beforeEach(() => {
-      prisma.stream.findUnique.mockResolvedValue({ id: 's1', hostId: 'host-1', status: StreamStatus.LIVE });
+      prisma.stream.findUnique.mockResolvedValue({
+        id: 's1',
+        hostId: 'host-1',
+        status: StreamStatus.LIVE,
+      });
     });
 
     it('lets the host grant a moderator for this stream only while live', async () => {
@@ -1316,11 +1425,17 @@ describe('StreamsService', () => {
 
       await service.grantModerator('s1', 'host-1', 'u1', [ModeratorCapability.PIN_MESSAGES]);
 
-      expect(moderators.grant).toHaveBeenCalledWith('host-1', 's1', 'u1', [ModeratorCapability.PIN_MESSAGES]);
+      expect(moderators.grant).toHaveBeenCalledWith('host-1', 's1', 'u1', [
+        ModeratorCapability.PIN_MESSAGES,
+      ]);
     });
 
     it('refuses to grant a moderator for a stream that is not live', async () => {
-      prisma.stream.findUnique.mockResolvedValue({ id: 's1', hostId: 'host-1', status: StreamStatus.ENDED });
+      prisma.stream.findUnique.mockResolvedValue({
+        id: 's1',
+        hostId: 'host-1',
+        status: StreamStatus.ENDED,
+      });
       const service = makeService();
 
       await expect(
@@ -1339,7 +1454,9 @@ describe('StreamsService', () => {
     });
 
     it('refuses to let a moderator grant another moderator', async () => {
-      moderators.findActiveGrant.mockResolvedValueOnce({ capabilities: [ModeratorCapability.BAN_USERS] });
+      moderators.findActiveGrant.mockResolvedValueOnce({
+        capabilities: [ModeratorCapability.BAN_USERS],
+      });
       const service = makeService();
 
       await expect(
@@ -1348,12 +1465,14 @@ describe('StreamsService', () => {
       expect(moderators.grant).not.toHaveBeenCalled();
     });
 
-    it('lets the host edit an existing moderator\'s capabilities', async () => {
+    it("lets the host edit an existing moderator's capabilities", async () => {
       const service = makeService();
 
       await service.updateModerator('s1', 'host-1', 'u1', [ModeratorCapability.BAN_USERS]);
 
-      expect(moderators.updateCapabilities).toHaveBeenCalledWith('s1', 'u1', [ModeratorCapability.BAN_USERS]);
+      expect(moderators.updateCapabilities).toHaveBeenCalledWith('s1', 'u1', [
+        ModeratorCapability.BAN_USERS,
+      ]);
     });
 
     it('lets the host revoke a moderator', async () => {
@@ -1371,7 +1490,9 @@ describe('StreamsService', () => {
       await expect(
         service.updateModerator('s1', 'viewer-1', 'u1', [ModeratorCapability.BAN_USERS]),
       ).rejects.toThrow(ForbiddenException);
-      await expect(service.revokeModerator('s1', 'viewer-1', 'u1')).rejects.toThrow(ForbiddenException);
+      await expect(service.revokeModerator('s1', 'viewer-1', 'u1')).rejects.toThrow(
+        ForbiddenException,
+      );
       expect(moderators.updateCapabilities).not.toHaveBeenCalled();
       expect(moderators.revoke).not.toHaveBeenCalled();
     });
@@ -1413,7 +1534,9 @@ describe('StreamsService', () => {
       const result = await service.listViewers('s1', 'me');
 
       expect(social.blockedEitherWayUserIds).toHaveBeenCalledWith('me');
-      expect(prisma.user.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: ['a', 'c'] } } }));
+      expect(prisma.user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: { in: ['a', 'c'] } } }),
+      );
       expect(result).toMatchObject({ hasMore: false, nextCursor: null });
     });
 
@@ -1483,7 +1606,12 @@ describe('StreamsService', () => {
   });
 
   describe('mention suggestions', () => {
-    const person = (id: string) => ({ id, username: id, displayName: id.toUpperCase(), avatarUrl: null });
+    const person = (id: string) => ({
+      id,
+      username: id,
+      displayName: id.toUpperCase(),
+      avatarUrl: null,
+    });
 
     beforeEach(() => {
       prisma.stream.findFirst.mockResolvedValue({ id: 's1', hostId: 'host' });
@@ -1505,9 +1633,15 @@ describe('StreamsService', () => {
           { displayName: { startsWith: 'an', mode: 'insensitive' } },
         ],
       };
-      expect(prisma.user.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'host', ...match } }));
+      expect(prisma.user.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'host', ...match } }),
+      );
       expect(prisma.user.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: { in: ['ana'] }, ...match }, orderBy: { username: 'asc' }, take: 5 }),
+        expect.objectContaining({
+          where: { id: { in: ['ana'] }, ...match },
+          orderBy: { username: 'asc' },
+          take: 5,
+        }),
       );
     });
 
@@ -1518,7 +1652,9 @@ describe('StreamsService', () => {
 
       expect(prisma.user.findFirst).not.toHaveBeenCalled();
       expect(prisma.user.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: { in: ['me', 'ana'] }, status: UserStatus.ACTIVE } }),
+        expect.objectContaining({
+          where: { id: { in: ['me', 'ana'] }, status: UserStatus.ACTIVE },
+        }),
       );
       expect(result.items).toHaveLength(2);
     });
@@ -1526,7 +1662,9 @@ describe('StreamsService', () => {
     it('404s when the stream is not live', async () => {
       prisma.stream.findFirst.mockResolvedValue(null);
 
-      await expect(makeService().mentionSuggestions('s1', 'me', 'a')).rejects.toThrow(NotFoundException);
+      await expect(makeService().mentionSuggestions('s1', 'me', 'a')).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
@@ -1561,7 +1699,9 @@ describe('StreamsService', () => {
       roomBans.isBanned.mockResolvedValueOnce(true);
       const service = makeService();
 
-      await expect(service.requestToJoinAsGuest('s1', 'viewer-1')).rejects.toThrow(ForbiddenException);
+      await expect(service.requestToJoinAsGuest('s1', 'viewer-1')).rejects.toThrow(
+        ForbiddenException,
+      );
       expect(guests.request).not.toHaveBeenCalled();
     });
 
@@ -1569,7 +1709,9 @@ describe('StreamsService', () => {
       social.isBlockedEitherWay.mockResolvedValueOnce(true);
       const service = makeService();
 
-      await expect(service.requestToJoinAsGuest('s1', 'viewer-1')).rejects.toThrow(NotFoundException);
+      await expect(service.requestToJoinAsGuest('s1', 'viewer-1')).rejects.toThrow(
+        NotFoundException,
+      );
       expect(guests.request).not.toHaveBeenCalled();
     });
 
@@ -1597,15 +1739,24 @@ describe('StreamsService', () => {
       await service.listGuestRequests('s1', 'host-1');
       expect(guests.listPending).toHaveBeenCalledWith('s1');
 
-      moderators.findActiveGrant.mockResolvedValue({ capabilities: [ModeratorCapability.MANAGE_GUEST_REQUESTS] });
+      moderators.findActiveGrant.mockResolvedValue({
+        capabilities: [ModeratorCapability.MANAGE_GUEST_REQUESTS],
+      });
       await service.listGuestRequests('s1', 'mod-1');
 
-      moderators.findActiveGrant.mockResolvedValue({ capabilities: [ModeratorCapability.BAN_USERS] });
+      moderators.findActiveGrant.mockResolvedValue({
+        capabilities: [ModeratorCapability.BAN_USERS],
+      });
       await expect(service.listGuestRequests('s1', 'mod-2')).rejects.toThrow(ForbiddenException);
     });
 
     it('accepting mints a fresh publisher token and hands it to GuestsService', async () => {
-      guests.findPendingOrThrow.mockResolvedValue({ id: 'req-1', streamId: 's1', userId: 'u1', initiatedBy: 'VIEWER' });
+      guests.findPendingOrThrow.mockResolvedValue({
+        id: 'req-1',
+        streamId: 's1',
+        userId: 'u1',
+        initiatedBy: 'VIEWER',
+      });
       const service = makeService();
 
       await service.acceptGuestRequest('s1', 'req-1', 'host-1');
@@ -1613,33 +1764,58 @@ describe('StreamsService', () => {
       expect(videoProvider.mintToken).toHaveBeenCalledWith(
         expect.objectContaining({ channelName: 'stream_s1', userId: 'u1', role: 'publisher' }),
       );
-      expect(guests.accept).toHaveBeenCalledWith('s1', 'req-1', expect.objectContaining({ provider: VideoProviderKind.LIVEKIT }));
+      expect(guests.accept).toHaveBeenCalledWith(
+        's1',
+        'req-1',
+        expect.objectContaining({ provider: VideoProviderKind.LIVEKIT }),
+      );
     });
 
     it('refuses to accept once the stream already has the maximum number of guests', async () => {
-      guests.findPendingOrThrow.mockResolvedValue({ id: 'req-1', streamId: 's1', userId: 'u1', initiatedBy: 'VIEWER' });
+      guests.findPendingOrThrow.mockResolvedValue({
+        id: 'req-1',
+        streamId: 's1',
+        userId: 'u1',
+        initiatedBy: 'VIEWER',
+      });
       guests.countActiveGuests.mockResolvedValueOnce(6);
       const service = makeService();
 
-      await expect(service.acceptGuestRequest('s1', 'req-1', 'host-1')).rejects.toThrow(ForbiddenException);
+      await expect(service.acceptGuestRequest('s1', 'req-1', 'host-1')).rejects.toThrow(
+        ForbiddenException,
+      );
       expect(guests.accept).not.toHaveBeenCalled();
     });
 
     it('only lets the invitee accept or reject a HOST-initiated invite, not the host or a moderator', async () => {
-      guests.findPendingOrThrow.mockResolvedValue({ id: 'req-1', streamId: 's1', userId: 'u1', initiatedBy: 'HOST' });
+      guests.findPendingOrThrow.mockResolvedValue({
+        id: 'req-1',
+        streamId: 's1',
+        userId: 'u1',
+        initiatedBy: 'HOST',
+      });
       const service = makeService();
 
-      await expect(service.acceptGuestRequest('s1', 'req-1', 'host-1')).rejects.toThrow(ForbiddenException);
+      await expect(service.acceptGuestRequest('s1', 'req-1', 'host-1')).rejects.toThrow(
+        ForbiddenException,
+      );
       await service.acceptGuestRequest('s1', 'req-1', 'u1');
       expect(guests.accept).toHaveBeenCalled();
     });
 
     it('only lets the host or a moderator accept/reject a VIEWER-initiated request, not the requester', async () => {
-      guests.findPendingOrThrow.mockResolvedValue({ id: 'req-1', streamId: 's1', userId: 'viewer-1', initiatedBy: 'VIEWER' });
+      guests.findPendingOrThrow.mockResolvedValue({
+        id: 'req-1',
+        streamId: 's1',
+        userId: 'viewer-1',
+        initiatedBy: 'VIEWER',
+      });
       moderators.findActiveGrant.mockResolvedValue(null);
       const service = makeService();
 
-      await expect(service.rejectGuestRequest('s1', 'req-1', 'viewer-1')).rejects.toThrow(ForbiddenException);
+      await expect(service.rejectGuestRequest('s1', 'req-1', 'viewer-1')).rejects.toThrow(
+        ForbiddenException,
+      );
       await service.rejectGuestRequest('s1', 'req-1', 'host-1');
       expect(guests.reject).toHaveBeenCalledWith('s1', 'req-1');
     });
@@ -1684,10 +1860,14 @@ describe('StreamsService', () => {
     });
 
     it('never lets a moderator take another moderator off the stage', async () => {
-      moderators.findActiveGrant.mockResolvedValueOnce({ capabilities: [ModeratorCapability.REMOVE_GUESTS] });
+      moderators.findActiveGrant.mockResolvedValueOnce({
+        capabilities: [ModeratorCapability.REMOVE_GUESTS],
+      });
       moderators.isActiveModerator.mockResolvedValueOnce(true);
 
-      await expect(makeService().removeGuest('s1', 'mod-1', 'mod-2')).rejects.toThrow(ForbiddenException);
+      await expect(makeService().removeGuest('s1', 'mod-1', 'mod-2')).rejects.toThrow(
+        ForbiddenException,
+      );
       expect(videoProvider.revokeToken).not.toHaveBeenCalled();
       expect(guests.remove).not.toHaveBeenCalled();
     });
@@ -1703,16 +1883,28 @@ describe('StreamsService', () => {
     });
 
     it("join() includes who's already on stage, the viewer's own pending request, and the host's Agora uid", async () => {
-      prisma.stream.findFirst.mockResolvedValue({ id: 's1', hostId: 'host-1', status: StreamStatus.LIVE });
-      guests.activeGuests.mockResolvedValueOnce([{ id: 'g1', username: 'g', displayName: 'G', avatarUrl: null, joinedAt: new Date() }]);
-      guests.findOwnPending.mockResolvedValueOnce({ id: 'req-1', initiatedBy: 'HOST', requestedAt: new Date() });
+      prisma.stream.findFirst.mockResolvedValue({
+        id: 's1',
+        hostId: 'host-1',
+        status: StreamStatus.LIVE,
+      });
+      guests.activeGuests.mockResolvedValueOnce([
+        { id: 'g1', username: 'g', displayName: 'G', avatarUrl: null, joinedAt: new Date() },
+      ]);
+      guests.findOwnPending.mockResolvedValueOnce({
+        id: 'req-1',
+        initiatedBy: 'HOST',
+        requestedAt: new Date(),
+      });
       const service = makeService();
 
       const result = await service.join('s1', 'viewer-1');
 
       expect(result.activeGuests).toHaveLength(1);
       expect(guests.findOwnPending).toHaveBeenCalledWith('s1', 'viewer-1');
-      expect(result.selfGuestRequest).toEqual(expect.objectContaining({ id: 'req-1', initiatedBy: 'HOST' }));
+      expect(result.selfGuestRequest).toEqual(
+        expect.objectContaining({ id: 'req-1', initiatedBy: 'HOST' }),
+      );
       expect(result.hostAgoraUid).toEqual(expect.any(Number));
     });
 

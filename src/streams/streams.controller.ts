@@ -70,7 +70,10 @@ export class StreamsController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(OptionalJwtAuthGuard)
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
-  watch(@CurrentUser() user: AuthenticatedUser | undefined, @Param('id', ParseUUIDPipe) id: string) {
+  watch(
+    @CurrentUser() user: AuthenticatedUser | undefined,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
     return this.streamsService.watch(id, user?.id);
   }
 
@@ -166,7 +169,10 @@ export class StreamsController {
 
   @Get(':id/recording-permissions')
   @UseGuards(JwtAuthGuard)
-  listRecordingPermissions(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
+  listRecordingPermissions(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
     return this.streamsService.listRecordingPermissions(id, user.id);
   }
 
@@ -271,13 +277,19 @@ export class StreamsController {
 
   @Get(':id/guest-requests')
   @UseGuards(JwtAuthGuard)
-  listGuestRequests(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
+  listGuestRequests(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
     return this.streamsService.listGuestRequests(id, user.id);
   }
 
   @Post(':id/guest-requests')
   @UseGuards(JwtAuthGuard)
-  requestToJoinAsGuest(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
+  requestToJoinAsGuest(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
     return this.streamsService.requestToJoinAsGuest(id, user.id);
   }
 

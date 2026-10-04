@@ -63,11 +63,20 @@ describe('UsersService', () => {
         where: { hostId: 'u1', status: StreamStatus.LIVE },
         select: { id: true },
       });
-      expect(profile).toEqual({ ...profileRow, ...relationship, canViewProfile: true, liveStreamId: null });
+      expect(profile).toEqual({
+        ...profileRow,
+        ...relationship,
+        canViewProfile: true,
+        liveStreamId: null,
+      });
     });
 
     describe('profile visibility', () => {
-      const friendsOnly = { ...profileRow, bio: 'Poker nights', profileVisibility: ProfileVisibility.FRIENDS };
+      const friendsOnly = {
+        ...profileRow,
+        bio: 'Poker nights',
+        profileVisibility: ProfileVisibility.FRIENDS,
+      };
 
       it('keeps the details from someone the owner does not allow, but not who they are', async () => {
         prisma.user.findUnique.mockResolvedValue(friendsOnly);
@@ -92,20 +101,34 @@ describe('UsersService', () => {
 
       it('shows them to a friend', async () => {
         prisma.user.findUnique.mockResolvedValue(friendsOnly);
-        social.getRelationshipSummary.mockResolvedValue({ ...relationship, isFollowing: true, isFollowedBy: true, isFriend: true });
+        social.getRelationshipSummary.mockResolvedValue({
+          ...relationship,
+          isFollowing: true,
+          isFollowedBy: true,
+          isFriend: true,
+        });
 
         const profile = await service().findPublicProfile('u1', 'viewer-1');
 
-        expect(profile).toEqual(expect.objectContaining({ canViewProfile: true, bio: 'Poker nights', followerCount: 3 }));
+        expect(profile).toEqual(
+          expect.objectContaining({ canViewProfile: true, bio: 'Poker nights', followerCount: 3 }),
+        );
       });
 
       it('always shows people their own profile, without a block lookup', async () => {
-        prisma.user.findUnique.mockResolvedValue({ ...friendsOnly, profileVisibility: ProfileVisibility.ONLY_ME });
+        prisma.user.findUnique.mockResolvedValue({
+          ...friendsOnly,
+          profileVisibility: ProfileVisibility.ONLY_ME,
+        });
 
         const profile = await service().findPublicProfile('u1', 'u1');
 
         expect(profile).toEqual(
-          expect.objectContaining({ canViewProfile: true, profileVisibility: ProfileVisibility.ONLY_ME, bio: 'Poker nights' }),
+          expect.objectContaining({
+            canViewProfile: true,
+            profileVisibility: ProfileVisibility.ONLY_ME,
+            bio: 'Poker nights',
+          }),
         );
         expect(social.isBlockedByViewer).not.toHaveBeenCalled();
       });
@@ -115,7 +138,9 @@ describe('UsersService', () => {
         prisma.stream.findFirst.mockResolvedValue({ id: 'stream-1' });
         social.isBlockedByViewer.mockResolvedValue(true);
 
-        await expect(service().findPublicProfile('u1', 'viewer-1')).rejects.toThrow(NotFoundException);
+        await expect(service().findPublicProfile('u1', 'viewer-1')).rejects.toThrow(
+          NotFoundException,
+        );
         expect(social.isBlockedByViewer).toHaveBeenCalledWith('u1', 'viewer-1');
       });
 
@@ -152,7 +177,10 @@ describe('UsersService', () => {
 
   describe('createAvatarUploadUrl', () => {
     it('keys the object under the user id with an extension matching the content type', async () => {
-      storage.createUploadUrl.mockResolvedValue({ uploadUrl: 'https://put', publicUrl: 'https://get' });
+      storage.createUploadUrl.mockResolvedValue({
+        uploadUrl: 'https://put',
+        publicUrl: 'https://get',
+      });
 
       const result = await service().createAvatarUploadUrl('u1', 'image/png');
 
@@ -163,7 +191,10 @@ describe('UsersService', () => {
     });
 
     it('defaults to a .jpg key for anything else the DTO allowed through', async () => {
-      storage.createUploadUrl.mockResolvedValue({ uploadUrl: 'https://put', publicUrl: 'https://get' });
+      storage.createUploadUrl.mockResolvedValue({
+        uploadUrl: 'https://put',
+        publicUrl: 'https://get',
+      });
 
       await service().createAvatarUploadUrl('u1', 'image/jpeg');
 

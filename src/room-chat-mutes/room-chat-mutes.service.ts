@@ -3,7 +3,9 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DomainEvents, RoomChatMuteChangedPayload } from '../common/events/domain-events';
 import { PrismaService } from '../common/prisma/prisma.service';
 
-const MUTED_USER_SELECT = { select: { id: true, username: true, displayName: true, avatarUrl: true } } as const;
+const MUTED_USER_SELECT = {
+  select: { id: true, username: true, displayName: true, avatarUrl: true },
+} as const;
 
 /**
  * Room chat mute (plan §6.7): stops one user's messages being accepted in
@@ -18,7 +20,12 @@ export class RoomChatMutesService {
   ) {}
 
   /** Muting someone already muted replaces the expiry - `expiresAt` null means until the live ends. */
-  async mute(streamId: string, userId: string, actorId: string, expiresAt: Date | null): Promise<void> {
+  async mute(
+    streamId: string,
+    userId: string,
+    actorId: string,
+    expiresAt: Date | null,
+  ): Promise<void> {
     await this.prisma.roomChatMute.upsert({
       where: { streamId_userId: { streamId, userId } },
       create: { streamId, userId, mutedById: actorId, expiresAt },

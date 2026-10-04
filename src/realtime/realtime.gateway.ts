@@ -405,7 +405,11 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     const room = streamRoom(request.streamId);
     if (!socket.rooms.has(room)) return fail('NOT_IN_ROOM');
     try {
-      const result = await this.chat.delete(request.streamId, request.messageId, socket.data.userId);
+      const result = await this.chat.delete(
+        request.streamId,
+        request.messageId,
+        socket.data.userId,
+      );
       if (!result.ok) return fail(result.error);
       // Broadcast happens off the chat_message.deleted domain event, not here
       // (handleChatMessageDeleted below) - keeps every path that can delete a
@@ -458,7 +462,9 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   @OnEvent(DomainEvents.StreamUnlocked)
   handleStreamUnlocked(payload: StreamUnlockedPayload) {
     if (!payload.hostId) return;
-    this.server.to(userRoom(payload.hostId)).emit('stream:unlocked', { streamId: payload.streamId });
+    this.server
+      .to(userRoom(payload.hostId))
+      .emit('stream:unlocked', { streamId: payload.streamId });
   }
 
   @OnEvent(DomainEvents.AdminAlertSent)
@@ -622,7 +628,9 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   handleRoomChatMuteChanged(payload: RoomChatMuteChangedPayload) {
     const room = userRoom(payload.userId);
     if (payload.muted) {
-      this.server.to(room).emit('chat:muted', { streamId: payload.streamId, mutedUntil: payload.mutedUntil });
+      this.server
+        .to(room)
+        .emit('chat:muted', { streamId: payload.streamId, mutedUntil: payload.mutedUntil });
     } else {
       this.server.to(room).emit('chat:unmuted', { streamId: payload.streamId });
     }
@@ -634,7 +642,9 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   handleGuestMicForceMuteChanged(payload: GuestMicForceMuteChangedPayload) {
     const { streamId, userId, forceMuted } = payload;
     if (forceMuted) this.server.to(userRoom(userId)).emit('force_mute_audio', { streamId });
-    this.server.to(streamRoom(streamId)).emit('presence:audio_state', { streamId, userId, forceMuted });
+    this.server
+      .to(streamRoom(streamId))
+      .emit('presence:audio_state', { streamId, userId, forceMuted });
   }
 
   // Private to that viewer: their app lets recording through for this live, or blocks it again.
@@ -755,7 +765,10 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     const pending = this.pendingArrivals.get(streamId);
     if (!pending) return;
     this.pendingArrivals.delete(streamId);
-    Promise.all([this.streams.participantSummaries([pending.userId]), this.blockedRoomsOf(pending.userId)]).then(
+    Promise.all([
+      this.streams.participantSummaries([pending.userId]),
+      this.blockedRoomsOf(pending.userId),
+    ]).then(
       ([[user], hidden]) => {
         if (!user) return;
         const room = this.server.to(streamRoom(streamId));

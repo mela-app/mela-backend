@@ -13,7 +13,9 @@ export const ALL_ADMIN_PERMISSIONS: readonly AdminPermission[] = Object.values(A
 
 /** [granted] plus everything it includes, once each, in the enum's order. */
 export function withIncludedPermissions(granted: readonly AdminPermission[]): AdminPermission[] {
-  const all = new Set(granted.flatMap((permission) => [permission, ...(INCLUDES[permission] ?? [])]));
+  const all = new Set(
+    granted.flatMap((permission) => [permission, ...(INCLUDES[permission] ?? [])]),
+  );
   return ALL_ADMIN_PERMISSIONS.filter((permission) => all.has(permission));
 }
 
@@ -22,7 +24,10 @@ export function withIncludedPermissions(granted: readonly AdminPermission[]): Ad
  * admin, what a super admin gave them for a platform moderator, and
  * nothing for anyone else.
  */
-export function effectiveAdminPermissions(role: PlatformRole, granted: readonly AdminPermission[]): AdminPermission[] {
+export function effectiveAdminPermissions(
+  role: PlatformRole,
+  granted: readonly AdminPermission[],
+): AdminPermission[] {
   if (role === PlatformRole.SUPER_ADMIN) return [...ALL_ADMIN_PERMISSIONS];
   if (role === PlatformRole.PLATFORM_MODERATOR) return withIncludedPermissions(granted);
   return [];
