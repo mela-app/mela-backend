@@ -6,6 +6,7 @@ import { ModeratorsModule } from '../moderators/moderators.module';
 import { RecordingPermissionsModule } from '../recording-permissions/recording-permissions.module';
 import { RoomBansModule } from '../room-bans/room-bans.module';
 import { RoomChatMutesModule } from '../room-chat-mutes/room-chat-mutes.module';
+import { SocialModule } from '../social/social.module';
 import { StreamsModule } from '../streams/streams.module';
 import { RealtimeGateway } from './realtime.gateway';
 
@@ -15,7 +16,8 @@ import { RealtimeGateway } from './realtime.gateway';
   // the chat and likes pipelines behind chat:send and like:send. RoomBansModule:
   // the stream:join ban check. RoomChatMutesModule: the joiner's own mute.
   // ModeratorsModule: who moderates a live, for everyone in it.
-  // RecordingPermissionsModule: whether the joiner may record.
+  // RecordingPermissionsModule: whether the joiner may record. SocialModule:
+  // blocks, which keep people out of each other's lives and chat.
   imports: [
     AuthModule,
     StreamsModule,
@@ -25,6 +27,7 @@ import { RealtimeGateway } from './realtime.gateway';
     RoomChatMutesModule,
     ModeratorsModule,
     RecordingPermissionsModule,
+    SocialModule,
   ],
   providers: [RealtimeGateway],
   // The admin console's alerts reach rooms through it; everything else

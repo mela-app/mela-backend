@@ -319,6 +319,8 @@ describe('SocialService', () => {
     const row = (id: string, userId: string) => ({ id, follower: { id: userId }, followee: { id: userId } });
     const owner = (profileVisibility: ProfileVisibility) => prisma.user.findUnique.mockResolvedValueOnce({ profileVisibility });
 
+    beforeEach(() => prisma.block.findMany.mockResolvedValue([]));
+
     it('pages followers, newest first, with a cursor for the next page', async () => {
       owner(ProfileVisibility.EVERYONE);
       prisma.follow.findMany.mockResolvedValue([row('3', 'a'), row('2', 'b'), row('1', 'c')]);
@@ -340,6 +342,28 @@ describe('SocialService', () => {
       const page = await service().listFollowing('host', undefined, undefined, 5);
 
       expect(page).toEqual({ items: [{ id: 'a' }], hasMore: false, nextCursor: null });
+    });
+
+    it('leaves out anyone blocked either way with the viewer', async () => {
+      prisma.block.findMany.mockResolvedValue([
+        { blockerId: 'me', blockedId: 'x' },
+        { blockerId: 'y', blockedId: 'me' },
+      ]);
+      prisma.follow.findMany.mockResolvedValue([]);
+
+      owner(ProfileVisibility.EVERYONE);
+      await service().listFollowers('host', 'me');
+      owner(ProfileVisibility.EVERYONE);
+      await service().listFollowing('host', 'me');
+
+      expect(prisma.follow.findMany).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ where: { followeeId: 'host', followerId: { notIn: ['x', 'y'] } } }),
+      );
+      expect(prisma.follow.findMany).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ where: { followerId: 'host', followeeId: { notIn: ['x', 'y'] } } }),
+      );
     });
 
     it('keeps a friends-only profile\'s lists from someone who is only a follower', async () => {
@@ -371,13 +395,17 @@ describe('SocialService', () => {
       await expect(service().listFollowers('me', 'me')).resolves.toEqual(expect.objectContaining({ items: [] }));
     });
 
-    it('treats a signed-out visitor, and someone the owner blocked, as strangers', async () => {
+    it('treats a signed-out visitor as a stranger', async () => {
       owner(ProfileVisibility.FOLLOWERS);
       await expect(service().listFollowers('host', undefined)).rejects.toThrow(ForbiddenException);
+    });
 
+    it('404s for someone the owner blocked, like the profile itself', async () => {
       owner(ProfileVisibility.EVERYONE);
       prisma.block.findUnique.mockResolvedValueOnce({ id: 'b1' });
-      await expect(service().listFollowers('host', 'me')).rejects.toThrow(ForbiddenException);
+
+      await expect(service().listFollowers('host', 'me')).rejects.toThrow(NotFoundException);
+      expect(prisma.follow.findMany).not.toHaveBeenCalled();
     });
 
     it('404s for someone who does not exist', async () => {

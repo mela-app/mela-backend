@@ -110,17 +110,23 @@ describe('UsersService', () => {
         expect(social.isBlockedByViewer).not.toHaveBeenCalled();
       });
 
-      it("shows someone the owner blocked a private profile, and not the owner's live", async () => {
+      it("404s for someone the owner blocked, as if the account didn't exist", async () => {
         prisma.user.findUnique.mockResolvedValue(profileRow);
         prisma.stream.findFirst.mockResolvedValue({ id: 'stream-1' });
         social.isBlockedByViewer.mockResolvedValue(true);
 
+        await expect(service().findPublicProfile('u1', 'viewer-1')).rejects.toThrow(NotFoundException);
+        expect(social.isBlockedByViewer).toHaveBeenCalledWith('u1', 'viewer-1');
+      });
+
+      it("doesn't offer the live of someone this viewer blocked", async () => {
+        prisma.user.findUnique.mockResolvedValue(profileRow);
+        prisma.stream.findFirst.mockResolvedValue({ id: 'stream-1' });
+        social.getRelationshipSummary.mockResolvedValue({ ...relationship, isBlocked: true });
+
         const profile = await service().findPublicProfile('u1', 'viewer-1');
 
-        expect(social.isBlockedByViewer).toHaveBeenCalledWith('u1', 'viewer-1');
-        expect(profile).toEqual(
-          expect.objectContaining({ canViewProfile: false, profileVisibility: ProfileVisibility.ONLY_ME, liveStreamId: null }),
-        );
+        expect(profile).toEqual(expect.objectContaining({ isBlocked: true, liveStreamId: null }));
       });
     });
 

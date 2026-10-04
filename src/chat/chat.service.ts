@@ -15,6 +15,7 @@ import { RedisService } from '../common/redis/redis.service';
 import { STORAGE_PROVIDER, StorageProvider } from '../common/storage/storage-provider.interface';
 import { ModeratorsService } from '../moderators/moderators.service';
 import { RoomChatMutesService } from '../room-chat-mutes/room-chat-mutes.service';
+import { notBlockedEitherWayWith } from '../social/block-filters';
 import { StreamsService } from '../streams/streams.service';
 import { BannedPhrasesService } from './banned-phrases.service';
 import { ChatImageType, chatImageKey, chatPreviewText, isChatImageKey } from './chat-images';
@@ -172,8 +173,11 @@ export class ChatService {
     return { ...(await this.storage.createUploadUrl(imageKey, contentType)), imageKey };
   }
 
-  /** A live's visible messages, oldest first - see ChatHistoryQueryDto. */
-  async history(streamId: string, query: ChatHistoryQueryDto) {
+  /**
+   * A live's visible messages, oldest first - see ChatHistoryQueryDto. For
+   * [requesterId], without anyone blocked either way (plan §6.4).
+   */
+  async history(streamId: string, query: ChatHistoryQueryDto, requesterId?: string) {
     // Chat belongs to the live, not a public archive (plan §6.1).
     if (!(await this.streams.findLive(streamId))) {
       throw new NotFoundException('Stream is not live');
@@ -184,6 +188,7 @@ export class ChatService {
         streamId,
         moderationStatus: ChatModerationStatus.VISIBLE,
         id: { lt: query.before, gt: query.after },
+        ...(requesterId && { user: notBlockedEitherWayWith(requesterId) }),
       },
       // Newest first to pick the window; handed out oldest first.
       orderBy: { id: 'desc' },

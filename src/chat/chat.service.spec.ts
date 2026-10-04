@@ -375,6 +375,23 @@ describe('ChatService', () => {
       );
     });
 
+    it('leaves out messages from anyone blocked either way with the reader', async () => {
+      prisma.chatMessage.findMany.mockResolvedValue([]);
+
+      await service().history(LIVE, { limit: 50 }, 'reader-1');
+
+      expect(prisma.chatMessage.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            user: {
+              blockedBy: { none: { blockerId: 'reader-1' } },
+              blocksMade: { none: { blockedId: 'reader-1' } },
+            },
+          }),
+        }),
+      );
+    });
+
     it("keeps an ended live's chat private", async () => {
       streams.findLive.mockResolvedValue(null);
 

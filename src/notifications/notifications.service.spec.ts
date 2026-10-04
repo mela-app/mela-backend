@@ -181,12 +181,34 @@ describe('NotificationsService', () => {
   });
 
   describe('list/unreadCount/markRead', () => {
+    // Nothing from anyone blocked either way; an account since deleted still shows.
+    const inbox = {
+      recipientId: 'u1',
+      OR: [
+        { actorId: null },
+        { actor: { blockedBy: { none: { blockerId: 'u1' } }, blocksMade: { none: { blockedId: 'u1' } } } },
+      ],
+    };
+
     it('pages the inbox newest-first with a cursor', async () => {
       prisma.notification.findMany.mockResolvedValue([{ id: 'n1' }]);
 
       const page = await service().list('u1', undefined, 30);
 
       expect(page).toEqual({ items: [{ id: 'n1' }], hasMore: false, nextCursor: null });
+    });
+
+    it("leaves out what came from anyone blocked either way, in the inbox and its count", async () => {
+      prisma.notification.findMany.mockResolvedValue([]);
+      prisma.notification.count.mockResolvedValue(0);
+
+      await service().list('u1', 'n9', 30);
+      await service().unreadCount('u1');
+
+      expect(prisma.notification.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { ...inbox, id: { lt: 'n9' } } }),
+      );
+      expect(prisma.notification.count).toHaveBeenCalledWith({ where: { ...inbox, readAt: null } });
     });
 
     it('reports the unread count', async () => {

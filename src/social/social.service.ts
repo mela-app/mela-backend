@@ -54,9 +54,11 @@ export class SocialService {
   }
 
   /**
-   * Personal block (plan §6.4): hides the blocked user's messages/streams for
-   * the blocker (enforced client-side) and deletes any follow between them
-   * both ways. Idempotent, like follow.
+   * Personal block (plan §6.4): deletes any follow between them both ways,
+   * and from then on neither sees the other's lives, chat, notifications or
+   * messages, and the blocker's profile is gone for the blocked person. A
+   * live already running between them is handled on UserBlocked. Idempotent,
+   * like follow.
    */
   async block(blockerId: string, blockedId: string): Promise<{ ok: true }> {
     if (blockerId === blockedId) throw new BadRequestException("You can't block yourself");
@@ -254,18 +256,28 @@ export class SocialService {
     return { isSelf: false, isFollower, isFriend: isFollower && isFollowedBy, blockedByOwner };
   }
 
-  // Who someone follows, and who follows them, are profile details too.
+  // Who someone follows, and who follows them, are profile details too - and
+  // like the profile itself, they don't exist for someone its owner blocked.
   private async assertCanViewDetails(profileId: string, requesterId?: string): Promise<void> {
     const owner = await this.prisma.user.findUnique({ where: { id: profileId }, select: { profileVisibility: true } });
     if (!owner) throw new NotFoundException('User not found');
-    if (canViewProfileDetails(owner.profileVisibility, await this.profileViewer(profileId, requesterId))) return;
+    const viewer = await this.profileViewer(profileId, requesterId);
+    if (viewer.blockedByOwner) throw new NotFoundException('User not found');
+    if (canViewProfileDetails(owner.profileVisibility, viewer)) return;
     throw new ForbiddenException({ message: 'This profile is private', code: 'PROFILE_PRIVATE' });
+  }
+
+  // Nobody blocked either way with the requester shows up in a list.
+  private async hiddenFrom(requesterId?: string): Promise<{ notIn: string[] } | undefined> {
+    const blocked = requesterId ? await this.blockedEitherWayUserIds(requesterId) : [];
+    return blocked.length > 0 ? { notIn: blocked } : undefined;
   }
 
   async listFollowers(userId: string, requesterId?: string, cursor?: string, limit = 30) {
     await this.assertCanViewDetails(userId, requesterId);
+    const hidden = await this.hiddenFrom(requesterId);
     const rows = await this.prisma.follow.findMany({
-      where: { followeeId: userId, ...(cursor ? { id: { lt: cursor } } : {}) },
+      where: { followeeId: userId, ...(hidden && { followerId: hidden }), ...(cursor ? { id: { lt: cursor } } : {}) },
       orderBy: { id: 'desc' },
       take: limit + 1,
       select: { id: true, follower: { select: PROFILE_SUMMARY_SELECT } },
@@ -278,8 +290,9 @@ export class SocialService {
 
   async listFollowing(userId: string, requesterId?: string, cursor?: string, limit = 30) {
     await this.assertCanViewDetails(userId, requesterId);
+    const hidden = await this.hiddenFrom(requesterId);
     const rows = await this.prisma.follow.findMany({
-      where: { followerId: userId, ...(cursor ? { id: { lt: cursor } } : {}) },
+      where: { followerId: userId, ...(hidden && { followeeId: hidden }), ...(cursor ? { id: { lt: cursor } } : {}) },
       orderBy: { id: 'desc' },
       take: limit + 1,
       select: { id: true, followee: { select: PROFILE_SUMMARY_SELECT } },

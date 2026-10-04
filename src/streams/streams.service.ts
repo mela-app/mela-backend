@@ -8,7 +8,7 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import {
   GuestRequestInitiator,
   ModeratorCapability,
@@ -24,11 +24,13 @@ import { PermissionsService } from '../common/permissions/permissions.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import {
   DomainEvents,
+  LiveAccessRevokedPayload,
   StreamEndedPayload,
   StreamLayoutChangedPayload,
   StreamLockedPayload,
   StreamStartedPayload,
   StreamUnlockedPayload,
+  UserBlockedPayload,
 } from '../common/events/domain-events';
 import {
   HOST_HEARTBEAT_TTL_SECONDS,
@@ -251,6 +253,7 @@ export class StreamsService {
 
   async join(streamId: string, viewerId: string) {
     const stream = await this.getLiveOrThrow(streamId);
+    await this.assertNotBlocked(stream.hostId, viewerId);
     if (await this.roomBans.isBanned(stream.hostId, viewerId, streamId)) {
       throw new ForbiddenException('You are banned from this stream');
     }
@@ -309,6 +312,7 @@ export class StreamsService {
    */
   async watch(streamId: string, userId?: string) {
     const stream = await this.getLiveOrThrow(streamId);
+    if (userId) await this.assertNotBlocked(stream.hostId, userId);
     if (userId && (await this.roomBans.isBanned(stream.hostId, userId, streamId))) {
       throw new ForbiddenException('You are banned from this stream');
     }
@@ -544,11 +548,19 @@ export class StreamsService {
     return this.moderators.revoke(streamId, userId);
   }
 
-  /** Who's watching right now, paginated from presence (plan §6.13) - live streams only. */
-  async listViewers(streamId: string, cursor?: string, limit = 30) {
+  /**
+   * Who's watching right now, paginated from presence (plan §6.13) - live
+   * streams only, without anyone blocked either way with [requesterId].
+   */
+  async listViewers(streamId: string, requesterId: string, cursor?: string, limit = 30) {
     if (!(await this.findLive(streamId))) throw new NotFoundException('Stream is not live');
 
-    const allIds = (await this.presence.viewerIds(streamId)).sort();
+    const [viewerIds, blocked] = await Promise.all([
+      this.presence.viewerIds(streamId),
+      this.social.blockedEitherWayUserIds(requesterId),
+    ]);
+    const hidden = new Set(blocked);
+    const allIds = viewerIds.filter((id) => !hidden.has(id)).sort();
     const startIndex = cursor ? allIds.indexOf(cursor) + 1 : 0;
     const pageIds = allIds.slice(startIndex, startIndex + limit + 1);
     const hasMore = pageIds.length > limit;
@@ -610,6 +622,7 @@ export class StreamsService {
   /** Viewer raises their hand to join on stage (plan §6.5) - live streams only, not banned, not already a guest. */
   async requestToJoinAsGuest(streamId: string, viewerId: string) {
     const stream = await this.getLiveOrThrow(streamId);
+    await this.assertNotBlocked(stream.hostId, viewerId);
     if (await this.roomBans.isBanned(stream.hostId, viewerId, streamId)) {
       throw new ForbiddenException('You are banned from this stream');
     }
@@ -622,6 +635,7 @@ export class StreamsService {
     if (!this.permissions.canStartOrEndStream(requesterId, stream.hostId)) {
       throw new ForbiddenException('Only the host can invite someone on stage');
     }
+    await this.assertNotBlocked(stream.hostId, userId);
     return this.guests.invite(streamId, stream.hostId, userId);
   }
 
@@ -749,6 +763,38 @@ export class StreamsService {
       likeCount,
       newFollowers,
     };
+  }
+
+  /**
+   * A block between a running live's host and someone in it (plan §6.4):
+   * they're out of it at once - off stage and out of the video room - and the
+   * gateway takes their sockets out of its room.
+   */
+  @OnEvent(DomainEvents.UserBlocked)
+  async handleUserBlocked({ blockerId, blockedId }: UserBlockedPayload): Promise<void> {
+    try {
+      const lives = await this.prisma.stream.findMany({
+        where: { status: StreamStatus.LIVE, hostId: { in: [blockerId, blockedId] } },
+      });
+      for (const stream of lives) {
+        const removedByHost = stream.hostId === blockerId;
+        const userId = removedByHost ? blockedId : blockerId;
+        await this.vacateGuestSeat(stream, userId, removedByHost, blockerId);
+        // A plain viewer has no seat, but still has the video.
+        await this.videoProviders
+          .get(stream.videoProvider)
+          .revokeToken(stream.channelName, userId)
+          .catch((error) => this.logger.warn(`Could not revoke token for ${userId} on ${stream.id}: ${error}`));
+        this.events.emit(DomainEvents.LiveAccessRevoked, {
+          streamId: stream.id,
+          hostId: stream.hostId,
+          userId,
+          removedByHost,
+        } satisfies LiveAccessRevokedPayload);
+      }
+    } catch (error) {
+      this.logger.warn(`Could not apply ${blockerId}'s block of ${blockedId} to their lives: ${error}`);
+    }
   }
 
   // Media first, then the seat: once `guest:removed` goes out the client may
@@ -936,6 +982,14 @@ export class StreamsService {
       throw new NotFoundException('Stream not found');
     }
     return stream;
+  }
+
+  // Blocked either way (plan §6.4): to them the live doesn't exist - without
+  // saying which side blocked.
+  private async assertNotBlocked(hostId: string, userId: string): Promise<void> {
+    if (await this.social.isBlockedEitherWay(hostId, userId)) {
+      throw new NotFoundException('Stream not found');
+    }
   }
 
   private async getLiveOrThrow(streamId: string) {

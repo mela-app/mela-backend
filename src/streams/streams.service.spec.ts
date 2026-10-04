@@ -86,6 +86,7 @@ describe('StreamsService', () => {
   };
   const social = {
     isFollowing: jest.fn().mockResolvedValue(false),
+    isBlockedEitherWay: jest.fn().mockResolvedValue(false),
     blockedEitherWayUserIds: jest.fn().mockResolvedValue([]),
   };
   const moderators = {
@@ -408,6 +409,22 @@ describe('StreamsService', () => {
     expect(videoProvider.mintToken).not.toHaveBeenCalled();
   });
 
+  it('treats a live as gone for someone blocked either way with its host', async () => {
+    prisma.stream.findUnique.mockResolvedValue({
+      id: 's1',
+      hostId: 'host-1',
+      status: StreamStatus.LIVE,
+      videoProvider: VideoProviderKind.AGORA,
+      channelName: 'stream_s1',
+    });
+    social.isBlockedEitherWay.mockResolvedValueOnce(true);
+    const service = makeService();
+
+    await expect(service.join('s1', 'viewer-1')).rejects.toThrow(NotFoundException);
+    expect(social.isBlockedEitherWay).toHaveBeenCalledWith('host-1', 'viewer-1');
+    expect(videoProvider.mintToken).not.toHaveBeenCalled();
+  });
+
   describe('watch (the share page player)', () => {
     const live = {
       id: 's1',
@@ -453,6 +470,16 @@ describe('StreamsService', () => {
       const service = makeService();
 
       await expect(service.watch('s1', 'viewer-1')).rejects.toThrow(ForbiddenException);
+      expect(videoProvider.mintToken).not.toHaveBeenCalled();
+    });
+
+    it('keeps someone blocked either way with the host out, even on the web', async () => {
+      prisma.stream.findUnique.mockResolvedValue(live);
+      social.isBlockedEitherWay.mockResolvedValueOnce(true);
+      const service = makeService();
+
+      await expect(service.watch('s1', 'viewer-1')).rejects.toThrow(NotFoundException);
+      expect(social.isBlockedEitherWay).toHaveBeenCalledWith('host-1', 'viewer-1');
       expect(videoProvider.mintToken).not.toHaveBeenCalled();
     });
 
@@ -1369,18 +1396,89 @@ describe('StreamsService', () => {
       ]);
       const service = makeService();
 
-      const result = await service.listViewers('s1', undefined, 2);
+      const result = await service.listViewers('s1', 'me', undefined, 2);
 
       expect(result.items.map((item) => item.id)).toEqual(['a', 'b']);
       expect(result.hasMore).toBe(true);
       expect(result.nextCursor).toBe('b');
     });
 
+    it('leaves out anyone blocked either way with the requester', async () => {
+      prisma.stream.findFirst.mockResolvedValue({ id: 's1' });
+      presence.viewerIds.mockResolvedValueOnce(['c', 'blocked', 'a']);
+      social.blockedEitherWayUserIds.mockResolvedValueOnce(['blocked']);
+      prisma.user.findMany.mockResolvedValueOnce([]);
+      const service = makeService();
+
+      const result = await service.listViewers('s1', 'me');
+
+      expect(social.blockedEitherWayUserIds).toHaveBeenCalledWith('me');
+      expect(prisma.user.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: ['a', 'c'] } } }));
+      expect(result).toMatchObject({ hasMore: false, nextCursor: null });
+    });
+
     it('404s when the stream is not live', async () => {
       prisma.stream.findFirst.mockResolvedValue(null);
       const service = makeService();
 
-      await expect(service.listViewers('s1')).rejects.toThrow(NotFoundException);
+      await expect(service.listViewers('s1', 'me')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('a block during a running live (plan §6.4)', () => {
+    const live = {
+      id: 's1',
+      hostId: 'host',
+      status: StreamStatus.LIVE,
+      videoProvider: VideoProviderKind.LIVEKIT,
+      channelName: 'stream_s1',
+    };
+
+    it('takes whoever the host blocked out of the live, and says the host removed them', async () => {
+      prisma.stream.findMany.mockResolvedValueOnce([live]);
+
+      await makeService().handleUserBlocked({ blockerId: 'host', blockedId: 'viewer' });
+
+      expect(prisma.stream.findMany).toHaveBeenCalledWith({
+        where: { status: StreamStatus.LIVE, hostId: { in: ['host', 'viewer'] } },
+      });
+      expect(videoProvider.revokeToken).toHaveBeenCalledWith('stream_s1', 'viewer');
+      expect(events.emit).toHaveBeenCalledWith('live.access_revoked', {
+        streamId: 's1',
+        hostId: 'host',
+        userId: 'viewer',
+        removedByHost: true,
+      });
+    });
+
+    it('takes someone who blocked the host out of their live too', async () => {
+      prisma.stream.findMany.mockResolvedValueOnce([live]);
+
+      await makeService().handleUserBlocked({ blockerId: 'viewer', blockedId: 'host' });
+
+      expect(videoProvider.revokeToken).toHaveBeenCalledWith('stream_s1', 'viewer');
+      expect(events.emit).toHaveBeenCalledWith(
+        'live.access_revoked',
+        expect.objectContaining({ userId: 'viewer', removedByHost: false }),
+      );
+    });
+
+    it('gets a blocked guest off the stage first', async () => {
+      prisma.stream.findMany.mockResolvedValueOnce([live]);
+      guests.isActiveGuest.mockResolvedValueOnce(true);
+
+      await makeService().handleUserBlocked({ blockerId: 'host', blockedId: 'guest' });
+
+      expect(guests.remove).toHaveBeenCalledWith('s1', 'host', 'guest', true, 'host');
+    });
+
+    it('does nothing when neither of them is live', async () => {
+      prisma.stream.findMany.mockResolvedValueOnce([]);
+
+      await makeService().handleUserBlocked({ blockerId: 'a', blockedId: 'b' });
+
+      expect(videoProvider.revokeToken).not.toHaveBeenCalled();
+      expect(events.emit).not.toHaveBeenCalled();
     });
   });
 
@@ -1464,6 +1562,14 @@ describe('StreamsService', () => {
       const service = makeService();
 
       await expect(service.requestToJoinAsGuest('s1', 'viewer-1')).rejects.toThrow(ForbiddenException);
+      expect(guests.request).not.toHaveBeenCalled();
+    });
+
+    it('has no stage to offer someone blocked either way with the host', async () => {
+      social.isBlockedEitherWay.mockResolvedValueOnce(true);
+      const service = makeService();
+
+      await expect(service.requestToJoinAsGuest('s1', 'viewer-1')).rejects.toThrow(NotFoundException);
       expect(guests.request).not.toHaveBeenCalled();
     });
 

@@ -98,8 +98,12 @@ export class StreamsController {
 
   @Get(':id/viewers')
   @UseGuards(JwtAuthGuard)
-  listViewers(@Param('id', ParseUUIDPipe) id: string, @Query() query: ViewersQueryDto) {
-    return this.streamsService.listViewers(id, query.cursor, query.limit);
+  listViewers(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: ViewersQueryDto,
+  ) {
+    return this.streamsService.listViewers(id, user.id, query.cursor, query.limit);
   }
 
   @Get(':id/mention-suggestions')

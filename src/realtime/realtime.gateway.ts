@@ -12,7 +12,7 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
-import { AlertScope, StreamLayout } from '@prisma/client';
+import { AlertScope, RoomBanScope, StreamLayout } from '@prisma/client';
 import { ClassConstructor, plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { Server, Socket } from 'socket.io';
@@ -37,6 +37,7 @@ import {
   GuestRequestCancelledPayload,
   GuestRequestCreatedPayload,
   GuestRequestRejectedPayload,
+  LiveAccessRevokedPayload,
   ModeratorGrantedPayload,
   ModeratorRevokedPayload,
   ModeratorUpdatedPayload,
@@ -57,6 +58,7 @@ import { ModeratorsService } from '../moderators/moderators.service';
 import { RecordingPermissionsService } from '../recording-permissions/recording-permissions.service';
 import { RoomBansService } from '../room-bans/room-bans.service';
 import { RoomChatMutesService } from '../room-chat-mutes/room-chat-mutes.service';
+import { SocialService } from '../social/social.service';
 import { StreamsService } from '../streams/streams.service';
 import { HostAwayDto, HostJoinDto, HostPauseDto, StreamRoomDto } from './dto/stream-room.dto';
 
@@ -152,6 +154,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     private readonly moderators: ModeratorsService,
     private readonly watchTickets: WatchTicketService,
     private readonly recordingPermissions: RecordingPermissionsService,
+    private readonly social: SocialService,
   ) {}
 
   // Middleware runs before a connection is accepted, so no event can arrive
@@ -197,6 +200,10 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     const live = await this.streams.findLive(request.streamId);
     if (!live) return fail('STREAM_NOT_LIVE');
     if (await this.roomBans.isBanned(live.hostId, socket.data.userId, live.id)) {
+      return fail('NOT_ALLOWED');
+    }
+    // Blocked either way with the host (plan §6.4).
+    if (await this.social.isBlockedEitherWay(live.hostId, socket.data.userId)) {
       return fail('NOT_ALLOWED');
     }
 
@@ -343,6 +350,8 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     // Rooms are emptied when a live ends, so this also refuses an ended live.
     if (!socket.rooms.has(room)) return fail('NOT_IN_ROOM');
     try {
+      // Looked up first: a message that can't be kept from them isn't sent at all.
+      const hidden = await this.blockedRoomsOf(socket.data.userId);
       const result = await this.chat.send(
         request.streamId,
         socket.data.userId,
@@ -351,8 +360,12 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
         request.imageKey,
       );
       if (!result.ok) return fail(result.error, result.retryAfterMs);
-      // The sender has it in this answer; everyone else, their other devices included, by broadcast.
-      if (!result.resent) socket.to(room).emit('chat:new', result.message);
+      // The sender has it in this answer; everyone else, their other devices
+      // included, by broadcast - but nobody blocked either way with them.
+      if (!result.resent) {
+        const others = socket.to(room);
+        (hidden.length > 0 ? others.except(hidden) : others).emit('chat:new', result.message);
+      }
       return { ok: true, message: result.message };
     } catch (error) {
       this.logger.warn(`Chat message for ${request.streamId} failed: ${error}`);
@@ -587,6 +600,22 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     });
   }
 
+  // A block between the host and someone in their live (plan §6.4): out of
+  // the room at once. Whoever the host blocked hears it as a removal from
+  // this live; someone who blocked the host is leaving on their own.
+  @OnEvent(DomainEvents.LiveAccessRevoked)
+  handleLiveAccessRevoked(payload: LiveAccessRevokedPayload) {
+    const target = userRoom(payload.userId);
+    this.server.in(target).socketsLeave(streamRoom(payload.streamId));
+    if (payload.removedByHost) {
+      this.server.to(target).emit('force_disconnect', {
+        hostId: payload.hostId,
+        streamId: payload.streamId,
+        scope: RoomBanScope.SESSION,
+      });
+    }
+  }
+
   // Private to the muted person (plan §6.7): their composer locks until
   // mutedUntil (null: the live's end) or chat:unmuted. The room isn't told.
   @OnEvent(DomainEvents.RoomChatMuteChanged)
@@ -726,12 +755,23 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     const pending = this.pendingArrivals.get(streamId);
     if (!pending) return;
     this.pendingArrivals.delete(streamId);
-    this.streams.participantSummaries([pending.userId]).then(
-      ([user]) => {
-        if (user) this.server.to(streamRoom(streamId)).emit('viewer:joined', { streamId, user, others: pending.others });
+    Promise.all([this.streams.participantSummaries([pending.userId]), this.blockedRoomsOf(pending.userId)]).then(
+      ([[user], hidden]) => {
+        if (!user) return;
+        const room = this.server.to(streamRoom(streamId));
+        (hidden.length > 0 ? room.except(hidden) : room).emit('viewer:joined', {
+          streamId,
+          user,
+          others: pending.others,
+        });
       },
       (error) => this.logger.warn(`Could not announce an arrival in ${streamId}: ${error}`),
     );
+  }
+
+  // The personal rooms of everyone blocked either way with [userId] (plan §6.4).
+  private async blockedRoomsOf(userId: string): Promise<string[]> {
+    return (await this.social.blockedEitherWayUserIds(userId)).map(userRoom);
   }
 
   private flushViewerCount(streamId: string): void {

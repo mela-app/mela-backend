@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
-import { GuestRequestInitiator, NotificationType } from '@prisma/client';
+import { GuestRequestInitiator, NotificationType, Prisma } from '@prisma/client';
 import {
   DomainEvents,
   GuestRequestCreatedPayload,
@@ -12,6 +12,7 @@ import {
 } from '../common/events/domain-events';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RedisService } from '../common/redis/redis.service';
+import { notBlockedEitherWayWith } from '../social/block-filters';
 import { SocialService } from '../social/social.service';
 import { MarkNotificationsReadDto } from './dto/mark-notifications-read.dto';
 import { UpdateNotificationSettingsDto } from './dto/notification-settings.dto';
@@ -54,6 +55,12 @@ const NOTIFICATION_LIST_SELECT = {
   actor: { select: PROFILE_SUMMARY_SELECT },
   stream: { select: { id: true, title: true } },
 } as const;
+
+// Someone's inbox, without anything from a person blocked either way (plan
+// §6.4) - a notification with no actor (deleted account) still shows.
+function inboxOf(recipientId: string): Prisma.NotificationWhereInput {
+  return { recipientId, OR: [{ actorId: null }, { actor: notBlockedEitherWayWith(recipientId) }] };
+}
 
 export interface SettingsView {
   pushStreamStarted: boolean;
@@ -213,7 +220,7 @@ export class NotificationsService {
   /** Cursor-paginated inbox, newest first (plan §6.11). */
   async list(recipientId: string, cursor?: string, limit = 30): Promise<Page<unknown>> {
     const rows = await this.prisma.notification.findMany({
-      where: { recipientId, ...(cursor ? { id: { lt: cursor } } : {}) },
+      where: { ...inboxOf(recipientId), ...(cursor ? { id: { lt: cursor } } : {}) },
       orderBy: { id: 'desc' },
       take: limit + 1,
       select: NOTIFICATION_LIST_SELECT,
@@ -224,7 +231,7 @@ export class NotificationsService {
   }
 
   async unreadCount(recipientId: string): Promise<{ count: number }> {
-    const count = await this.prisma.notification.count({ where: { recipientId, readAt: null } });
+    const count = await this.prisma.notification.count({ where: { ...inboxOf(recipientId), readAt: null } });
     return { count };
   }
 

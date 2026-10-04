@@ -31,6 +31,7 @@ export class UsersService {
   /**
    * [requesterId] adds isFollowing/isFollowedBy/isFriend for that viewer - omit it for a signed-out one.
    * The details (bio, counts) are null unless the owner's profile visibility lets this viewer see them.
+   * Someone the owner blocked gets a 404, as if the account didn't exist (plan §6.4).
    */
   async findPublicProfile(id: string, requesterId?: string) {
     const user = await this.prisma.user.findUnique({
@@ -46,6 +47,9 @@ export class UsersService {
       this.prisma.stream.findFirst({ where: { hostId: id, status: StreamStatus.LIVE }, select: { id: true } }),
       requesterId && !isSelf ? this.social.isBlockedByViewer(id, requesterId) : Promise.resolve(false),
     ]);
+    if (blockedByOwner) {
+      throw new NotFoundException('User not found');
+    }
     const viewer: ProfileViewer = {
       isSelf,
       isFollower: relationship.isFollowing,
@@ -63,7 +67,8 @@ export class UsersService {
       followerCount: canViewProfile ? followerCount : null,
       followingCount: canViewProfile ? followingCount : null,
       ...relation,
-      liveStreamId: blockedByOwner ? null : (liveStream?.id ?? null),
+      // Someone this viewer blocked can't be watched either.
+      liveStreamId: relation.isBlocked ? null : (liveStream?.id ?? null),
     };
   }
 

@@ -11,6 +11,7 @@ import { ModeratorsService } from '../moderators/moderators.service';
 import { RecordingPermissionsService } from '../recording-permissions/recording-permissions.service';
 import { RoomBansService } from '../room-bans/room-bans.service';
 import { RoomChatMutesService } from '../room-chat-mutes/room-chat-mutes.service';
+import { SocialService } from '../social/social.service';
 import { StreamsService } from '../streams/streams.service';
 import { RealtimeGateway } from './realtime.gateway';
 
@@ -34,6 +35,8 @@ interface FakeSocket {
 
 // Broadcasts from a socket reach everyone in the room but that socket.
 const othersEmit = jest.fn();
+// ...and but anyone in the rooms passed to except().
+const othersExcept = jest.fn(() => ({ emit: othersEmit }));
 
 function fakeSocket(userId = 'viewer-1', id = 'socket-1'): FakeSocket {
   return {
@@ -43,7 +46,7 @@ function fakeSocket(userId = 'viewer-1', id = 'socket-1'): FakeSocket {
     rooms: new Set([id]),
     join: jest.fn(),
     leave: jest.fn(),
-    to: jest.fn(() => ({ emit: othersEmit })),
+    to: jest.fn(() => ({ emit: othersEmit, except: othersExcept })),
     use: jest.fn(),
   };
 }
@@ -89,9 +92,11 @@ describe('RealtimeGateway', () => {
   const moderators = { listActiveUserIds: jest.fn() };
   const watchTickets = { verify: jest.fn() };
   const recordingPermissions = { isAllowed: jest.fn() };
+  const social = { isBlockedEitherWay: jest.fn(), blockedEitherWayUserIds: jest.fn() };
   const roomEmit = jest.fn();
+  const roomExcept = jest.fn(() => ({ emit: roomEmit }));
   const server = {
-    to: jest.fn(() => ({ emit: roomEmit })),
+    to: jest.fn(() => ({ emit: roomEmit, except: roomExcept })),
     in: jest.fn(() => ({ socketsLeave: jest.fn(), disconnectSockets: jest.fn() })),
     use: jest.fn(),
   };
@@ -110,6 +115,7 @@ describe('RealtimeGateway', () => {
       moderators as unknown as ModeratorsService,
       watchTickets as unknown as WatchTicketService,
       recordingPermissions as unknown as RecordingPermissionsService,
+      social as unknown as SocialService,
     );
     gateway.server = server as unknown as Server;
     return gateway;
@@ -122,6 +128,8 @@ describe('RealtimeGateway', () => {
     presence.claimArrivalNotice.mockResolvedValue(true);
     moderators.listActiveUserIds.mockResolvedValue(['mod-1']);
     recordingPermissions.isAllowed.mockResolvedValue(false);
+    social.isBlockedEitherWay.mockResolvedValue(false);
+    social.blockedEitherWayUserIds.mockResolvedValue([]);
   });
 
   describe('connection auth', () => {
@@ -346,6 +354,19 @@ describe('RealtimeGateway', () => {
       expect(socket.join).not.toHaveBeenCalled();
     });
 
+    it('rejects someone blocked either way with the host', async () => {
+      social.isBlockedEitherWay.mockResolvedValueOnce(true);
+      const socket = fakeSocket();
+
+      await expect(makeGateway().onStreamJoin(socket as never, { streamId: LIVE })).resolves.toEqual({
+        ok: false,
+        error: 'NOT_ALLOWED',
+      });
+      expect(social.isBlockedEitherWay).toHaveBeenCalledWith('host-1', 'viewer-1');
+      expect(socket.join).not.toHaveBeenCalled();
+      expect(presence.addViewer).not.toHaveBeenCalled();
+    });
+
     it('leaves the previous live when a socket joins another', async () => {
       const socket = fakeSocket();
       const gateway = makeGateway();
@@ -399,6 +420,18 @@ describe('RealtimeGateway', () => {
 
       expect(presence.claimArrivalNotice).toHaveBeenCalledWith(LIVE, 'kebede');
       expect(server.to).toHaveBeenCalledWith(`stream:${LIVE}`);
+      expect(roomEmit).toHaveBeenCalledWith('viewer:joined', { streamId: LIVE, user: person('kebede'), others: 0 });
+    });
+
+    it('keeps an arrival from anyone blocked either way with them', async () => {
+      presence.addViewer.mockResolvedValueOnce({ viewerCount: 2, arrived: true });
+      social.blockedEitherWayUserIds.mockResolvedValueOnce(['ex-1']);
+
+      await makeGateway().onStreamJoin(fakeSocket('kebede') as never, { streamId: LIVE });
+      await settle();
+
+      expect(social.blockedEitherWayUserIds).toHaveBeenCalledWith('kebede');
+      expect(roomExcept).toHaveBeenCalledWith(['user:ex-1']);
       expect(roomEmit).toHaveBeenCalledWith('viewer:joined', { streamId: LIVE, user: person('kebede'), others: 0 });
     });
 
@@ -628,6 +661,17 @@ describe('RealtimeGateway', () => {
       expect(ack).toEqual({ ok: true, message });
       expect(chat.send).toHaveBeenCalledWith(LIVE, 'viewer-1', 'gg', 'c1', undefined);
       expect(socket.to).toHaveBeenCalledWith(`stream:${LIVE}`);
+      expect(othersEmit).toHaveBeenCalledWith('chat:new', message);
+    });
+
+    it('keeps a message from anyone blocked either way with the sender', async () => {
+      chat.send.mockResolvedValue({ ok: true, message, resent: false });
+      social.blockedEitherWayUserIds.mockResolvedValueOnce(['ex-1', 'ex-2']);
+
+      await makeGateway().onChatSend(inLive(fakeSocket()) as never, { streamId: LIVE, text: 'gg', clientId: 'c1' });
+
+      expect(social.blockedEitherWayUserIds).toHaveBeenCalledWith('viewer-1');
+      expect(othersExcept).toHaveBeenCalledWith(['user:ex-1', 'user:ex-2']);
       expect(othersEmit).toHaveBeenCalledWith('chat:new', message);
     });
 
@@ -1113,6 +1157,34 @@ describe('RealtimeGateway', () => {
         streamId: null,
         scope: RoomBanScope.HOST_PERMANENT,
       });
+    });
+  });
+
+  describe('a block during a live', () => {
+    it('takes whoever the host blocked out of the room, and tells them they were removed', () => {
+      const socketsLeave = jest.fn();
+      server.in.mockReturnValueOnce({ socketsLeave, disconnectSockets: jest.fn() });
+
+      makeGateway().handleLiveAccessRevoked({ streamId: LIVE, hostId: 'host-1', userId: 'ex-1', removedByHost: true });
+
+      expect(server.in).toHaveBeenCalledWith('user:ex-1');
+      expect(socketsLeave).toHaveBeenCalledWith(`stream:${LIVE}`);
+      expect(server.to).toHaveBeenCalledWith('user:ex-1');
+      expect(roomEmit).toHaveBeenCalledWith('force_disconnect', {
+        hostId: 'host-1',
+        streamId: LIVE,
+        scope: RoomBanScope.SESSION,
+      });
+    });
+
+    it('quietly takes someone who blocked the host out of the room - their app is leaving', () => {
+      const socketsLeave = jest.fn();
+      server.in.mockReturnValueOnce({ socketsLeave, disconnectSockets: jest.fn() });
+
+      makeGateway().handleLiveAccessRevoked({ streamId: LIVE, hostId: 'host-1', userId: 'ex-1', removedByHost: false });
+
+      expect(socketsLeave).toHaveBeenCalledWith(`stream:${LIVE}`);
+      expect(roomEmit).not.toHaveBeenCalled();
     });
   });
 
