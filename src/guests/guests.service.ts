@@ -16,6 +16,8 @@ import {
   DomainEvents,
   GuestJoinedPayload,
   GuestMicForceMuteChangedPayload,
+  GuestPlacement,
+  GuestPlacementChangedPayload,
   GuestRemovedPayload,
   GuestRequestAcceptedPayload,
   GuestRequestCancelledPayload,
@@ -163,12 +165,15 @@ export class GuestsService {
       this.prisma.streamGuest.upsert({
         where: { streamId_userId: { streamId, userId: request.userId } },
         create: { streamId, userId: request.userId },
-        // A new seat starts with the mic allowed, whatever happened last time.
+        // A new seat starts with the mic allowed and in the automatic column, whatever happened last time.
         update: {
           status: StreamGuestStatus.ACTIVE,
           joinedAt: now,
           leftAt: null,
           micForceMuted: false,
+          stageX: null,
+          stageY: null,
+          stageSize: null,
         },
       }),
       this.prisma.user.findUniqueOrThrow({
@@ -237,7 +242,14 @@ export class GuestsService {
     const rows = await this.prisma.streamGuest.findMany({
       where: { streamId, status: StreamGuestStatus.ACTIVE },
       orderBy: { joinedAt: 'asc' },
-      select: { joinedAt: true, micForceMuted: true, user: { select: PROFILE_SUMMARY_SELECT } },
+      select: {
+        joinedAt: true,
+        micForceMuted: true,
+        stageX: true,
+        stageY: true,
+        stageSize: true,
+        user: { select: PROFILE_SUMMARY_SELECT },
+      },
     });
     // agoraUid is meaningless (but harmless) for a LiveKit stream, where a
     // client instead correlates by identity=userId directly - included
@@ -248,7 +260,35 @@ export class GuestsService {
       joinedAt: row.joinedAt,
       agoraUid: agoraUidFor(row.user.id),
       micForceMuted: row.micForceMuted,
+      placement:
+        row.stageX !== null && row.stageY !== null && row.stageSize !== null
+          ? { x: row.stageX, y: row.stageY, size: row.stageSize }
+          : null,
     }));
+  }
+
+  /** Moves a guest's tile on everyone's stage, or puts it back in the automatic column (null). */
+  async setPlacement(
+    streamId: string,
+    userId: string,
+    actorId: string,
+    placement: GuestPlacement | null,
+  ): Promise<void> {
+    const { count } = await this.prisma.streamGuest.updateMany({
+      where: { streamId, userId, status: StreamGuestStatus.ACTIVE },
+      data: {
+        stageX: placement?.x ?? null,
+        stageY: placement?.y ?? null,
+        stageSize: placement?.size ?? null,
+      },
+    });
+    if (count === 0) throw new NotFoundException("They're not on stage");
+    this.events.emit(DomainEvents.GuestPlacementChanged, {
+      streamId,
+      userId,
+      actorId,
+      placement,
+    } satisfies GuestPlacementChangedPayload);
   }
 
   /**

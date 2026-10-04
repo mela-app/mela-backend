@@ -1217,6 +1217,22 @@ describe('RealtimeGateway', () => {
       });
     });
 
+    it("moves a guest's tile on every stage in the live", () => {
+      makeGateway().handleGuestPlacementChanged({
+        streamId: LIVE,
+        userId: 'g1',
+        actorId: 'host-1',
+        placement: { x: 1, y: 0, size: 0.3 },
+      });
+
+      expect(server.to).toHaveBeenCalledWith(`stream:${LIVE}`);
+      expect(roomEmit).toHaveBeenCalledWith('guest:placed', {
+        streamId: LIVE,
+        userId: 'g1',
+        placement: { x: 1, y: 0, size: 0.3 },
+      });
+    });
+
     it('only updates everyone when the mic is allowed again - never turns it on', () => {
       makeGateway().handleGuestMicForceMuteChanged({
         streamId: LIVE,

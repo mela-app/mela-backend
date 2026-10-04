@@ -24,6 +24,7 @@ import { PermissionsService } from '../common/permissions/permissions.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import {
   DomainEvents,
+  GuestPlacement,
   LiveAccessRevokedPayload,
   StreamEndedPayload,
   StreamLayoutChangedPayload,
@@ -843,6 +844,28 @@ export class StreamsService {
       await this.assertCanModerateTarget(streamId, stream.hostId, requesterId, targetUserId);
     }
     await this.guests.setMicForceMuted(streamId, targetUserId, requesterId, forceMuted);
+    return { ok: true };
+  }
+
+  /** Moves a guest's tile on everyone's stage, or puts it back in line (null) - host or an ARRANGE_GUESTS moderator. */
+  async setGuestPlacement(
+    streamId: string,
+    requesterId: string,
+    targetUserId: string,
+    placement: GuestPlacement | null,
+  ) {
+    const stream = await this.getLiveOrThrow(streamId);
+    if (
+      !(await this.canUseCapability(
+        requesterId,
+        streamId,
+        stream.hostId,
+        ModeratorCapability.ARRANGE_GUESTS,
+      ))
+    ) {
+      throw new ForbiddenException('Only the host or a moderator can arrange guests');
+    }
+    await this.guests.setPlacement(streamId, targetUserId, requesterId, placement);
     return { ok: true };
   }
 

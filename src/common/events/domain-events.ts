@@ -80,6 +80,8 @@ export const DomainEvents = {
   DirectMessagesRead: 'direct_message.read',
   // A block between a running live's host and someone in it (plan §6.4).
   LiveAccessRevoked: 'live.access_revoked',
+  // A guest's tile was moved or resized on the stage, or put back in line.
+  GuestPlacementChanged: 'guest.placement_changed',
 } as const;
 
 export type DomainEventName = (typeof DomainEvents)[keyof typeof DomainEvents];
@@ -315,6 +317,23 @@ export interface GuestMicForceMuteChangedPayload {
   userId: string;
   actorId: string;
   forceMuted: boolean;
+}
+
+/** Where a guest's tile sits, as fractions of the stage's guest area (docs/features/guests.md). */
+export interface GuestPlacement {
+  x: number;
+  y: number;
+  // The tile's width as a share of the area's; tiles are always 3:4 portrait.
+  size: number;
+}
+
+// Public `guest:placed` to the stream's room: every stage moves the tile.
+export interface GuestPlacementChangedPayload {
+  streamId: string;
+  userId: string;
+  actorId: string;
+  // Null: back in the automatic column.
+  placement: GuestPlacement | null;
 }
 
 // Private, to that viewer's own `user:{id}` room: their app lets screen
