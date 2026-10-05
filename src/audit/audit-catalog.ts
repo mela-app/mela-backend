@@ -67,6 +67,10 @@ export const AUDIT_ACTIONS = {
   'phrase.added': { category: 'SETTINGS', label: 'Added a banned phrase' },
   'phrase.updated': { category: 'SETTINGS', label: 'Changed a banned phrase' },
   'phrase.removed': { category: 'SETTINGS', label: 'Removed a banned phrase' },
+
+  'app.release_published': { category: 'SETTINGS', label: 'Published an app update' },
+  'app.release_updated': { category: 'SETTINGS', label: 'Changed an app update' },
+  'app.release_withdrawn': { category: 'SETTINGS', label: 'Withdrew an app update' },
 } as const satisfies Record<string, { category: AuditCategory; label: string }>;
 
 export type AuditAction = keyof typeof AUDIT_ACTIONS;
@@ -84,7 +88,8 @@ export const AUDIT_CATEGORY_LABELS: Record<AuditCategory, string> = {
   SETTINGS: 'Settings',
 };
 
-export type AuditTargetType = 'USER' | 'STREAM' | 'MESSAGE' | 'ALERT' | 'PHRASE' | 'CONVERSATION';
+export type AuditTargetType =
+  'USER' | 'STREAM' | 'MESSAGE' | 'ALERT' | 'PHRASE' | 'CONVERSATION' | 'APP_RELEASE';
 
 export function isAuditAction(value: string): value is AuditAction {
   return Object.prototype.hasOwnProperty.call(AUDIT_ACTIONS, value);

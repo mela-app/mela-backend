@@ -1,5 +1,6 @@
 import {
   AdminPermission,
+  AppPlatform,
   AuditActorRole,
   GuestRequestInitiator,
   PlatformRole,
@@ -255,6 +256,35 @@ describe('AuditEventsListener', () => {
             from: [AdminPermission.VIEW_LIVES],
             to: [AdminPermission.VIEW_LIVES, AdminPermission.MANAGE_LIVES],
           },
+        }),
+      );
+    });
+
+    it('records each app update change against the release, labelled with platform and version', async () => {
+      const release = {
+        releaseId: 'r1',
+        actorId: 'admin-1',
+        platform: AppPlatform.ANDROID,
+        version: '1.2.0',
+        build: 12,
+        required: true,
+      };
+
+      await listener().onAppReleaseChanged({ ...release, change: 'published' });
+      await listener().onAppReleaseChanged({ ...release, change: 'updated', fields: ['required'] });
+
+      expect(audit.record.mock.calls[0][0]).toEqual(
+        expect.objectContaining({
+          action: 'app.release_published',
+          actorId: 'admin-1',
+          target: { type: 'APP_RELEASE', id: 'r1', label: 'Android 1.2.0 (12)' },
+          metadata: { platform: 'ANDROID', version: '1.2.0', build: 12, required: true },
+        }),
+      );
+      expect(audit.record.mock.calls[1][0]).toEqual(
+        expect.objectContaining({
+          action: 'app.release_updated',
+          metadata: expect.objectContaining({ fields: ['required'] }),
         }),
       );
     });

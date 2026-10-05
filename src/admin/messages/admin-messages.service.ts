@@ -1,18 +1,15 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AuditService } from '../../audit/audit.service';
 import { pageArgs, toPage } from '../../common/pagination/page-query.dto';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AdminPrincipal } from '../admin.guard';
+import { nameMatches, rangeOf } from '../day-range';
 import { AdminConversationsQueryDto, AdminTranscriptQueryDto } from './admin-messages.dto';
 
 const PERSON = {
   select: { id: true, username: true, displayName: true, avatarUrl: true },
 } as const;
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-/** The longest stretch one request looks at. */
-export const MAX_RANGE_DAYS = 31;
 
 /**
  * Direct messages in the admin console (docs/features/messages.md): who
@@ -113,29 +110,10 @@ export class AdminMessagesService {
   }
 }
 
-function rangeOf(query: { from: string; to: string }): { gte: Date; lte: Date } {
-  const from = new Date(query.from);
-  const to = new Date(query.to);
-  if (to < from) throw new BadRequestException('The end of the range is before its start');
-  if (to.getTime() - from.getTime() > MAX_RANGE_DAYS * DAY_MS) {
-    throw new BadRequestException(`Look at ${MAX_RANGE_DAYS} days at most at a time`);
-  }
-  return { gte: from, lte: to };
-}
-
 function messagesWhere(query: AdminConversationsQueryDto): Prisma.DirectMessageWhereInput {
   const and: Prisma.DirectMessageWhereInput[] = [{ createdAt: rangeOf(query) }];
   if (query.userId) and.push({ OR: [{ senderId: query.userId }, { recipientId: query.userId }] });
   const q = query.q?.trim();
   if (q) and.push({ OR: [{ sender: nameMatches(q) }, { recipient: nameMatches(q) }] });
   return { AND: and };
-}
-
-function nameMatches(q: string): Prisma.UserWhereInput {
-  return {
-    OR: [
-      { username: { contains: q, mode: 'insensitive' } },
-      { displayName: { contains: q, mode: 'insensitive' } },
-    ],
-  };
 }

@@ -29,6 +29,9 @@ enum AdminPermission {
   VIEW_AUDIT_LOG
   // Reading direct messages between users - every conversation opened is audited.
   VIEW_PRIVATE_MESSAGES
+  // App updates (docs/features/app-updates.md): MANAGE publishes, edits and withdraws them.
+  VIEW_APP_RELEASES
+  MANAGE_APP_RELEASES
 }
 
 enum UserStatus {
@@ -107,6 +110,7 @@ model User {
   conversationsAsB      Conversation[]        @relation("ConversationUserB")
   directMessagesSent    DirectMessage[]       @relation("DirectMessagesSent")
   directMessagesInbox   DirectMessage[]       @relation("DirectMessagesReceived")
+  appReleasesPublished  AppRelease[]
 
   @@map("users")
 }
@@ -672,4 +676,35 @@ model DirectMessage {
   @@index([conversationId, id])
   @@index([recipientId, readAt])
   @@map("direct_messages")
+}
+
+enum AppPlatform {
+  ANDROID
+  IOS
+}
+
+// App updates (docs/features/app-updates.md): each version of the app the
+// team ships, per platform. Phones on an older build are asked to update;
+// below a required one they can't go on without updating.
+model AppRelease {
+  id            String      @id @default(uuid(7)) @db.Uuid
+  platform      AppPlatform
+  // What people see, e.g. 1.2.0.
+  version       String
+  // What phones compare: the number after + in pubspec.yaml (Android
+  // versionCode, iOS CFBundleVersion). Only ever goes up.
+  build         Int
+  // What's new, one change per line.
+  notes         String
+  // The store page or the APK.
+  downloadUrl   String
+  required      Boolean     @default(false)
+  publishedById String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  publishedBy User? @relation(fields: [publishedById], references: [id], onDelete: SetNull)
+
+  @@unique([platform, build])
+  @@map("app_releases")
 }

@@ -12,6 +12,9 @@ coverage/
 secrets/
 firebase-service-account*.json
 
+# Personal checklist for testing all repos together on this machine.
+LOCAL_TESTING.md
+
 # IDE / OS
 .idea/
 .vscode/*
