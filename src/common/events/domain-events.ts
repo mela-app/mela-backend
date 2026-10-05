@@ -2,6 +2,7 @@ import type {
   AdminPermission,
   AlertScope,
   AlertSeverity,
+  AppPlatform,
   BannedPhraseSeverity,
   GuestRequestInitiator,
   ModeratorCapability,
@@ -82,6 +83,8 @@ export const DomainEvents = {
   LiveAccessRevoked: 'live.access_revoked',
   // A guest's tile was moved or resized on the stage, or put back in line.
   GuestPlacementChanged: 'guest.placement_changed',
+  // An app update was published, changed or withdrawn (docs/features/app-updates.md).
+  AppReleaseChanged: 'app_release.changed',
 } as const;
 
 export type DomainEventName = (typeof DomainEvents)[keyof typeof DomainEvents];
@@ -445,6 +448,20 @@ export interface AdminAlertSentPayload {
   message: string;
   severity: AlertSeverity;
   createdAt: Date;
+}
+
+// RealtimeGateway tells every open app (`app:update`), and each asks
+// GET /v1/app/update again. The release as it is after the change.
+export interface AppReleaseChangedPayload {
+  change: 'published' | 'updated' | 'withdrawn';
+  releaseId: string;
+  actorId: string;
+  platform: AppPlatform;
+  version: string;
+  build: number;
+  required: boolean;
+  // 'updated' only: which of notes, downloadUrl and required changed.
+  fields?: string[];
 }
 
 export interface BannedPhraseChangedPayload {

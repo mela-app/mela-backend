@@ -25,6 +25,7 @@ import { GuestsModule } from './guests/guests.module';
 import { AuditModule } from './audit/audit.module';
 import { AdminModule } from './admin/admin.module';
 import { DirectMessagesModule } from './direct-messages/direct-messages.module';
+import { AppReleasesModule } from './app-releases/app-releases.module';
 import { HealthController } from './health.controller';
 
 @Module({
@@ -63,6 +64,7 @@ import { HealthController } from './health.controller';
     AuditModule,
     AdminModule,
     DirectMessagesModule,
+    AppReleasesModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

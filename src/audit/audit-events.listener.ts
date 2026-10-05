@@ -6,6 +6,7 @@ import {
   AdminAlertSentPayload,
   AdminSignInFailedPayload,
   AdminSignedInPayload,
+  AppReleaseChangedPayload,
   BannedPhraseChangedPayload,
   ChatMessageDeletedPayload,
   ChatMessagePinnedPayload,
@@ -539,6 +540,27 @@ export class AuditEventsListener {
       target: { type: 'ALERT', id: payload.alertId, label: excerpt(payload.message) },
       streamId: payload.streamId,
       metadata: { scope: payload.scope, severity: payload.severity },
+    }));
+  }
+
+  @OnEvent(DomainEvents.AppReleaseChanged)
+  onAppReleaseChanged(payload: AppReleaseChangedPayload) {
+    const platform = payload.platform === 'IOS' ? 'iOS' : 'Android';
+    return this.track(async () => ({
+      action: `app.release_${payload.change}` as const,
+      actorId: payload.actorId,
+      target: {
+        type: 'APP_RELEASE',
+        id: payload.releaseId,
+        label: `${platform} ${payload.version} (${payload.build})`,
+      },
+      metadata: {
+        platform: payload.platform,
+        version: payload.version,
+        build: payload.build,
+        required: payload.required,
+        ...(payload.fields ? { fields: payload.fields } : {}),
+      },
     }));
   }
 

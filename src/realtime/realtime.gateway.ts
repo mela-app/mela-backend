@@ -25,6 +25,7 @@ import { LikesService } from '../chat/likes.service';
 import {
   DomainEvents,
   AdminAlertSentPayload,
+  AppReleaseChangedPayload,
   ChatMessageDeletedPayload,
   ChatMessagePinnedPayload,
   ChatMessageUnpinnedPayload,
@@ -483,6 +484,12 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     } else {
       this.server.emit('admin:alert', alert);
     }
+  }
+
+  // Every open app asks again whether it's up to date (docs/features/app-updates.md).
+  @OnEvent(DomainEvents.AppReleaseChanged)
+  handleAppReleaseChanged(payload: AppReleaseChangedPayload) {
+    this.server.emit('app:update', { platform: payload.platform });
   }
 
   /** Devices an alert would reach right now: every connected app, or one live's room. */

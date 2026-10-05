@@ -1423,6 +1423,25 @@ describe('RealtimeGateway', () => {
       );
     });
 
+    it('asks every open app to check for updates when a release changes', () => {
+      const emit = jest.fn();
+      const gateway = makeGateway();
+      gateway.server = { ...server, emit } as unknown as Server;
+
+      gateway.handleAppReleaseChanged({
+        change: 'published',
+        releaseId: 'r1',
+        actorId: 'admin-1',
+        platform: 'IOS',
+        version: '1.2.0',
+        build: 12,
+        required: false,
+      });
+
+      expect(server.to).not.toHaveBeenCalled();
+      expect(emit).toHaveBeenCalledWith('app:update', { platform: 'IOS' });
+    });
+
     it('disconnects every device of a user signed out everywhere', () => {
       const disconnectSockets = jest.fn();
       server.in.mockReturnValueOnce({ socketsLeave: jest.fn(), disconnectSockets });

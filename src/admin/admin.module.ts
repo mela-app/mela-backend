@@ -10,6 +10,8 @@ import { AdminGuard } from './admin.guard';
 import { AdminAuditController } from './audit/admin-audit.controller';
 import { AdminAccountController, AdminAuthController } from './auth/admin-auth.controller';
 import { AdminAuthService } from './auth/admin-auth.service';
+import { AdminChatController } from './chat/admin-chat.controller';
+import { AdminChatService } from './chat/admin-chat.service';
 import {
   AdminAlertsController,
   AdminBannedPhrasesController,
@@ -19,6 +21,8 @@ import { AdminMessagesController } from './messages/admin-messages.controller';
 import { AdminMessagesService } from './messages/admin-messages.service';
 import { AdminOverviewController } from './overview/admin-overview.controller';
 import { AdminOverviewService } from './overview/admin-overview.service';
+import { AdminReleasesController } from './releases/admin-releases.controller';
+import { AdminReleasesService } from './releases/admin-releases.service';
 import { AdminStreamsController } from './streams/admin-streams.controller';
 import { AdminStreamsService } from './streams/admin-streams.service';
 import { AdminStaffController, AdminUsersController } from './users/admin-users.controller';
@@ -50,6 +54,8 @@ import { AdminUsersService } from './users/admin-users.service';
     AdminBannedPhrasesController,
     AdminAuditController,
     AdminMessagesController,
+    AdminChatController,
+    AdminReleasesController,
   ],
   providers: [
     AdminGuard,
@@ -59,6 +65,8 @@ import { AdminUsersService } from './users/admin-users.service';
     AdminUsersService,
     AdminContentService,
     AdminMessagesService,
+    AdminChatService,
+    AdminReleasesService,
   ],
 })
 export class AdminModule {}
