@@ -3,6 +3,8 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { AuditActorRole, GuestRequestInitiator, StreamEndReason } from '@prisma/client';
 import {
   AccountCredentialChangedPayload,
+  AccountIdentityLinkedPayload,
+  AccountPasswordSetPayload,
   AdminAlertSentPayload,
   AdminSignInFailedPayload,
   AdminSignedInPayload,
@@ -69,6 +71,7 @@ export class AuditEventsListener {
       action: 'auth.signed_up',
       actorId: payload.userId,
       target: { type: 'USER', id: payload.userId, label: `@${payload.username}` },
+      ...(payload.method && { metadata: { method: payload.method } }),
     }));
   }
 
@@ -77,7 +80,7 @@ export class AuditEventsListener {
     return this.track(async () => ({
       action: 'auth.signed_in',
       actorId: payload.userId,
-      metadata: { platform: payload.platform },
+      metadata: { platform: payload.platform, ...(payload.method && { method: payload.method }) },
     }));
   }
 
@@ -114,16 +117,35 @@ export class AuditEventsListener {
   }
 
   @OnEvent(DomainEvents.AccountPasswordChanged)
-  onPasswordChanged(payload: AccountCredentialChangedPayload) {
+  onPasswordChanged(payload: AccountPasswordSetPayload) {
     return this.track(async () => ({
       action: 'account.password_changed',
       actorId: payload.userId,
+      ...(payload.confirmedWith && { metadata: { confirmedWith: payload.confirmedWith } }),
+    }));
+  }
+
+  @OnEvent(DomainEvents.AccountPasswordAdded)
+  onPasswordAdded(payload: AccountPasswordSetPayload) {
+    return this.track(async () => ({
+      action: 'account.password_added',
+      actorId: payload.userId,
+      ...(payload.confirmedWith && { metadata: { confirmedWith: payload.confirmedWith } }),
     }));
   }
 
   @OnEvent(DomainEvents.AccountEmailChanged)
   onEmailChanged(payload: AccountCredentialChangedPayload) {
     return this.track(async () => ({ action: 'account.email_changed', actorId: payload.userId }));
+  }
+
+  @OnEvent(DomainEvents.AccountIdentityLinked)
+  onIdentityLinked(payload: AccountIdentityLinkedPayload) {
+    return this.track(async () => ({
+      action: 'account.identity_linked',
+      actorId: payload.userId,
+      metadata: { provider: payload.provider, passwordRemoved: payload.passwordRemoved },
+    }));
   }
 
   @OnEvent(DomainEvents.UserProfileUpdated)

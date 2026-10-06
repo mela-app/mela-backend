@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { JwtService } from '@nestjs/jwt';
@@ -71,50 +71,21 @@ describe('AuthService', () => {
     jwtService.verifyAsync.mockResolvedValue({ sub: 'u1', username: 'alice', sid: 's1', jti: 'j' });
   });
 
-  it('rejects signup when the username or email is already taken', async () => {
-    prisma.user.findFirst.mockResolvedValue({ id: 'existing' });
-
-    await expect(
-      makeService().signup({
-        username: 'a',
-        displayName: 'A',
-        email: 'a@a.com',
-        password: 'password123',
-      }),
-    ).rejects.toThrow(ConflictException);
-  });
-
-  it('creates the user, emits user.registered and starts a device session on signup', async () => {
-    prisma.user.findFirst.mockResolvedValue(null);
-
-    const result = await makeService().signup({
-      username: 'a',
-      displayName: 'A',
-      email: 'a@a.com',
-      password: 'password123',
-      platform: SessionPlatform.IOS,
-    });
-
-    expect(result).toEqual({ accessToken: expect.any(String), refreshToken: expect.any(String) });
-    expect(events.emit).toHaveBeenCalledWith(
-      'user.registered',
-      expect.objectContaining({ userId: 'new-user' }),
-    );
-    expect(prisma.userSession.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        userId: 'new-user',
-        platform: SessionPlatform.IOS,
-        refreshTokenHash: hashToken(result.refreshToken),
-      }),
-    });
-  });
-
   it('rejects login for an unknown user without revealing which field was wrong', async () => {
     prisma.user.findFirst.mockResolvedValue(null);
 
     await expect(makeService().login({ usernameOrEmail: 'nobody', password: 'x' })).rejects.toThrow(
       UnauthorizedException,
     );
+  });
+
+  it('turns away a password for an account made with Google, as for a wrong one', async () => {
+    prisma.user.findFirst.mockResolvedValue({ ...activeUser, passwordHash: null });
+
+    await expect(
+      makeService().login({ usernameOrEmail: 'alice', password: 'password123' }),
+    ).rejects.toThrow(new UnauthorizedException('Invalid credentials'));
+    expect(prisma.userSession.create).not.toHaveBeenCalled();
   });
 
   it('tells a suspended account it is suspended, but only once the password is right', async () => {
@@ -159,6 +130,7 @@ describe('AuthService', () => {
     expect(events.emit).toHaveBeenCalledWith('user.logged_in', {
       userId: 'u1',
       platform: SessionPlatform.IOS,
+      method: 'password',
     });
   });
 

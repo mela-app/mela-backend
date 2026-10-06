@@ -14,8 +14,9 @@ import { SessionPlatform } from '@prisma/client';
 import { CookieOptions, Request, Response } from 'express';
 import { readCookie } from '../common/http/read-cookie';
 import { AuthService, TokenPair } from './auth.service';
+import { IdentitySignupDto, IdentityTokenDto } from './dto/identity.dto';
 import { LoginDto } from './dto/login.dto';
-import { SignupDto } from './dto/signup.dto';
+import { IdentitySignInService } from './identity/identity-sign-in.service';
 
 // httpOnly and sent to these routes only: the page's script never sees it.
 const REFRESH_COOKIE = 'mela_web_refresh';
@@ -33,18 +34,36 @@ const CLIENT = 'mela-web';
 export class WebAuthController {
   constructor(
     private readonly auth: AuthService,
+    private readonly identities: IdentitySignInService,
     private readonly config: ConfigService,
   ) {}
 
-  @Post('signup')
-  @Throttle({ default: { limit: 5, ttl: 60_000 } })
-  async signup(
+  /** Continue with Google: signed in, or what a new account would start with. */
+  @Post('identity')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  async continueWithIdentity(
     @Req() req: Request,
-    @Body() dto: SignupDto,
+    @Body() dto: IdentityTokenDto,
     @Res({ passthrough: true }) res: Response,
   ) {
     assertWebClient(req);
-    return this.respond(await this.auth.signup({ ...dto, platform: SessionPlatform.WEB }), res);
+    const outcome = await this.identities.continueWith(dto.idToken, SessionPlatform.WEB);
+    return outcome.status === 'SIGNED_IN'
+      ? { status: outcome.status, ...this.respond(outcome.tokens, res) }
+      : { status: outcome.status, ...outcome.profile };
+  }
+
+  @Post('identity/signup')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  async createAccount(
+    @Req() req: Request,
+    @Body() dto: IdentitySignupDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    assertWebClient(req);
+    const tokens = await this.identities.createAccount({ ...dto, platform: SessionPlatform.WEB });
+    return this.respond(tokens, res);
   }
 
   @Post('login')

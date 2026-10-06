@@ -10,6 +10,7 @@ const DEV = {
   APP_URL_SCHEME: 'gamblinglive',
   ANDROID_APP_PACKAGE_NAME: 'com.gamblinglive.app',
   S3_REGION: 'us-east-1',
+  FIREBASE_PROJECT_ID: 'mela-dev',
 };
 
 const PROD = {
@@ -28,7 +29,7 @@ describe('validateEnv', () => {
 
   it('reports every missing required variable', () => {
     expect(() => validateEnv({})).toThrow(
-      /PORT is not set[\s\S]*DATABASE_URL is not set[\s\S]*REDIS_URL is not set[\s\S]*CORS_ORIGIN is not set[\s\S]*JWT_ACCESS_SECRET is not set[\s\S]*APP_URL_SCHEME is not set[\s\S]*ANDROID_APP_PACKAGE_NAME is not set[\s\S]*S3_REGION is not set/,
+      /PORT is not set[\s\S]*DATABASE_URL is not set[\s\S]*REDIS_URL is not set[\s\S]*CORS_ORIGIN is not set[\s\S]*JWT_ACCESS_SECRET is not set[\s\S]*APP_URL_SCHEME is not set[\s\S]*ANDROID_APP_PACKAGE_NAME is not set[\s\S]*S3_REGION is not set[\s\S]*FIREBASE_PROJECT_ID is not set/,
     );
   });
 
@@ -40,6 +41,7 @@ describe('validateEnv', () => {
       'APP_URL_SCHEME',
       'ANDROID_APP_PACKAGE_NAME',
       'S3_REGION',
+      'FIREBASE_PROJECT_ID',
     ]) {
       expect(() => validateEnv({ ...DEV, [key]: ' ' })).toThrow(new RegExp(`${key} is not set`));
     }

@@ -7,26 +7,20 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { MELA_COLORS, MELA_LOGO_SVG } from './brand';
 import { escapeHtml, InstallLinks, installLinks, jsonForHtml } from './share-page';
 
-// Helmet's default policy would block the video SDKs' connections to their servers.
-const PLAYER_CSP = [
-  "default-src 'self'",
-  "script-src 'self'",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https:",
-  "media-src 'self' blob: mediastream:",
-  "connect-src 'self' https: wss:",
-  "worker-src 'self' blob:",
-  "font-src 'self' data:",
-  "object-src 'none'",
-  "base-uri 'none'",
-  "form-action 'self'",
-  "frame-ancestors 'none'",
-].join('; ');
+/** Firebase's public web settings: the player's Continue with Google (docs/features/auth.md). */
+export interface FirebaseWebConfig {
+  apiKey: string;
+  authDomain: string;
+  projectId: string;
+  appId: string;
+}
 
 /** What the browser player (the mela-web repository) needs to know about this page. */
 export interface PlayerConfig extends InstallLinks {
   streamId: string;
   appScheme: string;
+  /** Absent until the Firebase web app is set up: the player then sends people to the app to sign up. */
+  firebase?: FirebaseWebConfig;
 }
 
 /**
@@ -55,23 +49,50 @@ export class WebFallbackController {
       : null;
     const isLive = stream?.status === StreamStatus.LIVE;
     const scheme = this.config.getOrThrow<string>('APP_URL_SCHEME');
+    const player = isLive ? this.playerConfig(id, scheme) : null;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    if (isLive) res.setHeader('Content-Security-Policy', this.playerCsp());
-    res.send(renderPage(stream, id, scheme, isLive ? this.playerConfig(id, scheme) : null));
+    if (player) res.setHeader('Content-Security-Policy', this.playerCsp(player.firebase));
+    res.send(renderPage(stream, id, scheme, player));
   }
 
   private playerConfig(streamId: string, appScheme: string): PlayerConfig {
-    return { streamId, appScheme, ...installLinks(this.config) };
+    const firebase = this.firebaseWebConfig();
+    return { streamId, appScheme, ...installLinks(this.config), ...(firebase && { firebase }) };
   }
 
-  // Plain http:/ws: too outside production: a LiveKit server and photos on a development machine.
-  private playerCsp(): string {
-    return this.config.get<string>('NODE_ENV') === 'production'
-      ? PLAYER_CSP
-      : PLAYER_CSP.replace(
-          "connect-src 'self' https: wss:",
-          "connect-src 'self' https: wss: http: ws:",
-        ).replace("img-src 'self' data: blob: https:", "img-src 'self' data: blob: https: http:");
+  private firebaseWebConfig(): FirebaseWebConfig | null {
+    const apiKey = this.config.get<string>('FIREBASE_WEB_API_KEY');
+    const appId = this.config.get<string>('FIREBASE_WEB_APP_ID');
+    const projectId = this.config.get<string>('FIREBASE_PROJECT_ID');
+    if (!apiKey || !appId || !projectId) return null;
+    const authDomain =
+      this.config.get<string>('FIREBASE_AUTH_DOMAIN') || `${projectId}.firebaseapp.com`;
+    return { apiKey, authDomain, projectId, appId };
+  }
+
+  // Helmet's default would block the video SDKs' connections to their servers. Outside
+  // production, plain http:/ws: too: a LiveKit server and photos on a development machine.
+  private playerCsp(firebase?: FirebaseWebConfig): string {
+    const development = this.config.get<string>('NODE_ENV') !== 'production';
+    const directives: [string, string[]][] = [
+      ['default-src', ["'self'"]],
+      // Google's sign-in popup talks to the page through Firebase's frame and Google's script.
+      ['script-src', ["'self'", ...(firebase ? ['https://apis.google.com'] : [])]],
+      ['style-src', ["'self'", "'unsafe-inline'"]],
+      ['img-src', ["'self'", 'data:', 'blob:', 'https:', ...(development ? ['http:'] : [])]],
+      ['media-src', ["'self'", 'blob:', 'mediastream:']],
+      ['connect-src', ["'self'", 'https:', 'wss:', ...(development ? ['http:', 'ws:'] : [])]],
+      ['worker-src', ["'self'", 'blob:']],
+      ['font-src', ["'self'", 'data:']],
+      ...(firebase
+        ? [['frame-src', [`https://${firebase.authDomain}`]] as [string, string[]]]
+        : []),
+      ['object-src', ["'none'"]],
+      ['base-uri', ["'none'"]],
+      ['form-action', ["'self'"]],
+      ['frame-ancestors', ["'none'"]],
+    ];
+    return directives.map(([name, sources]) => `${name} ${sources.join(' ')}`).join('; ');
   }
 }
 

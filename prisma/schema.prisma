@@ -64,7 +64,10 @@ model User {
   username               String            @unique
   displayName            String
   email                  String            @unique
-  passwordHash           String
+  // Null for an account made with Google: it signs in with Google only.
+  passwordHash           String?
+  // When the owner proved this email is theirs (Google, or Firebase's emailed link); null for older sign-ups.
+  emailVerifiedAt        DateTime?
   avatarUrl              String?
   // Phase 3: profile bio (plan §6.10).
   bio                    String?
@@ -85,6 +88,7 @@ model User {
 
   streams               Stream[]              @relation("StreamHost")
   sessions              UserSession[]
+  identities            UserIdentity[]
   chatMessages          ChatMessage[]
   // Rows where this user is the one following someone.
   following             Follow[]              @relation("Follower")
@@ -178,6 +182,31 @@ model UserSession {
 
   @@index([userId])
   @@map("user_sessions")
+}
+
+// Ways to sign in besides a password (docs/features/auth.md). A phone number comes next.
+enum IdentityProvider {
+  GOOGLE
+}
+
+// A sign-in identity the provider vouched for, linked to one account.
+model UserIdentity {
+  id         String           @id @default(uuid(7)) @db.Uuid
+  userId     String
+  provider   IdentityProvider
+  // The provider's own stable id for the person (Google's `sub`) - unlike an email, it never changes.
+  subject    String
+  // What the provider vouched for when it was linked.
+  email      String?
+  createdAt  DateTime         @default(now())
+  lastUsedAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, subject])
+  // One Google account per Mela account.
+  @@unique([userId, provider])
+  @@map("user_identities")
 }
 
 enum StreamStatus {
@@ -399,6 +428,9 @@ enum NotificationType {
   STREAM_INVITE
   MODERATOR_GRANTED
   GUEST_INVITE
+  // Security notices about the recipient's own account - no actor, always pushed.
+  PASSWORD_ADDED
+  PASSWORD_CHANGED
 }
 
 model Notification {

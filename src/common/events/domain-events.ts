@@ -5,6 +5,7 @@ import type {
   AppPlatform,
   BannedPhraseSeverity,
   GuestRequestInitiator,
+  IdentityProvider,
   ModeratorCapability,
   NotificationType,
   PlatformRole,
@@ -62,7 +63,11 @@ export const DomainEvents = {
   UserAdminPermissionsChanged: 'user.admin_permissions_changed',
   UserSessionsRevoked: 'user.sessions_revoked',
   AccountPasswordChanged: 'account.password_changed',
+  // The first password of an account made with Google (docs/features/auth.md).
+  AccountPasswordAdded: 'account.password_added',
   AccountEmailChanged: 'account.email_changed',
+  // Someone proved an existing account's email with Google (docs/features/auth.md).
+  AccountIdentityLinked: 'account.identity_linked',
   AdminSignedIn: 'admin.signed_in',
   AdminSignInFailed: 'admin.sign_in_failed',
   AdminSignedOut: 'admin.signed_out',
@@ -94,6 +99,8 @@ export type DomainEventName = (typeof DomainEvents)[keyof typeof DomainEvents];
 export interface UserRegisteredPayload {
   userId: string;
   username: string;
+  // How the new account's email was proven.
+  method?: SignUpMethod;
 }
 
 export interface UserSuspendedPayload {
@@ -364,6 +371,7 @@ export interface RecordingPermissionChangedPayload {
 export interface UserLoggedInPayload {
   userId: string;
   platform: SessionPlatform;
+  method?: 'password' | 'google';
 }
 
 export interface UserLoggedOutPayload {
@@ -414,6 +422,20 @@ export interface UserSessionsRevokedPayload {
 
 export interface AccountCredentialChangedPayload {
   userId: string;
+}
+
+export interface AccountPasswordSetPayload extends AccountCredentialChangedPayload {
+  // How they proved it was them, in the app - the console always asks for the current password.
+  confirmedWith?: 'password' | 'google';
+}
+
+export type SignUpMethod = 'google' | 'email';
+
+export interface AccountIdentityLinkedPayload {
+  userId: string;
+  provider: IdentityProvider;
+  // The account's email had never been proven, so its old password and sessions ended.
+  passwordRemoved: boolean;
 }
 
 export interface AdminSignedInPayload {

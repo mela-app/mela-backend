@@ -14,7 +14,9 @@ export const AUDIT_ACTIONS = {
 
   'account.profile_updated': { category: 'ACCOUNT', label: 'Updated their profile' },
   'account.password_changed': { category: 'ACCOUNT', label: 'Changed their password' },
+  'account.password_added': { category: 'ACCOUNT', label: 'Added a password' },
   'account.email_changed': { category: 'ACCOUNT', label: 'Changed their email' },
+  'account.identity_linked': { category: 'ACCOUNT', label: 'Linked a sign-in method' },
 
   'user.suspended': { category: 'ADMIN', label: 'Suspended an account' },
   'user.reinstated': { category: 'ADMIN', label: 'Reinstated an account' },
