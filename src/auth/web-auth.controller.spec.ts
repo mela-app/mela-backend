@@ -2,19 +2,21 @@ import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
+import { IdentitySignInService } from './identity/identity-sign-in.service';
 import { WebAuthController } from './web-auth.controller';
 
 describe('WebAuthController', () => {
   const auth = {
     login: jest.fn(),
-    signup: jest.fn(),
     refresh: jest.fn(),
     logout: jest.fn(),
     refreshTtlSeconds: jest.fn(() => 604800),
   };
+  const identities = { continueWith: jest.fn(), createAccount: jest.fn() };
   const config = { get: jest.fn() };
   const controller = new WebAuthController(
     auth as unknown as AuthService,
+    identities as unknown as IdentitySignInService,
     config as unknown as ConfigService,
   );
   const tokens = { accessToken: 'access-1', refreshToken: 'refresh-1' };
@@ -62,19 +64,33 @@ describe('WebAuthController', () => {
     );
   });
 
-  it('signs up as a web session too', async () => {
-    auth.signup.mockResolvedValueOnce(tokens);
-    const dto = {
-      username: 'ana',
-      displayName: 'Ana',
-      email: 'ana@example.com',
-      password: 'secret123',
-    };
+  it('continues with Google as a web session, setting the cookie only once signed in', async () => {
+    identities.continueWith.mockResolvedValueOnce({ status: 'SIGNED_IN', tokens });
+    const res = response();
 
-    await expect(controller.signup(request(), dto, response())).resolves.toEqual({
+    await expect(
+      controller.continueWithIdentity(request(), { idToken: 'firebase-token' }, res),
+    ).resolves.toEqual({ status: 'SIGNED_IN', accessToken: 'access-1' });
+    expect(identities.continueWith).toHaveBeenCalledWith('firebase-token', 'WEB');
+    expect(res.cookie).toHaveBeenCalledWith('mela_web_refresh', 'refresh-1', expect.anything());
+
+    const profile = { email: 'ana@gmail.com', displayName: 'Ana', suggestedUsername: 'ana' };
+    identities.continueWith.mockResolvedValueOnce({ status: 'NEEDS_ACCOUNT', profile });
+    const newcomer = response();
+    await expect(
+      controller.continueWithIdentity(request(), { idToken: 'firebase-token' }, newcomer),
+    ).resolves.toEqual({ status: 'NEEDS_ACCOUNT', ...profile });
+    expect(newcomer.cookie).not.toHaveBeenCalled();
+  });
+
+  it('creates the account as a web session', async () => {
+    identities.createAccount.mockResolvedValueOnce(tokens);
+    const dto = { idToken: 'firebase-token', username: 'ana', displayName: 'Ana' };
+
+    await expect(controller.createAccount(request(), dto, response())).resolves.toEqual({
       accessToken: 'access-1',
     });
-    expect(auth.signup).toHaveBeenCalledWith({ ...dto, platform: 'WEB' });
+    expect(identities.createAccount).toHaveBeenCalledWith({ ...dto, platform: 'WEB' });
   });
 
   it('renews from the cookie, and drops a cookie that no longer works', async () => {

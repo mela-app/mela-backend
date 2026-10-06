@@ -122,6 +122,42 @@ describe('WebFallbackController', () => {
     });
   });
 
+  it("offers Continue with Google once Firebase's web app is set, opening the policy only for its popup", async () => {
+    findUnique.mockResolvedValue({
+      title: 'Big night',
+      status: StreamStatus.LIVE,
+      host: { displayName: 'Ana' },
+    });
+    await controller.show(LIVE, res);
+    expect(playerConfig()).not.toHaveProperty('firebase');
+    expect(header('Content-Security-Policy')).not.toContain('apis.google.com');
+    expect(header('Content-Security-Policy')).not.toContain('frame-src');
+
+    jest.clearAllMocks();
+    const settings: Record<string, string> = {
+      NODE_ENV: 'production',
+      FIREBASE_PROJECT_ID: 'mela-prod',
+      FIREBASE_WEB_API_KEY: 'web-key',
+      FIREBASE_WEB_APP_ID: '1:123:web:abc',
+    };
+    config.get.mockImplementation((key: string) => settings[key]);
+    await controller.show(LIVE, res);
+
+    expect(playerConfig().firebase).toEqual({
+      apiKey: 'web-key',
+      authDomain: 'mela-prod.firebaseapp.com',
+      projectId: 'mela-prod',
+      appId: '1:123:web:abc',
+    });
+    expect(header('Content-Security-Policy')).toContain(
+      "script-src 'self' https://apis.google.com;",
+    );
+    expect(header('Content-Security-Policy')).toContain(
+      'frame-src https://mela-prod.firebaseapp.com;',
+    );
+    expect(header('Content-Security-Policy')).toContain("frame-ancestors 'none'");
+  });
+
   it("keeps the player's settings from breaking out of their script tag", async () => {
     findUnique.mockResolvedValue({
       title: 'Big night',

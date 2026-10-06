@@ -209,6 +209,12 @@ export class AdminUsersService {
     const target = await this.getTarget(userId);
     if (target.id === admin.id) throw new BadRequestException("You can't change your own role");
     if (target.platformRole === role) return { ok: true };
+    // The console signs staff in with a password; an account made with Google has none.
+    if (role !== PlatformRole.USER && !target.hasPassword) {
+      throw new BadRequestException(
+        'This account signs in with Google and has no password for the console - create a staff account for them instead',
+      );
+    }
     const granted =
       role === PlatformRole.PLATFORM_MODERATOR ? moderatorPermissions(permissions) : [];
     if (target.platformRole === PlatformRole.SUPER_ADMIN)
@@ -429,10 +435,11 @@ export class AdminUsersService {
   private async getTarget(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, platformRole: true, status: true },
+      select: { id: true, platformRole: true, status: true, passwordHash: true },
     });
     if (!user) throw new NotFoundException('User not found');
-    return user;
+    const { passwordHash, ...target } = user;
+    return { ...target, hasPassword: passwordHash !== null };
   }
 
   private async assertExists(userId: string): Promise<void> {

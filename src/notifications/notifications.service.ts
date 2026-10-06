@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { GuestRequestInitiator, NotificationType, Prisma } from '@prisma/client';
 import {
+  AccountCredentialChangedPayload,
   DomainEvents,
   GuestRequestCreatedPayload,
   ModeratorGrantedPayload,
@@ -78,13 +79,16 @@ const DEFAULT_SETTINGS: SettingsView = {
   pushGuestInvite: true,
 };
 
-// Which per-type toggle in NotificationSettings gates a push for that type.
-const SETTING_KEY_BY_TYPE: Record<NotificationType, keyof SettingsView> = {
+// Which per-type toggle in NotificationSettings gates a push for that type -
+// none for security notices, which always push.
+const SETTING_KEY_BY_TYPE: Record<NotificationType, keyof SettingsView | null> = {
   STREAM_STARTED: 'pushStreamStarted',
   NEW_FOLLOWER: 'pushNewFollower',
   STREAM_INVITE: 'pushStreamInvite',
   MODERATOR_GRANTED: 'pushModeratorGranted',
   GUEST_INVITE: 'pushGuestInvite',
+  PASSWORD_ADDED: null,
+  PASSWORD_CHANGED: null,
 };
 
 export interface Page<T> {
@@ -231,6 +235,33 @@ export class NotificationsService {
     });
   }
 
+  // Security notices, so a change nobody on this account made gets seen.
+  @OnEvent(DomainEvents.AccountPasswordAdded)
+  async onPasswordAdded(payload: AccountCredentialChangedPayload): Promise<void> {
+    await this.fanOut([payload.userId], {
+      type: NotificationType.PASSWORD_ADDED,
+      actorId: null,
+      streamId: null,
+      title: 'Password added',
+      body: 'You can now also log in with your email and password. Not you? Change it in Settings.',
+      actor: null,
+      streamTitle: null,
+    });
+  }
+
+  @OnEvent(DomainEvents.AccountPasswordChanged)
+  async onPasswordChanged(payload: AccountCredentialChangedPayload): Promise<void> {
+    await this.fanOut([payload.userId], {
+      type: NotificationType.PASSWORD_CHANGED,
+      actorId: null,
+      streamId: null,
+      title: 'Password changed',
+      body: 'Your password was changed and your other devices were signed out.',
+      actor: null,
+      streamTitle: null,
+    });
+  }
+
   /** Cursor-paginated inbox, newest first (plan §6.11). */
   async list(recipientId: string, cursor?: string, limit = 30): Promise<Page<unknown>> {
     const rows = await this.prisma.notification.findMany({
@@ -351,19 +382,23 @@ export class NotificationsService {
     });
 
     const settingKey = SETTING_KEY_BY_TYPE[input.type];
-    const settingsRows = await this.prisma.notificationSettings.findMany({
-      where: { userId: { in: recipientIds } },
-      select: {
-        userId: true,
-        pushStreamStarted: true,
-        pushNewFollower: true,
-        pushStreamInvite: true,
-        pushModeratorGranted: true,
-        pushGuestInvite: true,
-      },
-    });
+    const settingsRows = settingKey
+      ? await this.prisma.notificationSettings.findMany({
+          where: { userId: { in: recipientIds } },
+          select: {
+            userId: true,
+            pushStreamStarted: true,
+            pushNewFollower: true,
+            pushStreamInvite: true,
+            pushModeratorGranted: true,
+            pushGuestInvite: true,
+          },
+        })
+      : [];
     const pushDisabledFor = new Set(
-      settingsRows.filter((row) => row[settingKey] === false).map((row) => row.userId),
+      settingsRows
+        .filter((row) => settingKey && row[settingKey] === false)
+        .map((row) => row.userId),
     );
 
     for (const row of created) {

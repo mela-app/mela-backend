@@ -24,6 +24,7 @@ import { ChatDeleteDto, ChatSendDto, LikeSendDto } from '../chat/dto/chat-events
 import { LikesService } from '../chat/likes.service';
 import {
   DomainEvents,
+  AccountIdentityLinkedPayload,
   AdminAlertSentPayload,
   AppReleaseChangedPayload,
   ChatMessageDeletedPayload,
@@ -467,6 +468,12 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   @OnEvent(DomainEvents.UserSessionsRevoked)
   handleUserSessionsRevoked(payload: UserSessionsRevokedPayload) {
     this.server.in(userRoom(payload.userId)).disconnectSockets(true);
+  }
+
+  // The email's owner took over an account they never made: whoever did is out.
+  @OnEvent(DomainEvents.AccountIdentityLinked)
+  handleAccountIdentityLinked(payload: AccountIdentityLinkedPayload) {
+    if (payload.passwordRemoved) this.server.in(userRoom(payload.userId)).disconnectSockets(true);
   }
 
   // Before stream_ended, which empties the room (plan §6.8).

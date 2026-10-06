@@ -178,12 +178,12 @@ export class AdminAuthService implements OnModuleInit {
   /** Every other device of this account is signed out, the console included. */
   async changePassword(admin: AdminPrincipal, dto: ChangePasswordDto): Promise<AdminView> {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: admin.id } });
-    if (!(await argon2.verify(user.passwordHash, dto.currentPassword))) {
+    if (!(await passwordMatches(user.passwordHash, dto.currentPassword))) {
       throw new BadRequestException('Your current password is incorrect');
     }
     const problem = adminPasswordProblem(dto.newPassword, user.email);
     if (problem) throw new BadRequestException(problem);
-    if (await argon2.verify(user.passwordHash, dto.newPassword)) {
+    if (await passwordMatches(user.passwordHash, dto.newPassword)) {
       throw new BadRequestException('Choose a password different from your current one');
     }
 
@@ -200,7 +200,7 @@ export class AdminAuthService implements OnModuleInit {
 
   async changeEmail(admin: AdminPrincipal, dto: ChangeEmailDto): Promise<AdminView> {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: admin.id } });
-    if (!(await argon2.verify(user.passwordHash, dto.currentPassword))) {
+    if (!(await passwordMatches(user.passwordHash, dto.currentPassword))) {
       throw new BadRequestException('Your current password is incorrect');
     }
     if (user.email.toLowerCase() === dto.email.toLowerCase()) return toAdminView(user);
@@ -266,4 +266,9 @@ export function toAdminView(user: User): AdminView {
     permissions: effectiveAdminPermissions(user.platformRole, user.adminPermissions),
     passwordChangeRequired: user.passwordChangeRequired,
   };
+}
+
+// An account made with Google has no password to match.
+function passwordMatches(hash: string | null, password: string): Promise<boolean> {
+  return hash ? argon2.verify(hash, password) : Promise.resolve(false);
 }

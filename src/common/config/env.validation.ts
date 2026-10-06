@@ -9,6 +9,8 @@ const REQUIRED = [
   'APP_URL_SCHEME',
   'ANDROID_APP_PACKAGE_NAME',
   'S3_REGION',
+  // Checks sign-up identity tokens (docs/features/auth.md) - every new account needs one.
+  'FIREBASE_PROJECT_ID',
 ] as const;
 
 // The sample values in .env.example and the LiveKit dev server's key pair.

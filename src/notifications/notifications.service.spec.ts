@@ -196,6 +196,44 @@ describe('NotificationsService', () => {
     expect(pushQueue.enqueue).not.toHaveBeenCalled();
   });
 
+  describe('security notices', () => {
+    it('tells the account a password was added, with no actor', async () => {
+      await service().onPasswordAdded({ userId: 'u1' });
+
+      expect(prisma.notification.createManyAndReturn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: [
+            {
+              recipientId: 'u1',
+              type: NotificationType.PASSWORD_ADDED,
+              actorId: null,
+              streamId: null,
+            },
+          ],
+        }),
+      );
+      expect(pushQueue.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recipientId: 'u1',
+          title: 'Password added',
+          data: { type: NotificationType.PASSWORD_ADDED },
+        }),
+      );
+    });
+
+    it('always pushes a changed password - no setting turns it off', async () => {
+      await service().onPasswordChanged({ userId: 'u1' });
+
+      expect(prisma.notificationSettings.findMany).not.toHaveBeenCalled();
+      expect(pushQueue.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: 'Password changed',
+          data: { type: NotificationType.PASSWORD_CHANGED },
+        }),
+      );
+    });
+  });
+
   describe('onGuestRequestCreated', () => {
     const user = { id: 'g1', username: 'guest', displayName: 'Guest', avatarUrl: null };
 

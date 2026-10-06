@@ -1,10 +1,5 @@
 import { createHash, randomUUID, timingSafeEqual } from 'crypto';
-import {
-  ConflictException,
-  ForbiddenException,
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { JwtService } from '@nestjs/jwt';
@@ -15,12 +10,10 @@ import {
   DomainEvents,
   UserLoggedInPayload,
   UserLoggedOutPayload,
-  UserRegisteredPayload,
   UserSuspendedPayload,
 } from '../common/events/domain-events';
 import { AccessTokenClaims, RefreshTokenClaims } from './auth.types';
 import { LoginDto } from './dto/login.dto';
-import { SignupDto } from './dto/signup.dto';
 
 // A just-rotated refresh token keeps working this long, so a device whose
 // refresh response was lost on a slow network can retry instead of being
@@ -34,6 +27,9 @@ export interface TokenPair {
 
 type TokenUser = Pick<User, 'id' | 'username' | 'platformRole'>;
 
+// Checked when there's no password to check, so every failed login takes as long.
+let dummyPasswordHash: Promise<string> | undefined;
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -43,44 +39,18 @@ export class AuthService {
     private readonly events: EventEmitter2,
   ) {}
 
-  async signup(dto: SignupDto): Promise<TokenPair> {
-    const existing = await this.prisma.user.findFirst({
-      where: { OR: [{ username: dto.username }, { email: dto.email }] },
-    });
-    if (existing) {
-      throw new ConflictException('Username or email already in use');
-    }
-
-    const passwordHash = await argon2.hash(dto.password);
-    const user = await this.prisma.user.create({
-      data: {
-        username: dto.username,
-        displayName: dto.displayName,
-        email: dto.email,
-        passwordHash,
-      },
-    });
-
-    this.events.emit(DomainEvents.UserRegistered, {
-      userId: user.id,
-      username: user.username,
-    } satisfies UserRegisteredPayload);
-
-    return this.startSession(user, dto.platform);
-  }
-
   async login(dto: LoginDto): Promise<TokenPair> {
     const user = await this.prisma.user.findFirst({
       where: { OR: [{ username: dto.usernameOrEmail }, { email: dto.usernameOrEmail }] },
     });
 
-    // Deliberately generic message either way - never reveal which part was wrong.
-    if (!user) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
-
-    const passwordValid = await argon2.verify(user.passwordHash, dto.password);
-    if (!passwordValid) {
+    // An account made with Google has no password. Deliberately generic message either way.
+    dummyPasswordHash ??= argon2.hash(randomUUID());
+    const passwordValid = await argon2.verify(
+      user?.passwordHash ?? (await dummyPasswordHash),
+      dto.password,
+    );
+    if (!user?.passwordHash || !passwordValid) {
       throw new UnauthorizedException('Invalid credentials');
     }
     // Only after the right password: telling a stranger an account is suspended would leak that it exists.
@@ -96,6 +66,7 @@ export class AuthService {
     this.events.emit(DomainEvents.UserLoggedIn, {
       userId: user.id,
       platform: dto.platform ?? SessionPlatform.UNKNOWN,
+      method: 'password',
     } satisfies UserLoggedInPayload);
     return tokens;
   }
