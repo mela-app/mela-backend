@@ -33,6 +33,7 @@ describe('GuestsService', () => {
       findMany: jest.fn(),
     },
     user: { findUniqueOrThrow: jest.fn() },
+    $transaction: jest.fn(),
   };
   const redisClient = { exists: jest.fn().mockResolvedValue(0), set: jest.fn() };
   const redis = { getClient: () => redisClient } as unknown as RedisService;
@@ -53,6 +54,7 @@ describe('GuestsService', () => {
     moderators.listUserIdsWithCapability.mockResolvedValue([]);
     prisma.guestRequest.findFirst.mockResolvedValue(null);
     prisma.streamGuest.findUnique.mockResolvedValue(null);
+    prisma.$transaction.mockImplementation((run: (tx: typeof prisma) => unknown) => run(prisma));
   });
 
   describe('request', () => {
@@ -164,7 +166,15 @@ describe('GuestsService', () => {
     it('lists seats oldest first, each with the Agora uid their publisher token uses and its mic lock', async () => {
       const joinedAt = new Date();
       prisma.streamGuest.findMany.mockResolvedValue([
-        { joinedAt, micForceMuted: true, stageX: null, stageY: null, stageSize: null, user: USER },
+        {
+          joinedAt,
+          micForceMuted: true,
+          stageX: null,
+          stageY: null,
+          stageSize: null,
+          spotlightAt: null,
+          user: USER,
+        },
       ]);
 
       const result = await service().activeGuests(STREAM);
@@ -176,8 +186,33 @@ describe('GuestsService', () => {
         }),
       );
       expect(result).toEqual([
-        { ...USER, joinedAt, agoraUid: agoraUidFor(USER.id), micForceMuted: true, placement: null },
+        {
+          ...USER,
+          joinedAt,
+          agoraUid: agoraUidFor(USER.id),
+          micForceMuted: true,
+          placement: null,
+          spotlight: false,
+        },
       ]);
+    });
+
+    it('says who fills the stage', async () => {
+      prisma.streamGuest.findMany.mockResolvedValue([
+        {
+          joinedAt: new Date(),
+          micForceMuted: false,
+          stageX: null,
+          stageY: null,
+          stageSize: null,
+          spotlightAt: new Date(),
+          user: USER,
+        },
+      ]);
+
+      const [guest] = await service().activeGuests(STREAM);
+
+      expect(guest.spotlight).toBe(true);
     });
 
     it('says where the host put a tile', async () => {
@@ -236,6 +271,63 @@ describe('GuestsService', () => {
       await expect(service().setPlacement(STREAM, USER.id, HOST, null)).rejects.toThrow(
         NotFoundException,
       );
+      expect(events.emit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('setSpotlight', () => {
+    it('puts a guest on the full stage, takes it from anyone else, and tells everyone', async () => {
+      prisma.streamGuest.updateMany.mockResolvedValue({ count: 1 });
+
+      await service().setSpotlight(STREAM, USER.id, 'mod-1');
+
+      expect(prisma.streamGuest.updateMany).toHaveBeenNthCalledWith(1, {
+        where: { streamId: STREAM, userId: USER.id, status: StreamGuestStatus.ACTIVE },
+        data: { spotlightAt: expect.any(Date) },
+      });
+      expect(prisma.streamGuest.updateMany).toHaveBeenNthCalledWith(2, {
+        where: { streamId: STREAM, spotlightAt: { not: null }, NOT: { userId: USER.id } },
+        data: { spotlightAt: null },
+      });
+      expect(events.emit).toHaveBeenCalledWith(DomainEvents.GuestSpotlightChanged, {
+        streamId: STREAM,
+        userId: USER.id,
+        actorId: 'mod-1',
+      });
+    });
+
+    it('gives the host the full stage back', async () => {
+      prisma.streamGuest.updateMany.mockResolvedValue({ count: 1 });
+
+      await service().setSpotlight(STREAM, null, HOST);
+
+      expect(prisma.streamGuest.updateMany).toHaveBeenCalledTimes(1);
+      expect(prisma.streamGuest.updateMany).toHaveBeenCalledWith({
+        where: { streamId: STREAM, spotlightAt: { not: null } },
+        data: { spotlightAt: null },
+      });
+      expect(events.emit).toHaveBeenCalledWith(DomainEvents.GuestSpotlightChanged, {
+        streamId: STREAM,
+        userId: null,
+        actorId: HOST,
+      });
+    });
+
+    it('stays quiet when the host already had it', async () => {
+      prisma.streamGuest.updateMany.mockResolvedValue({ count: 0 });
+
+      await service().setSpotlight(STREAM, null, HOST);
+
+      expect(events.emit).not.toHaveBeenCalled();
+    });
+
+    it('404s for someone who is not on stage, changing nothing', async () => {
+      prisma.streamGuest.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service().setSpotlight(STREAM, USER.id, HOST)).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(prisma.streamGuest.updateMany).toHaveBeenCalledTimes(1);
       expect(events.emit).not.toHaveBeenCalled();
     });
   });
@@ -333,13 +425,14 @@ describe('GuestsService', () => {
       expect(prisma.streamGuest.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { streamId_userId: { streamId: STREAM, userId: USER.id } },
-          // A returning guest starts with their mic allowed again, back in line.
+          // A returning guest starts with their mic allowed again, back in line, off the full stage.
           update: expect.objectContaining({
             status: StreamGuestStatus.ACTIVE,
             micForceMuted: false,
             stageX: null,
             stageY: null,
             stageSize: null,
+            spotlightAt: null,
           }),
         }),
       );
@@ -484,6 +577,11 @@ describe('GuestsService', () => {
 
       await service().remove(STREAM, HOST, USER.id, true);
 
+      // Leaving the stage gives the host the full stage back, if the guest had it.
+      expect(prisma.streamGuest.updateMany).toHaveBeenCalledWith({
+        where: { streamId: STREAM, userId: USER.id, status: StreamGuestStatus.ACTIVE },
+        data: { status: StreamGuestStatus.REMOVED, leftAt: expect.any(Date), spotlightAt: null },
+      });
       expect(redisClient.set).toHaveBeenCalledWith(
         `guest_cooldown:${STREAM}:${USER.id}`,
         '1',

@@ -48,6 +48,15 @@ enum ProfileVisibility {
   ONLY_ME
 }
 
+// Who may share a profile's link; the owner always can, and only people who
+// can see the profile can share it. See src/social/profile-sharing.ts.
+enum ProfileSharing {
+  EVERYONE
+  FOLLOWERS
+  FRIENDS
+  ONLY_ME
+}
+
 // Phase 0: users table. Every feature module owns its own models and its
 // own migration - see docs/features/README.md.
 model User {
@@ -72,6 +81,7 @@ model User {
   // Platform moderators only; always empty for everyone else.
   adminPermissions       AdminPermission[] @default([])
   profileVisibility      ProfileVisibility @default(EVERYONE)
+  profileSharing         ProfileSharing    @default(EVERYONE)
 
   streams               Stream[]              @relation("StreamHost")
   sessions              UserSession[]
@@ -488,6 +498,10 @@ model StreamGuest {
   stageX        Float?
   stageY        Float?
   stageSize     Float?
+  // When the host or an ARRANGE_GUESTS moderator put this guest on the full
+  // stage, the host's video shrinking to a tile (docs/features/guests.md). At
+  // most one seat of a live has it; leaving the stage ends it.
+  spotlightAt   DateTime?
 
   stream Stream @relation(fields: [streamId], references: [id], onDelete: Cascade)
   user   User   @relation("GuestSeats", fields: [userId], references: [id], onDelete: Cascade)

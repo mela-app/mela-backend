@@ -33,6 +33,8 @@ export class WellKnownController {
   appleAppSiteAssociation() {
     const appId = this.config.get<string>('APPLE_APP_ID');
     if (!appId) return { applinks: { apps: [], details: [] } };
-    return { applinks: { apps: [], details: [{ appID: appId, paths: ['/live/*'] }] } };
+    return {
+      applinks: { apps: [], details: [{ appID: appId, paths: ['/live/*', '/profile/*'] }] },
+    };
   }
 }

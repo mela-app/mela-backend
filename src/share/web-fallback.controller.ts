@@ -5,6 +5,7 @@ import { isUUID } from 'class-validator';
 import type { Response } from 'express';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { MELA_COLORS, MELA_LOGO_SVG } from './brand';
+import { escapeHtml, InstallLinks, installLinks, jsonForHtml } from './share-page';
 
 // Helmet's default policy would block the video SDKs' connections to their servers.
 const PLAYER_CSP = [
@@ -23,12 +24,9 @@ const PLAYER_CSP = [
 ].join('; ');
 
 /** What the browser player (the mela-web repository) needs to know about this page. */
-export interface PlayerConfig {
+export interface PlayerConfig extends InstallLinks {
   streamId: string;
   appScheme: string;
-  androidPackage: string;
-  androidInstallUrl: string;
-  iosInstallUrl: string | null;
 }
 
 /**
@@ -63,16 +61,7 @@ export class WebFallbackController {
   }
 
   private playerConfig(streamId: string, appScheme: string): PlayerConfig {
-    const androidPackage = this.config.getOrThrow<string>('ANDROID_APP_PACKAGE_NAME');
-    return {
-      streamId,
-      appScheme,
-      androidPackage,
-      androidInstallUrl:
-        this.config.get<string>('ANDROID_INSTALL_URL') ||
-        `https://play.google.com/store/apps/details?id=${encodeURIComponent(androidPackage)}`,
-      iosInstallUrl: this.config.get<string>('IOS_INSTALL_URL') || null,
-    };
+    return { streamId, appScheme, ...installLinks(this.config) };
   }
 
   // Plain http:/ws: too outside production: a LiveKit server and photos on a development machine.
@@ -151,20 +140,4 @@ ${isLive ? '<div class="live">LIVE</div>' : ''}
 </div>
 </body>
 </html>`;
-}
-
-function escapeHtml(value: string): string {
-  const entities: Record<string, string> = {
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-  };
-  return value.replace(/[&<>"']/g, (char) => entities[char]);
-}
-
-// Inside a <script>, a `</script>` or `<!--` in a value would end it early.
-function jsonForHtml(value: unknown): string {
-  return JSON.stringify(value).replace(/</g, '\\u003c');
 }

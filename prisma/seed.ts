@@ -1,4 +1,10 @@
-import { AuditActorRole, AuditCategory, PlatformRole, PrismaClient, UserStatus } from '@prisma/client';
+import {
+  AuditActorRole,
+  AuditCategory,
+  PlatformRole,
+  PrismaClient,
+  UserStatus,
+} from '@prisma/client';
 import * as argon2 from 'argon2';
 import { adminPasswordProblem } from '../src/admin/password-policy';
 
@@ -23,7 +29,9 @@ async function main() {
   }
   const displayName = process.env.SEED_ADMIN_NAME?.trim() || 'Administrator';
 
-  const existing = await prisma.user.findFirst({ where: { email: { equals: email, mode: 'insensitive' } } });
+  const existing = await prisma.user.findFirst({
+    where: { email: { equals: email, mode: 'insensitive' } },
+  });
   if (existing) {
     if (existing.status !== UserStatus.ACTIVE) {
       console.warn(`Warning: ${email} is suspended - reinstate it before signing in.`);
@@ -32,7 +40,10 @@ async function main() {
       console.log(`${email} is already a super admin - left unchanged.`);
       return;
     }
-    await prisma.user.update({ where: { id: existing.id }, data: { platformRole: PlatformRole.SUPER_ADMIN } });
+    await prisma.user.update({
+      where: { id: existing.id },
+      data: { platformRole: PlatformRole.SUPER_ADMIN },
+    });
     await prisma.auditLog.create({
       data: {
         category: AuditCategory.ADMIN,
@@ -87,7 +98,10 @@ async function main() {
 async function freeUsername(base: string): Promise<string> {
   for (let suffix = 0; ; suffix++) {
     const candidate = suffix === 0 ? base : `${base}_${suffix + 1}`;
-    const taken = await prisma.user.findUnique({ where: { username: candidate }, select: { id: true } });
+    const taken = await prisma.user.findUnique({
+      where: { username: candidate },
+      select: { id: true },
+    });
     if (!taken) return candidate;
   }
 }

@@ -302,6 +302,23 @@ export class StreamsController {
     return this.streamsService.setGuestPlacement(id, user.id, userId, null);
   }
 
+  @Put(':id/guests/:userId/spotlight')
+  @UseGuards(JwtAuthGuard)
+  spotlightGuest(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ) {
+    return this.streamsService.setSpotlight(id, user.id, userId);
+  }
+
+  // The host has the full stage again.
+  @Delete(':id/spotlight')
+  @UseGuards(JwtAuthGuard)
+  endSpotlight(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.streamsService.setSpotlight(id, user.id, null);
+  }
+
   @Get(':id/guest-requests')
   @UseGuards(JwtAuthGuard)
   listGuestRequests(
