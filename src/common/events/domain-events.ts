@@ -83,6 +83,8 @@ export const DomainEvents = {
   LiveAccessRevoked: 'live.access_revoked',
   // A guest's tile was moved or resized on the stage, or put back in line.
   GuestPlacementChanged: 'guest.placement_changed',
+  // A guest was put on the full stage (the host in a tile), or the host got it back.
+  GuestSpotlightChanged: 'guest.spotlight_changed',
   // An app update was published, changed or withdrawn (docs/features/app-updates.md).
   AppReleaseChanged: 'app_release.changed',
 } as const;
@@ -337,6 +339,14 @@ export interface GuestPlacementChangedPayload {
   actorId: string;
   // Null: back in the automatic column.
   placement: GuestPlacement | null;
+}
+
+// Public `guest:spotlight` to the stream's room: every stage swaps who fills it.
+export interface GuestSpotlightChangedPayload {
+  streamId: string;
+  // Null: the host has the full stage again.
+  userId: string | null;
+  actorId: string;
 }
 
 // Private, to that viewer's own `user:{id}` room: their app lets screen

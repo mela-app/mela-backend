@@ -1,4 +1,4 @@
-import { ProfileVisibility } from '@prisma/client';
+import { ProfileSharing, ProfileVisibility } from '@prisma/client';
 import { IsEnum, IsOptional, IsString, IsUrl, MaxLength } from 'class-validator';
 
 export class UpdateProfileDto {
@@ -20,4 +20,8 @@ export class UpdateProfileDto {
   @IsOptional()
   @IsEnum(ProfileVisibility)
   profileVisibility?: ProfileVisibility;
+
+  @IsOptional()
+  @IsEnum(ProfileSharing)
+  profileSharing?: ProfileSharing;
 }

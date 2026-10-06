@@ -35,6 +35,7 @@ interface FakeSocket {
     viewingStreamId?: string;
     hostingStreamId?: string;
     watchOnly?: { streamId: string };
+    arranging?: { streamId: string; until: number };
   };
   handshake: { auth: { token?: string; watchTicket?: string }; headers: Record<string, string> };
   rooms: Set<string>;
@@ -83,7 +84,11 @@ describe('RealtimeGateway', () => {
   const jwt = { verifyAsync: jest.fn() };
   const config = { get: jest.fn(() => 'secret') };
   const auth = { isSessionActive: jest.fn() };
-  const streams = { findLive: jest.fn(), participantSummaries: jest.fn() };
+  const streams = {
+    findLive: jest.fn(),
+    participantSummaries: jest.fn(),
+    canArrangeStage: jest.fn(),
+  };
   const presence = {
     addViewer: jest.fn(),
     claimArrivalNotice: jest.fn(),
@@ -105,7 +110,8 @@ describe('RealtimeGateway', () => {
   const recordingPermissions = { isAllowed: jest.fn() };
   const social = { isBlockedEitherWay: jest.fn(), blockedEitherWayUserIds: jest.fn() };
   const roomEmit = jest.fn();
-  const roomExcept = jest.fn(() => ({ emit: roomEmit }));
+  // Volatile broadcasts land in roomEmit too.
+  const roomExcept = jest.fn(() => ({ emit: roomEmit, volatile: { emit: roomEmit } }));
   const server = {
     to: jest.fn(() => ({ emit: roomEmit, except: roomExcept })),
     in: jest.fn(() => ({ socketsLeave: jest.fn(), disconnectSockets: jest.fn() })),
@@ -1248,6 +1254,123 @@ describe('RealtimeGateway', () => {
         userId: 'g1',
         forceMuted: false,
       });
+    });
+  });
+
+  describe('arranging the stage', () => {
+    const GUEST = '7b9e2f14-5c3a-4d8e-9f1b-2a6c0d4e8f13';
+    const move = (x: number) => ({
+      streamId: LIVE,
+      userId: GUEST,
+      placement: { x, y: 0.5, size: 0.3 },
+    });
+    const moves = () => roomEmit.mock.calls.filter(([event]) => event === 'guest:moving');
+    const host = () => {
+      const socket = fakeSocket('host-1', 'socket-h');
+      socket.data.hostingStreamId = LIVE;
+      return socket;
+    };
+
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    it("shows everyone else a tile while it's dragged - the first position at once, then the latest each window", async () => {
+      const gateway = makeGateway();
+      const socket = host();
+
+      await expect(gateway.onGuestMoving(socket as never, move(0.1))).resolves.toEqual({
+        ok: true,
+      });
+      await gateway.onGuestMoving(socket as never, move(0.2));
+      await gateway.onGuestMoving(socket as never, move(0.3));
+
+      expect(moves()).toEqual([['guest:moving', move(0.1)]]);
+      expect(server.to).toHaveBeenCalledWith(`stream:${LIVE}`);
+      expect(roomExcept).toHaveBeenCalledWith('socket-h');
+
+      jest.advanceTimersByTime(100);
+
+      expect(moves()).toEqual([
+        ['guest:moving', move(0.1)],
+        ['guest:moving', move(0.3)],
+      ]);
+      expect(streams.canArrangeStage).not.toHaveBeenCalled();
+    });
+
+    it('checks a moderator once, then trusts them for a while', async () => {
+      streams.canArrangeStage.mockResolvedValue(true);
+      const gateway = makeGateway();
+      const socket = fakeSocket('mod-1');
+      socket.data.viewingStreamId = LIVE;
+
+      await gateway.onGuestMoving(socket as never, move(0.1));
+      await gateway.onGuestMoving(socket as never, move(0.2));
+
+      expect(streams.canArrangeStage).toHaveBeenCalledTimes(1);
+      expect(streams.canArrangeStage).toHaveBeenCalledWith(LIVE, 'mod-1');
+
+      jest.advanceTimersByTime(10_001);
+      await gateway.onGuestMoving(socket as never, move(0.3));
+      expect(streams.canArrangeStage).toHaveBeenCalledTimes(2);
+    });
+
+    it('refuses anyone who may not arrange it, or is not in the live, and anything malformed', async () => {
+      streams.canArrangeStage.mockResolvedValue(false);
+      const gateway = makeGateway();
+      const viewer = fakeSocket('viewer-1');
+      viewer.data.viewingStreamId = LIVE;
+
+      await expect(gateway.onGuestMoving(viewer as never, move(0.1))).resolves.toEqual({
+        ok: false,
+        error: 'NOT_ALLOWED',
+      });
+      await expect(gateway.onGuestMoving(fakeSocket() as never, move(0.1))).resolves.toEqual({
+        ok: false,
+        error: 'NOT_IN_ROOM',
+      });
+      await expect(
+        gateway.onGuestMoving(host() as never, {
+          ...move(0.1),
+          placement: { x: 2, y: 0, size: 1 },
+        }),
+      ).resolves.toEqual({ ok: false, error: 'INVALID_PAYLOAD' });
+      await expect(
+        gateway.onGuestMoving(host() as never, { streamId: LIVE, userId: GUEST }),
+      ).resolves.toEqual({ ok: false, error: 'INVALID_PAYLOAD' });
+      expect(moves()).toEqual([]);
+    });
+
+    it('lets no position from the drag arrive after the drop', async () => {
+      const gateway = makeGateway();
+      await gateway.onGuestMoving(host() as never, move(0.1));
+      await gateway.onGuestMoving(host() as never, move(0.2));
+
+      gateway.handleGuestPlacementChanged({
+        streamId: LIVE,
+        userId: GUEST,
+        actorId: 'host-1',
+        placement: { x: 0.2, y: 0.5, size: 0.3 },
+      });
+      jest.advanceTimersByTime(500);
+
+      expect(moves()).toEqual([['guest:moving', move(0.1)]]);
+    });
+
+    it('swaps who fills every stage in the live', () => {
+      makeGateway().handleGuestSpotlightChanged({
+        streamId: LIVE,
+        userId: GUEST,
+        actorId: 'host-1',
+      });
+      makeGateway().handleGuestSpotlightChanged({
+        streamId: LIVE,
+        userId: null,
+        actorId: 'host-1',
+      });
+
+      expect(server.to).toHaveBeenCalledWith(`stream:${LIVE}`);
+      expect(roomEmit).toHaveBeenCalledWith('guest:spotlight', { streamId: LIVE, userId: GUEST });
+      expect(roomEmit).toHaveBeenCalledWith('guest:spotlight', { streamId: LIVE, userId: null });
     });
   });
 

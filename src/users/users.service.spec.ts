@@ -1,6 +1,6 @@
 import { NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { ProfileVisibility, StreamStatus } from '@prisma/client';
+import { ProfileSharing, ProfileVisibility, StreamStatus } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { StorageProvider } from '../common/storage/storage-provider.interface';
 import { SocialService } from '../social/social.service';
@@ -31,6 +31,7 @@ describe('UsersService', () => {
     bio: null,
     createdAt: new Date('2026-01-01'),
     profileVisibility: ProfileVisibility.EVERYONE,
+    profileSharing: ProfileSharing.EVERYONE,
   };
   const relationship = {
     followerCount: 3,
@@ -66,8 +67,48 @@ describe('UsersService', () => {
       expect(profile).toEqual({
         ...profileRow,
         ...relationship,
+        profileSharing: null,
         canViewProfile: true,
+        canShare: true,
         liveStreamId: null,
+      });
+    });
+
+    describe('profile sharing', () => {
+      const friendsShare = { ...profileRow, profileSharing: ProfileSharing.FRIENDS };
+
+      it('lets only the people the owner chose share it, without telling them the setting', async () => {
+        prisma.user.findUnique.mockResolvedValue(friendsShare);
+        social.getRelationshipSummary.mockResolvedValue({ ...relationship, isFollowing: true });
+
+        const follower = await service().findPublicProfile('u1', 'viewer-1');
+
+        expect(follower).toEqual(
+          expect.objectContaining({ canShare: false, profileSharing: null }),
+        );
+
+        social.getRelationshipSummary.mockResolvedValue({
+          ...relationship,
+          isFollowing: true,
+          isFollowedBy: true,
+          isFriend: true,
+        });
+        const friend = await service().findPublicProfile('u1', 'viewer-2');
+
+        expect(friend).toEqual(expect.objectContaining({ canShare: true, profileSharing: null }));
+      });
+
+      it('shows the owner their own setting, and always lets them share', async () => {
+        prisma.user.findUnique.mockResolvedValue({
+          ...friendsShare,
+          profileSharing: ProfileSharing.ONLY_ME,
+        });
+
+        const profile = await service().findPublicProfile('u1', 'u1');
+
+        expect(profile).toEqual(
+          expect.objectContaining({ canShare: true, profileSharing: ProfileSharing.ONLY_ME }),
+        );
       });
     });
 

@@ -33,12 +33,14 @@ import {
   DirectMessagesReadPayload,
   GuestJoinedPayload,
   GuestMicForceMuteChangedPayload,
+  GuestPlacement,
   GuestPlacementChangedPayload,
   GuestRemovedPayload,
   GuestRequestAcceptedPayload,
   GuestRequestCancelledPayload,
   GuestRequestCreatedPayload,
   GuestRequestRejectedPayload,
+  GuestSpotlightChangedPayload,
   LiveAccessRevokedPayload,
   ModeratorGrantedPayload,
   ModeratorRevokedPayload,
@@ -62,6 +64,7 @@ import { RoomBansService } from '../room-bans/room-bans.service';
 import { RoomChatMutesService } from '../room-chat-mutes/room-chat-mutes.service';
 import { SocialService } from '../social/social.service';
 import { StreamsService } from '../streams/streams.service';
+import { GuestMovingDto } from './dto/guest-moving.dto';
 import { HostAwayDto, HostJoinDto, HostPauseDto, StreamRoomDto } from './dto/stream-room.dto';
 
 const VIEWER_COUNT_THROTTLE_MS = 2000;
@@ -69,6 +72,10 @@ const VIEWER_COUNT_THROTTLE_MS = 2000;
 const LIKES_THROTTLE_MS = 1000;
 // A busy live's arrivals come out as one "X and N others joined" at a time.
 const ARRIVALS_THROTTLE_MS = 1500;
+// A dragged tile's position, about ten times a second - enough to look like it's following a finger.
+const GUEST_MOVE_THROTTLE_MS = 100;
+// How long a socket's right to arrange a stage is trusted before it's checked again.
+const ARRANGE_CHECK_TTL_MS = 10_000;
 // What the share page's player shows of the chat so far.
 const WATCH_CHAT_SNAPSHOT = 30;
 // All a watch-only socket may ask; anything else is refused before any handler runs.
@@ -80,6 +87,8 @@ interface SocketData {
   hostingStreamId?: string;
   // Set for the share page's player without an account: the one live its ticket is for.
   watchOnly?: { streamId: string };
+  // A drag sends many moves: the right to arrange a stage is checked once, then trusted a while.
+  arranging?: { streamId: string; until: number };
 }
 
 type AuthedSocket = Socket & { data: SocketData };
@@ -139,6 +148,14 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   );
   // Per live: the latest arrival not yet announced, and how many more came with them.
   private readonly pendingArrivals = new Map<string, { userId: string; others: number }>();
+  private readonly guestMoves = new KeyedThrottle(GUEST_MOVE_THROTTLE_MS, (key) =>
+    this.flushGuestMove(key),
+  );
+  // Per live and guest: where their tile is mid-drag, and the socket dragging it.
+  private readonly pendingMoves = new Map<
+    string,
+    { streamId: string; userId: string; placement: GuestPlacement; fromSocketId: string }
+  >();
 
   @WebSocketServer()
   server!: Server;
@@ -659,7 +676,44 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   @OnEvent(DomainEvents.GuestPlacementChanged)
   handleGuestPlacementChanged(payload: GuestPlacementChangedPayload) {
     const { streamId, userId, placement } = payload;
+    // The drop is where the drag ends: no stale position may follow it.
+    const key = moveKey(streamId, userId);
+    this.guestMoves.cancel(key);
+    this.pendingMoves.delete(key);
     this.server.to(streamRoom(streamId)).emit('guest:placed', { streamId, userId, placement });
+  }
+
+  // Every stage swaps who fills it; null gives the host the full stage again.
+  @OnEvent(DomainEvents.GuestSpotlightChanged)
+  handleGuestSpotlightChanged(payload: GuestSpotlightChangedPayload) {
+    const { streamId, userId } = payload;
+    this.server.to(streamRoom(streamId)).emit('guest:spotlight', { streamId, userId });
+  }
+
+  // A tile while it's being dragged (docs/features/guests.md): relayed to the
+  // rest of the room - the latest position, at most every
+  // GUEST_MOVE_THROTTLE_MS - and never stored. The drop saves it, through the API.
+  @SubscribeMessage('guest:moving')
+  async onGuestMoving(
+    @ConnectedSocket() socket: AuthedSocket,
+    @MessageBody() body: unknown,
+  ): Promise<Ack> {
+    const request = await parse(GuestMovingDto, body);
+    if (!request) return fail('INVALID_PAYLOAD');
+    const { streamId, userId, placement } = request;
+    if (socket.data.viewingStreamId !== streamId && socket.data.hostingStreamId !== streamId) {
+      return fail('NOT_IN_ROOM');
+    }
+    if (!(await this.mayArrange(socket, streamId))) return fail('NOT_ALLOWED');
+    const key = moveKey(streamId, userId);
+    this.pendingMoves.set(key, {
+      streamId,
+      userId,
+      placement: { x: placement.x, y: placement.y, size: placement.size },
+      fromSocketId: socket.id,
+    });
+    this.guestMoves.schedule(key);
+    return { ok: true };
   }
 
   // Private to that viewer: their app lets recording through for this live, or blocks it again.
@@ -816,10 +870,33 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       (error) => this.logger.warn(`Could not read the likes of ${streamId}: ${error}`),
     );
   }
+
+  // The host of the live, or someone who may arrange its stage - looked up once a while per socket.
+  private async mayArrange(socket: AuthedSocket, streamId: string): Promise<boolean> {
+    if (socket.data.hostingStreamId === streamId) return true;
+    const trusted = socket.data.arranging;
+    if (trusted?.streamId === streamId && trusted.until > Date.now()) return true;
+    if (!(await this.streams.canArrangeStage(streamId, socket.data.userId))) return false;
+    socket.data.arranging = { streamId, until: Date.now() + ARRANGE_CHECK_TTL_MS };
+    return true;
+  }
+
+  private flushGuestMove(key: string): void {
+    const move = this.pendingMoves.get(key);
+    if (!move) return;
+    this.pendingMoves.delete(key);
+    const { streamId, userId, placement, fromSocketId } = move;
+    // Volatile: a slow connection skips a position rather than falling behind on all of them.
+    this.server
+      .to(streamRoom(streamId))
+      .except(fromSocketId)
+      .volatile.emit('guest:moving', { streamId, userId, placement });
+  }
 }
 
 const streamRoom = (streamId: string) => `stream:${streamId}`;
 const userRoom = (userId: string) => `user:${userId}`;
+const moveKey = (streamId: string, userId: string) => `${streamId}:${userId}`;
 const fail = (error: RealtimeError, retryAfterMs?: number): Failure =>
   retryAfterMs ? { ok: false, error, retryAfterMs } : { ok: false, error };
 

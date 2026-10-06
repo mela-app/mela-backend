@@ -870,6 +870,33 @@ export class StreamsService {
   }
 
   /**
+   * Puts a guest on the full stage, the host's video shrinking to a tile - or
+   * gives it back to the host (null). The host or an ARRANGE_GUESTS moderator.
+   */
+  async setSpotlight(streamId: string, requesterId: string, targetUserId: string | null) {
+    const stream = await this.getLiveOrThrow(streamId);
+    if (
+      !(await this.canUseCapability(
+        requesterId,
+        streamId,
+        stream.hostId,
+        ModeratorCapability.ARRANGE_GUESTS,
+      ))
+    ) {
+      throw new ForbiddenException('Only the host or a moderator can arrange the stage');
+    }
+    await this.guests.setSpotlight(streamId, targetUserId, requesterId);
+    return { ok: true };
+  }
+
+  /** For the realtime gateway: whether [userId] may arrange the stage of this live. */
+  async canArrangeStage(streamId: string, userId: string): Promise<boolean> {
+    const live = await this.findLive(streamId);
+    if (!live) return false;
+    return this.canUseCapability(userId, streamId, live.hostId, ModeratorCapability.ARRANGE_GUESTS);
+  }
+
+  /**
    * The host's post-live numbers (plan §6.13): how long it ran, peak viewers,
    * likes, and how many people followed them during it. Still answers while
    * live (counts from presence), so the ending screen never races the end.

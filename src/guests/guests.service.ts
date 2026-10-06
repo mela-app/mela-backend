@@ -23,6 +23,7 @@ import {
   GuestRequestCancelledPayload,
   GuestRequestCreatedPayload,
   GuestRequestRejectedPayload,
+  GuestSpotlightChangedPayload,
 } from '../common/events/domain-events';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RedisService } from '../common/redis/redis.service';
@@ -165,7 +166,7 @@ export class GuestsService {
       this.prisma.streamGuest.upsert({
         where: { streamId_userId: { streamId, userId: request.userId } },
         create: { streamId, userId: request.userId },
-        // A new seat starts with the mic allowed and in the automatic column, whatever happened last time.
+        // A new seat starts with the mic allowed, in the automatic column and off the full stage, whatever happened last time.
         update: {
           status: StreamGuestStatus.ACTIVE,
           joinedAt: now,
@@ -174,6 +175,7 @@ export class GuestsService {
           stageX: null,
           stageY: null,
           stageSize: null,
+          spotlightAt: null,
         },
       }),
       this.prisma.user.findUniqueOrThrow({
@@ -248,6 +250,7 @@ export class GuestsService {
         stageX: true,
         stageY: true,
         stageSize: true,
+        spotlightAt: true,
         user: { select: PROFILE_SUMMARY_SELECT },
       },
     });
@@ -264,6 +267,8 @@ export class GuestsService {
         row.stageX !== null && row.stageY !== null && row.stageSize !== null
           ? { x: row.stageX, y: row.stageY, size: row.stageSize }
           : null,
+      // Fills the stage; the host's video is a tile meanwhile.
+      spotlight: row.spotlightAt !== null,
     }));
   }
 
@@ -289,6 +294,35 @@ export class GuestsService {
       actorId,
       placement,
     } satisfies GuestPlacementChangedPayload);
+  }
+
+  /**
+   * Puts an active guest on the full stage, the host's video shrinking to a
+   * tile - or, with null, gives it back to the host. One guest at a time:
+   * whoever had it goes back to a tile.
+   */
+  async setSpotlight(streamId: string, userId: string | null, actorId: string): Promise<void> {
+    const cleared = await this.prisma.$transaction(async (tx) => {
+      if (userId) {
+        const { count } = await tx.streamGuest.updateMany({
+          where: { streamId, userId, status: StreamGuestStatus.ACTIVE },
+          data: { spotlightAt: new Date() },
+        });
+        if (count === 0) throw new NotFoundException("They're not on stage");
+      }
+      const others = await tx.streamGuest.updateMany({
+        where: { streamId, spotlightAt: { not: null }, ...(userId ? { NOT: { userId } } : {}) },
+        data: { spotlightAt: null },
+      });
+      return others.count;
+    });
+    // Giving the host back a stage they already had changes nothing.
+    if (!userId && cleared === 0) return;
+    this.events.emit(DomainEvents.GuestSpotlightChanged, {
+      streamId,
+      userId,
+      actorId,
+    } satisfies GuestSpotlightChangedPayload);
   }
 
   /**
@@ -335,7 +369,8 @@ export class GuestsService {
   ): Promise<void> {
     const result = await this.prisma.streamGuest.updateMany({
       where: { streamId, userId, status: StreamGuestStatus.ACTIVE },
-      data: { status: StreamGuestStatus.REMOVED, leftAt: new Date() },
+      // Off the full stage too: the host has it back.
+      data: { status: StreamGuestStatus.REMOVED, leftAt: new Date(), spotlightAt: null },
     });
     if (result.count === 0) return;
 
@@ -357,7 +392,7 @@ export class GuestsService {
   async removeAllForEndedStream(streamId: string): Promise<void> {
     await this.prisma.streamGuest.updateMany({
       where: { streamId, status: StreamGuestStatus.ACTIVE },
-      data: { status: StreamGuestStatus.REMOVED, leftAt: new Date() },
+      data: { status: StreamGuestStatus.REMOVED, leftAt: new Date(), spotlightAt: null },
     });
   }
 

@@ -118,6 +118,7 @@ describe('StreamsService', () => {
     removeAllForEndedStream: jest.fn().mockResolvedValue(undefined),
     setMicForceMuted: jest.fn(),
     setPlacement: jest.fn(),
+    setSpotlight: jest.fn(),
   };
   const roomChatMutes = {
     mute: jest.fn(),
@@ -1390,6 +1391,70 @@ describe('StreamsService', () => {
         NotFoundException,
       );
       expect(guests.setPlacement).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('the full stage (spotlight)', () => {
+    beforeEach(() => {
+      prisma.stream.findUnique.mockResolvedValue({
+        id: 's1',
+        hostId: 'host-1',
+        status: StreamStatus.LIVE,
+      });
+      moderators.findActiveGrant.mockReset().mockResolvedValue(null);
+    });
+
+    it('lets the host, or an ARRANGE_GUESTS moderator, put a guest on it or give it back', async () => {
+      await makeService().setSpotlight('s1', 'host-1', 'g1');
+      expect(guests.setSpotlight).toHaveBeenCalledWith('s1', 'g1', 'host-1');
+
+      moderators.findActiveGrant.mockResolvedValueOnce({
+        capabilities: [ModeratorCapability.ARRANGE_GUESTS],
+      });
+      await makeService().setSpotlight('s1', 'mod-1', null);
+      expect(guests.setSpotlight).toHaveBeenCalledWith('s1', null, 'mod-1');
+    });
+
+    it('refuses a viewer, a guest, and a moderator without the ability', async () => {
+      await expect(makeService().setSpotlight('s1', 'viewer-1', 'g1')).rejects.toThrow(
+        ForbiddenException,
+      );
+      await expect(makeService().setSpotlight('s1', 'g1', 'g1')).rejects.toThrow(
+        ForbiddenException,
+      );
+      moderators.findActiveGrant.mockResolvedValueOnce({
+        capabilities: [ModeratorCapability.REMOVE_GUESTS],
+      });
+      await expect(makeService().setSpotlight('s1', 'mod-1', null)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(guests.setSpotlight).not.toHaveBeenCalled();
+    });
+
+    it('only while live', async () => {
+      prisma.stream.findUnique.mockResolvedValue({
+        id: 's1',
+        hostId: 'host-1',
+        status: StreamStatus.ENDED,
+      });
+
+      await expect(makeService().setSpotlight('s1', 'host-1', 'g1')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(guests.setSpotlight).not.toHaveBeenCalled();
+    });
+
+    it('tells the realtime gateway who may arrange a running live', async () => {
+      prisma.stream.findFirst.mockResolvedValue({ id: 's1', hostId: 'host-1', layout: 'FULL' });
+      await expect(makeService().canArrangeStage('s1', 'host-1')).resolves.toBe(true);
+      await expect(makeService().canArrangeStage('s1', 'viewer-1')).resolves.toBe(false);
+      moderators.findActiveGrant.mockResolvedValueOnce({
+        capabilities: [ModeratorCapability.ARRANGE_GUESTS],
+      });
+      await expect(makeService().canArrangeStage('s1', 'mod-1')).resolves.toBe(true);
+
+      prisma.stream.findFirst.mockResolvedValue(null);
+      await expect(makeService().canArrangeStage('s1', 'host-1')).resolves.toBe(false);
     });
   });
 

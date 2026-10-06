@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import { DomainEvents, UserProfileUpdatedPayload } from '../common/events/domain-events';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { STORAGE_PROVIDER, StorageProvider } from '../common/storage/storage-provider.interface';
+import { canShareProfile } from '../social/profile-sharing';
 import {
   canViewProfileDetails,
   ProfileViewer,
@@ -21,6 +22,7 @@ const PUBLIC_PROFILE_SELECT = {
   bio: true,
   createdAt: true,
   profileVisibility: true,
+  profileSharing: true,
 } as const;
 
 @Injectable()
@@ -34,7 +36,8 @@ export class UsersService {
 
   /**
    * [requesterId] adds isFollowing/isFollowedBy/isFriend for that viewer - omit it for a signed-out one.
-   * The details (bio, counts) are null unless the owner's profile visibility lets this viewer see them.
+   * The details (bio, counts) are null unless the owner's profile visibility lets this viewer see them;
+   * canShare says whether the owner lets this viewer share the profile, whose setting only they see.
    * Someone the owner blocked gets a 404, as if the account didn't exist (plan §6.4).
    */
   async findPublicProfile(id: string, requesterId?: string) {
@@ -70,7 +73,9 @@ export class UsersService {
     return {
       ...user,
       profileVisibility: visibilityShownTo(user.profileVisibility, viewer),
+      profileSharing: isSelf ? user.profileSharing : null,
       canViewProfile,
+      canShare: canShareProfile(user.profileSharing, user.profileVisibility, viewer),
       bio: canViewProfile ? user.bio : null,
       createdAt: canViewProfile ? user.createdAt : null,
       followerCount: canViewProfile ? followerCount : null,
