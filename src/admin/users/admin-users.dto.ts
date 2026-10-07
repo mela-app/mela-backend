@@ -48,6 +48,9 @@ export class SuspendUserDto {
   reason!: string;
 }
 
+// Kept in the audit log, e.g. "Asked by email on 7 October".
+export class DeleteUserDto extends SuspendUserDto {}
+
 export class ChangeRoleDto {
   @IsEnum(PlatformRole)
   platformRole!: PlatformRole;

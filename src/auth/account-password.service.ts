@@ -3,13 +3,13 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
-  UnauthorizedException,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { IdentityProvider, PlatformRole } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { AccountPasswordSetPayload, DomainEvents } from '../common/events/domain-events';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { AccountProof, proveAccount } from './account-proof';
 import { AuthService } from './auth.service';
 import { AuthenticatedUser } from './auth.types';
 import { IdentityVerifier } from './identity/firebase-identity.verifier';
@@ -24,11 +24,8 @@ export interface SignInMethods {
   managedByConsole: boolean;
 }
 
-export interface NewPassword {
+export interface NewPassword extends AccountProof {
   newPassword: string;
-  currentPassword?: string;
-  /** A fresh Google sign-in to the account's linked Google account. */
-  idToken?: string;
 }
 
 /**
@@ -66,37 +63,7 @@ export class AccountPasswordService {
       });
     }
 
-    let confirmedWith: AccountPasswordSetPayload['confirmedWith'];
-    if (request.idToken) {
-      const identity = await this.verifier.verify(request.idToken).catch((error: unknown) => {
-        // A 401 on a signed-in route reads as this device's own session ending.
-        throw error instanceof UnauthorizedException
-          ? new BadRequestException(error.getResponse())
-          : error;
-      });
-      const linked = account.identities[0];
-      if (identity.method !== 'google' || !linked || linked.subject !== identity.subject) {
-        throw new ForbiddenException({
-          message: 'Confirm with the Google account linked to this Mela account.',
-          code: 'GOOGLE_ACCOUNT_MISMATCH',
-        });
-      }
-      confirmedWith = 'google';
-    } else if (account.passwordHash && request.currentPassword) {
-      if (!(await argon2.verify(account.passwordHash, request.currentPassword))) {
-        throw new BadRequestException({
-          message: 'Your current password is incorrect.',
-          code: 'WRONG_PASSWORD',
-        });
-      }
-      confirmedWith = 'password';
-    } else {
-      throw new BadRequestException(
-        account.passwordHash
-          ? { message: 'Enter your current password.', code: 'CURRENT_PASSWORD_REQUIRED' }
-          : { message: 'Confirm with Google first.', code: 'GOOGLE_CONFIRMATION_REQUIRED' },
-      );
-    }
+    const confirmedWith = await proveAccount(account, request, this.verifier);
 
     const previousHash = account.passwordHash;
     if (previousHash && (await argon2.verify(previousHash, request.newPassword))) {

@@ -25,6 +25,14 @@ import { WebAuthController } from './web-auth.controller';
   ],
   // Re-export JwtModule too, not just the guards, so any module that imports
   // AuthModule can also construct them in its own injector scope.
-  exports: [JwtAuthGuard, OptionalJwtAuthGuard, JwtModule, AuthService, WatchTicketService],
+  exports: [
+    JwtAuthGuard,
+    OptionalJwtAuthGuard,
+    JwtModule,
+    AuthService,
+    WatchTicketService,
+    // Proving it's the owner before an account is deleted (UsersModule).
+    IdentityVerifier,
+  ],
 })
 export class AuthModule {}

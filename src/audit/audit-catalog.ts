@@ -17,6 +17,7 @@ export const AUDIT_ACTIONS = {
   'account.password_added': { category: 'ACCOUNT', label: 'Added a password' },
   'account.email_changed': { category: 'ACCOUNT', label: 'Changed their email' },
   'account.identity_linked': { category: 'ACCOUNT', label: 'Linked a sign-in method' },
+  'account.deleted': { category: 'ACCOUNT', label: 'Deleted their account' },
 
   'user.suspended': { category: 'ADMIN', label: 'Suspended an account' },
   'user.reinstated': { category: 'ADMIN', label: 'Reinstated an account' },
@@ -24,6 +25,7 @@ export const AUDIT_ACTIONS = {
   'user.permissions_changed': { category: 'ADMIN', label: "Changed a moderator's access" },
   'user.profile_edited': { category: 'ADMIN', label: "Edited a user's profile" },
   'user.sessions_revoked': { category: 'ADMIN', label: 'Signed a user out everywhere' },
+  'user.deleted': { category: 'ADMIN', label: 'Deleted an account' },
   'admin.staff_created': { category: 'ADMIN', label: 'Created a staff account' },
   'admin.seeded': { category: 'ADMIN', label: 'Created the default super admin' },
   'admin.audit_exported': { category: 'ADMIN', label: 'Exported the audit log' },
@@ -54,6 +56,12 @@ export const AUDIT_ACTIONS = {
   'moderation.moderator_removed': { category: 'MODERATION', label: 'Removed a moderator' },
   'moderation.guest_mic_locked': { category: 'MODERATION', label: "Turned off a guest's mic" },
   'moderation.guest_mic_unlocked': { category: 'MODERATION', label: "Allowed a guest's mic again" },
+  'report.actioned': { category: 'MODERATION', label: 'Acted on a report' },
+  'report.dismissed': { category: 'MODERATION', label: 'Dismissed a report' },
+  'report.private_message_removed': {
+    category: 'MODERATION',
+    label: 'Removed a reported private message',
+  },
 
   'guest.requested': { category: 'GUEST', label: 'Asked to join the stage' },
   'guest.invited': { category: 'GUEST', label: 'Invited someone on stage' },
@@ -101,7 +109,12 @@ export type AuditTargetType =
   | 'CONVERSATION'
   | 'APP_RELEASE'
   // One of the data sets on the console's Data page.
-  | 'DATA';
+  | 'DATA'
+  // A case on the console's Reports page.
+  | 'REPORT';
+
+// What entries say instead of a deleted account's name.
+export const DELETED_ACCOUNT_LABEL = 'Deleted account';
 
 export function isAuditAction(value: string): value is AuditAction {
   return Object.prototype.hasOwnProperty.call(AUDIT_ACTIONS, value);

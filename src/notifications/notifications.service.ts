@@ -7,6 +7,7 @@ import {
   GuestRequestCreatedPayload,
   ModeratorGrantedPayload,
   NotificationCreatedPayload,
+  ReportCaseResolvedPayload,
   StreamInviteSentPayload,
   StreamStartedPayload,
   UserFollowedPayload,
@@ -80,7 +81,7 @@ const DEFAULT_SETTINGS: SettingsView = {
 };
 
 // Which per-type toggle in NotificationSettings gates a push for that type -
-// none for security notices, which always push.
+// none for security notices and report outcomes, which always push.
 const SETTING_KEY_BY_TYPE: Record<NotificationType, keyof SettingsView | null> = {
   STREAM_STARTED: 'pushStreamStarted',
   NEW_FOLLOWER: 'pushNewFollower',
@@ -89,6 +90,8 @@ const SETTING_KEY_BY_TYPE: Record<NotificationType, keyof SettingsView | null> =
   GUEST_INVITE: 'pushGuestInvite',
   PASSWORD_ADDED: null,
   PASSWORD_CHANGED: null,
+  REPORT_ACTIONED: null,
+  REPORT_DISMISSED: null,
 };
 
 export interface Page<T> {
@@ -257,6 +260,23 @@ export class NotificationsService {
       streamId: null,
       title: 'Password changed',
       body: 'Your password was changed and your other devices were signed out.',
+      actor: null,
+      streamTitle: null,
+    });
+  }
+
+  // Without what was reported: the notice shouldn't show it again.
+  @OnEvent(DomainEvents.ReportCaseResolved)
+  async onReportResolved(payload: ReportCaseResolvedPayload): Promise<void> {
+    const actioned = payload.outcome === 'ACTIONED';
+    await this.fanOut(payload.reporterIds, {
+      type: actioned ? NotificationType.REPORT_ACTIONED : NotificationType.REPORT_DISMISSED,
+      actorId: null,
+      streamId: null,
+      title: actioned ? 'Thanks for your report' : 'We reviewed your report',
+      body: actioned
+        ? 'We looked into something you reported and took action.'
+        : "We looked into something you reported. It doesn't go against our guidelines.",
       actor: null,
       streamTitle: null,
     });

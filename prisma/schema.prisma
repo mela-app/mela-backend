@@ -32,6 +32,9 @@ enum AdminPermission {
   // App updates (docs/features/app-updates.md): MANAGE publishes, edits and withdraws them.
   VIEW_APP_RELEASES
   MANAGE_APP_RELEASES
+  // What users reported (docs/features/moderation.md): MANAGE decides on it.
+  VIEW_REPORTS
+  MANAGE_REPORTS
 }
 
 enum UserStatus {
@@ -125,6 +128,9 @@ model User {
   directMessagesSent    DirectMessage[]       @relation("DirectMessagesSent")
   directMessagesInbox   DirectMessage[]       @relation("DirectMessagesReceived")
   appReleasesPublished  AppRelease[]
+  reportsMade           Report[]              @relation("ReportsMade")
+  reportCasesAgainst    ReportCase[]          @relation("ReportCasesAgainst")
+  reportCasesResolved   ReportCase[]          @relation("ReportCasesResolved")
 
   @@map("users")
 }
@@ -431,6 +437,9 @@ enum NotificationType {
   // Security notices about the recipient's own account - no actor, always pushed.
   PASSWORD_ADDED
   PASSWORD_CHANGED
+  // What staff decided about something the recipient reported.
+  REPORT_ACTIONED
+  REPORT_DISMISSED
 }
 
 model Notification {
@@ -753,4 +762,83 @@ model AppRelease {
 
   @@unique([platform, build])
   @@map("app_releases")
+}
+
+// What users report (docs/features/moderation.md).
+enum ReportTargetType {
+  LIVE
+  CHAT_MESSAGE
+  USER
+  // Only its recipient can report one.
+  DIRECT_MESSAGE
+}
+
+enum ReportReason {
+  SPAM
+  SCAM
+  HARASSMENT
+  HATE
+  VIOLENCE
+  SEXUAL_CONTENT
+  CHILD_SAFETY
+  SELF_HARM
+  ILLEGAL
+  IMPERSONATION
+  OTHER
+}
+
+enum ReportCaseStatus {
+  OPEN
+  ACTIONED
+  DISMISSED
+}
+
+// Everything reported about one thing, decided on once. A report about
+// something with an open case joins it; after a decision, a new one starts.
+model ReportCase {
+  id             String           @id @default(uuid(7)) @db.Uuid
+  targetType     ReportTargetType
+  // The live, chat message, account or private message reported.
+  targetId       String
+  // Whose it is: the live's host, the message's sender, the account itself.
+  reportedUserId String?
+  // The live it was in - no foreign key, so a removed live leaves the case whole.
+  streamId       String?
+  // What it showed when first reported; a message may be erased afterwards.
+  snapshot       Json
+  status         ReportCaseStatus @default(OPEN)
+  // A child's safety or self-harm: reviewed first.
+  urgent         Boolean          @default(false)
+  reportCount    Int              @default(1)
+  lastReportedAt DateTime         @default(now())
+  resolvedById   String?
+  resolvedAt     DateTime?
+  resolutionNote String?
+  createdAt      DateTime         @default(now())
+
+  reportedUser User?    @relation("ReportCasesAgainst", fields: [reportedUserId], references: [id], onDelete: SetNull)
+  resolvedBy   User?    @relation("ReportCasesResolved", fields: [resolvedById], references: [id], onDelete: SetNull)
+  reports      Report[]
+
+  @@index([status, urgent, lastReportedAt])
+  @@index([targetType, targetId, status])
+  @@index([reportedUserId])
+  @@map("report_cases")
+}
+
+// One person's report; kept, without who sent it, if their account is deleted.
+model Report {
+  id         String       @id @default(uuid(7)) @db.Uuid
+  caseId     String       @db.Uuid
+  reporterId String?
+  reason     ReportReason
+  details    String?
+  createdAt  DateTime     @default(now())
+
+  case     ReportCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  reporter User?      @relation("ReportsMade", fields: [reporterId], references: [id], onDelete: SetNull)
+
+  @@unique([caseId, reporterId])
+  @@index([reporterId, createdAt])
+  @@map("reports")
 }

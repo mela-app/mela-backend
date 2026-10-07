@@ -37,14 +37,16 @@ const message = (id: string, senderId: string, recipientId: string, text = 'hell
 describe('DirectMessagesService', () => {
   const prisma = {
     user: { findMany: jest.fn(), findUnique: jest.fn() },
-    conversation: { upsert: jest.fn(), findMany: jest.fn() },
+    conversation: { upsert: jest.fn(), findMany: jest.fn(), update: jest.fn(), delete: jest.fn() },
     directMessage: {
       create: jest.fn(),
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
       findMany: jest.fn(),
       updateMany: jest.fn(),
       count: jest.fn(),
       groupBy: jest.fn(),
+      delete: jest.fn(),
     },
     follow: { findMany: jest.fn() },
     $transaction: jest.fn(),
@@ -398,6 +400,53 @@ describe('DirectMessagesService', () => {
           blocksMade: { none: { blockedId: ANA } },
         },
       },
+    });
+  });
+
+  describe('erase', () => {
+    beforeEach(() => {
+      prisma.directMessage.findUnique.mockResolvedValue({
+        conversationId: 'conversation-1',
+        senderId: ANA,
+        recipientId: BEN,
+      });
+    });
+
+    it("deletes a reported message, keeps the conversation's order, and tells both apps", async () => {
+      const newest = new Date('2026-10-01T08:00:00Z');
+      prisma.directMessage.findFirst.mockResolvedValue({ createdAt: newest });
+
+      await expect(service().erase('dm-1', 'admin-1')).resolves.toBe(true);
+
+      expect(prisma.directMessage.delete).toHaveBeenCalledWith({ where: { id: 'dm-1' } });
+      expect(prisma.conversation.update).toHaveBeenCalledWith({
+        where: { id: 'conversation-1' },
+        data: { lastMessageAt: newest },
+      });
+      expect(prisma.conversation.delete).not.toHaveBeenCalled();
+      expect(events.emit).toHaveBeenCalledWith(DomainEvents.DirectMessageErased, {
+        messageId: 'dm-1',
+        senderId: ANA,
+        recipientId: BEN,
+        actorId: 'admin-1',
+        recipientUnreadCount: 3,
+      });
+    });
+
+    it('takes away a conversation left empty', async () => {
+      prisma.directMessage.findFirst.mockResolvedValue(null);
+
+      await service().erase('dm-1', 'admin-1');
+
+      expect(prisma.conversation.delete).toHaveBeenCalledWith({ where: { id: 'conversation-1' } });
+    });
+
+    it('does nothing for a message already gone', async () => {
+      prisma.directMessage.findUnique.mockResolvedValue(null);
+
+      await expect(service().erase('dm-1', 'admin-1')).resolves.toBe(false);
+      expect(prisma.directMessage.delete).not.toHaveBeenCalled();
+      expect(events.emit).not.toHaveBeenCalled();
     });
   });
 });

@@ -24,6 +24,7 @@ import { ChatDeleteDto, ChatSendDto, LikeSendDto } from '../chat/dto/chat-events
 import { LikesService } from '../chat/likes.service';
 import {
   DomainEvents,
+  AccountDeletedPayload,
   AccountIdentityLinkedPayload,
   AdminAlertSentPayload,
   AppReleaseChangedPayload,
@@ -32,6 +33,7 @@ import {
   ChatMessageUnpinnedPayload,
   DataClearedPayload,
   DataResetPayload,
+  DirectMessageErasedPayload,
   DirectMessageSentPayload,
   DirectMessagesReadPayload,
   GuestJoinedPayload,
@@ -767,6 +769,23 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     this.server
       .to(userRoom(readerId))
       .emit('message:unread_count', { count: payload.readerUnreadCount });
+  }
+
+  // Staff erased a reported message: both apps drop it, and the recipient's badge is recounted.
+  @OnEvent(DomainEvents.DirectMessageErased)
+  handleDirectMessageErased(payload: DirectMessageErasedPayload) {
+    const { messageId, senderId, recipientId } = payload;
+    this.server
+      .to([userRoom(senderId), userRoom(recipientId)])
+      .emit('message:deleted', { messageId, senderId, recipientId });
+    this.server
+      .to(userRoom(recipientId))
+      .emit('message:unread_count', { count: payload.recipientUnreadCount });
+  }
+
+  @OnEvent(DomainEvents.AccountDeleted)
+  handleAccountDeleted(payload: AccountDeletedPayload) {
+    this.server.in(userRoom(payload.userId)).disconnectSockets(true);
   }
 
   private async authenticate(socket: AuthedSocket): Promise<void> {

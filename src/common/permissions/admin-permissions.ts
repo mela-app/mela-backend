@@ -8,6 +8,7 @@ const INCLUDES: Partial<Record<AdminPermission, readonly AdminPermission[]>> = {
   [AdminPermission.SEND_GLOBAL_ALERTS]: [AdminPermission.SEND_ALERTS, AdminPermission.VIEW_ALERTS],
   [AdminPermission.MANAGE_PHRASES]: [AdminPermission.VIEW_PHRASES],
   [AdminPermission.MANAGE_APP_RELEASES]: [AdminPermission.VIEW_APP_RELEASES],
+  [AdminPermission.MANAGE_REPORTS]: [AdminPermission.VIEW_REPORTS],
 };
 
 export const ALL_ADMIN_PERMISSIONS: readonly AdminPermission[] = Object.values(AdminPermission);

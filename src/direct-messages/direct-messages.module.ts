@@ -12,5 +12,7 @@ import { DirectMessagesService } from './direct-messages.service';
   imports: [AuthModule, SocialModule, ChatModule, RateLimitModule],
   controllers: [DirectMessagesController],
   providers: [DirectMessagesService],
+  // The admin console erases reported messages.
+  exports: [DirectMessagesService],
 })
 export class DirectMessagesModule {}

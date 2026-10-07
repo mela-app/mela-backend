@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { RateLimitModule } from '../common/rate-limit/rate-limit.module';
 import { SocialModule } from '../social/social.module';
+import { AccountDeletionPageController } from './account-deletion-page.controller';
 import { ProfileLinkController } from './profile-link.controller';
 import { ShareController } from './share.controller';
 import { ShareService } from './share.service';
@@ -12,7 +13,13 @@ import { WellKnownController } from './well-known.controller';
   // AuthModule: the JWT guard. SocialModule: the friends-only check.
   // RateLimitModule: anti-spam on invites.
   imports: [AuthModule, SocialModule, RateLimitModule],
-  controllers: [ShareController, WebFallbackController, ProfileLinkController, WellKnownController],
+  controllers: [
+    ShareController,
+    WebFallbackController,
+    ProfileLinkController,
+    WellKnownController,
+    AccountDeletionPageController,
+  ],
   providers: [ShareService],
 })
 export class ShareModule {}

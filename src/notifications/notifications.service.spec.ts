@@ -234,6 +234,55 @@ describe('NotificationsService', () => {
     });
   });
 
+  describe('report outcomes', () => {
+    const resolved = (outcome: 'ACTIONED' | 'DISMISSED') => ({
+      caseId: 'case-1',
+      outcome,
+      actorId: 'admin-1',
+      targetType: 'CHAT_MESSAGE',
+      label: 'Chat message from @ana',
+      reporterIds: ['ben-1', 'cal-1'],
+      note: null,
+    });
+
+    it('tells everyone who reported something that action was taken - not what it was', async () => {
+      await service().onReportResolved(resolved('ACTIONED'));
+
+      expect(prisma.notification.createManyAndReturn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: [
+            {
+              recipientId: 'ben-1',
+              type: NotificationType.REPORT_ACTIONED,
+              actorId: null,
+              streamId: null,
+            },
+            {
+              recipientId: 'cal-1',
+              type: NotificationType.REPORT_ACTIONED,
+              actorId: null,
+              streamId: null,
+            },
+          ],
+        }),
+      );
+      expect(pushQueue.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ recipientId: 'ben-1', title: 'Thanks for your report' }),
+      );
+    });
+
+    it('tells them when nothing went against the guidelines', async () => {
+      await service().onReportResolved(resolved('DISMISSED'));
+
+      expect(pushQueue.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: 'We reviewed your report',
+          data: { type: NotificationType.REPORT_DISMISSED },
+        }),
+      );
+    });
+  });
+
   describe('onGuestRequestCreated', () => {
     const user = { id: 'g1', username: 'guest', displayName: 'Guest', avatarUrl: null };
 
