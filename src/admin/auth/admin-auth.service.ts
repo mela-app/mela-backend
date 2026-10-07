@@ -26,7 +26,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { effectiveAdminPermissions } from '../../common/permissions/admin-permissions';
 import { RateLimit, RateLimitService } from '../../common/rate-limit/rate-limit.service';
 import { AdminPrincipal } from '../admin.guard';
-import { adminPasswordProblem } from '../password-policy';
+import { adminPasswordProblem, passwordMatches } from '../password-policy';
 import {
   AdminSignInDto,
   ChangeEmailDto,
@@ -266,9 +266,4 @@ export function toAdminView(user: User): AdminView {
     permissions: effectiveAdminPermissions(user.platformRole, user.adminPermissions),
     passwordChangeRequired: user.passwordChangeRequired,
   };
-}
-
-// An account made with Google has no password to match.
-function passwordMatches(hash: string | null, password: string): Promise<boolean> {
-  return hash ? argon2.verify(hash, password) : Promise.resolve(false);
 }

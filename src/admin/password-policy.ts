@@ -1,3 +1,4 @@
+import * as argon2 from 'argon2';
 import { randomInt } from 'crypto';
 
 // Staff accounts guard every user's data, so the bar is higher than the app's.
@@ -15,6 +16,11 @@ export function adminPasswordProblem(password: string, email: string): string | 
     return "Don't use your email address in your password";
   }
   return null;
+}
+
+// An account made with Google has no password to match.
+export function passwordMatches(hash: string | null, password: string): Promise<boolean> {
+  return hash ? argon2.verify(hash, password) : Promise.resolve(false);
 }
 
 // No look-alikes (0/O, 1/l/I), so it can be read out or retyped safely.

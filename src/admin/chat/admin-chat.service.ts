@@ -1,7 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { ChatService } from '../../chat/chat.service';
 import { pageArgs, toPage } from '../../common/pagination/page-query.dto';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { AdminPrincipal } from '../admin.guard';
 import { nameMatches, rangeOf } from '../day-range';
 import { AdminChatHostsQueryDto, AdminHostChatQueryDto } from './admin-chat.dto';
 
@@ -32,7 +34,15 @@ export interface HostRow {
  */
 @Injectable()
 export class AdminChatService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly chat: ChatService,
+  ) {}
+
+  /** Erases them for good, the same as one at a time; ones already gone are skipped. */
+  async deleteMessages(admin: AdminPrincipal, messageIds: string[]) {
+    return { deleted: await this.chat.eraseAsAdmin([...new Set(messageIds)], admin.id) };
+  }
 
   /** Hosts whose lives had chat in the range, the latest message first. */
   async hosts(query: AdminChatHostsQueryDto) {

@@ -300,26 +300,48 @@ export class ChatService {
   }
 
   /**
-   * The admin console (plan §6.8): removes any message, live or not - anyone
-   * still in the live sees it go, the same as a host's delete.
+   * The admin console (plan §6.8): erases messages for good, photos included,
+   * live or not - anyone still in the live sees them go. Says how many went.
    */
-  async deleteAsAdmin(messageId: string, actorId: string): Promise<ChatDeleteResult> {
-    const message = await this.prisma.chatMessage.findUnique({
-      where: { id: messageId },
-      select: { streamId: true, moderationStatus: true },
+  async eraseAsAdmin(messageIds: string[], actorId: string): Promise<number> {
+    const messages = await this.prisma.chatMessage.findMany({
+      where: { id: { in: messageIds } },
+      select: {
+        id: true,
+        streamId: true,
+        text: true,
+        imageUrl: true,
+        userId: true,
+        user: { select: { username: true } },
+        stream: { select: { hostId: true, pinnedMessageId: true } },
+      },
     });
-    if (!message) return { ok: false, error: 'NOT_FOUND' };
-    if (message.moderationStatus === ChatModerationStatus.DELETED) return { ok: true };
-    await this.prisma.chatMessage.update({
-      where: { id: messageId },
-      data: { moderationStatus: ChatModerationStatus.DELETED },
+    if (messages.length === 0) return 0;
+    const { count } = await this.prisma.chatMessage.deleteMany({
+      where: { id: { in: messages.map((message) => message.id) } },
     });
-    this.events.emit(DomainEvents.ChatMessageDeleted, {
-      streamId: message.streamId,
-      messageId,
-      actorId,
-    } satisfies ChatMessageDeletedPayload);
-    return { ok: true };
+    void this.storage.deleteUrls(messages.flatMap((message) => message.imageUrl ?? []));
+    for (const message of messages) {
+      // The stream's pin cleared itself with the row; the room still shows it.
+      if (message.stream.pinnedMessageId === message.id) {
+        this.events.emit(DomainEvents.ChatMessageUnpinned, {
+          streamId: message.streamId,
+          actorId,
+        } satisfies ChatMessageUnpinnedPayload);
+      }
+      this.events.emit(DomainEvents.ChatMessageDeleted, {
+        streamId: message.streamId,
+        messageId: message.id,
+        actorId,
+        erased: {
+          text: message.text,
+          senderId: message.userId,
+          sender: message.user.username,
+          hostId: message.stream.hostId,
+        },
+      } satisfies ChatMessageDeletedPayload);
+    }
+    return count;
   }
 
   /** Pins one message to the top of chat - host, or an active moderator holding `PIN_MESSAGES` (plan §6.13). */

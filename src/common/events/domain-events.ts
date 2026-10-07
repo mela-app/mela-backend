@@ -92,6 +92,9 @@ export const DomainEvents = {
   GuestSpotlightChanged: 'guest.spotlight_changed',
   // An app update was published, changed or withdrawn (docs/features/app-updates.md).
   AppReleaseChanged: 'app_release.changed',
+  // A super admin removed stored data, or everything but their own account (docs/features/admin.md).
+  DataCleared: 'data.cleared',
+  DataReset: 'data.reset',
 } as const;
 
 export type DomainEventName = (typeof DomainEvents)[keyof typeof DomainEvents];
@@ -176,6 +179,8 @@ export interface ChatMessageDeletedPayload {
   streamId: string;
   messageId: string;
   actorId: string;
+  // Erased for good by the admin console: what it was, as it can't be looked up any more.
+  erased?: { text: string; senderId: string; sender: string; hostId: string };
 }
 
 export interface ChatMessagePinnedPayload {
@@ -560,4 +565,23 @@ export interface DirectMessagesReadPayload {
   partnerId: string;
   readAt: Date;
   readerUnreadCount: number;
+}
+
+export interface DataClearedPayload {
+  actorId: string;
+  dataSet: string;
+  label: string;
+  // Null when everything in it went.
+  olderThanDays: number | null;
+  removed: number;
+  // Everyone but the actor lost their sessions: their open connections close too.
+  signedOut: boolean;
+}
+
+// Everything but the actor's own account is gone - other staff included.
+export interface DataResetPayload {
+  actorId: string;
+  // What was left in place, e.g. 'auditLog'.
+  kept: string[];
+  usersRemoved: number;
 }

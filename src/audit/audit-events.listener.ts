@@ -13,6 +13,8 @@ import {
   ChatMessageDeletedPayload,
   ChatMessagePinnedPayload,
   ChatMessageUnpinnedPayload,
+  DataClearedPayload,
+  DataResetPayload,
   DomainEvents,
   GuestJoinedPayload,
   GuestMicForceMuteChangedPayload,
@@ -328,19 +330,32 @@ export class AuditEventsListener {
   @OnEvent(DomainEvents.ChatMessageDeleted)
   onMessageDeleted(payload: ChatMessageDeletedPayload) {
     return this.track(async () => {
-      const message = await this.prisma.chatMessage.findUnique({
-        where: { id: payload.messageId },
-        select: {
-          text: true,
-          userId: true,
-          user: { select: { username: true } },
-          stream: { select: { hostId: true } },
-        },
-      });
+      const message =
+        payload.erased ??
+        (await this.prisma.chatMessage
+          .findUnique({
+            where: { id: payload.messageId },
+            select: {
+              text: true,
+              userId: true,
+              user: { select: { username: true } },
+              stream: { select: { hostId: true } },
+            },
+          })
+          .then((row) =>
+            row
+              ? {
+                  text: row.text,
+                  senderId: row.userId,
+                  sender: row.user.username,
+                  hostId: row.stream.hostId,
+                }
+              : null,
+          ));
       return {
         action: 'chat.message_deleted',
         actorId: payload.actorId,
-        hostId: message?.stream.hostId,
+        hostId: message?.hostId,
         target: {
           type: 'MESSAGE',
           id: payload.messageId,
@@ -348,7 +363,11 @@ export class AuditEventsListener {
         },
         streamId: payload.streamId,
         metadata: message
-          ? { senderId: message.userId, sender: `@${message.user.username}` }
+          ? {
+              senderId: message.senderId,
+              sender: `@${message.sender}`,
+              ...(payload.erased && { erased: true }),
+            }
           : undefined,
       };
     });
@@ -583,6 +602,29 @@ export class AuditEventsListener {
         required: payload.required,
         ...(payload.fields ? { fields: payload.fields } : {}),
       },
+    }));
+  }
+
+  // Recorded after the removal, so even clearing the audit log leaves this entry.
+  @OnEvent(DomainEvents.DataCleared)
+  onDataCleared(payload: DataClearedPayload) {
+    return this.track(async () => ({
+      action: 'data.cleared',
+      actorId: payload.actorId,
+      target: { type: 'DATA', id: payload.dataSet, label: payload.label },
+      metadata: {
+        removed: payload.removed,
+        ...(payload.olderThanDays !== null && { olderThanDays: payload.olderThanDays }),
+      },
+    }));
+  }
+
+  @OnEvent(DomainEvents.DataReset)
+  onDataReset(payload: DataResetPayload) {
+    return this.track(async () => ({
+      action: 'data.reset',
+      actorId: payload.actorId,
+      metadata: { kept: payload.kept, usersRemoved: payload.usersRemoved },
     }));
   }
 

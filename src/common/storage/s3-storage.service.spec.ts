@@ -1,3 +1,5 @@
+import { DeleteObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { S3StorageProvider } from './s3-storage.service';
@@ -70,5 +72,36 @@ describe('S3StorageProvider', () => {
     const params = [...new URL(uploadUrl).searchParams.keys()];
     expect(params).toContain('X-Amz-Signature');
     expect(params.filter((key) => key.toLowerCase().includes('checksum'))).toEqual([]);
+  });
+
+  describe('deleteUrls', () => {
+    afterEach(() => jest.restoreAllMocks());
+
+    it("deletes each of this bucket's objects once, and leaves other addresses alone", async () => {
+      const send = jest.spyOn(S3Client.prototype, 'send').mockResolvedValue({} as never);
+
+      await new S3StorageProvider(config()).deleteUrls([
+        'http://localhost:9000/avatars/chat-images/s1/a.jpg',
+        'http://localhost:9000/avatars/chat-images/s1/a.jpg',
+        'https://elsewhere.example/b.jpg',
+        'http://localhost:9000/avatars/avatars/u1/c.jpg',
+      ]);
+
+      const deleted = send.mock.calls.map(([command]) => (command as DeleteObjectCommand).input);
+      expect(deleted).toEqual([
+        { Bucket: 'avatars', Key: 'chat-images/s1/a.jpg' },
+        { Bucket: 'avatars', Key: 'avatars/u1/c.jpg' },
+      ]);
+    });
+
+    it('logs a file it could not delete instead of failing', async () => {
+      jest.spyOn(S3Client.prototype, 'send').mockRejectedValue(new Error('timed out') as never);
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+
+      await expect(
+        new S3StorageProvider(config()).deleteUrls(['http://localhost:9000/avatars/a.jpg']),
+      ).resolves.toBeUndefined();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('a.jpg'));
+    });
   });
 });

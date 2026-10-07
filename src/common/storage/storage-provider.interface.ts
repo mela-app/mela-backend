@@ -18,4 +18,9 @@ export interface StorageProvider {
   createUploadUrl(key: string, contentType: string): Promise<UploadUrl>;
   /** Where the object at `key` is readable. */
   publicUrl(key: string): string;
+  /**
+   * Deletes the objects behind these public URLs, skipping any that aren't this
+   * bucket's. Best effort: a failure is logged, never thrown.
+   */
+  deleteUrls(urls: string[]): Promise<void>;
 }
