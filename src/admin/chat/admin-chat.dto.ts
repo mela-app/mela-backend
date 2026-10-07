@@ -1,6 +1,9 @@
 import { ChatModerationStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsEnum,
   IsInt,
   IsISO8601,
@@ -56,4 +59,12 @@ export class AdminHostChatQueryDto {
   @Min(1)
   @Max(200)
   limit: number = 100;
+}
+
+export class DeleteChatMessagesDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(500)
+  @IsUUID('all', { each: true })
+  messageIds!: string[];
 }

@@ -28,6 +28,8 @@ export const AUDIT_ACTIONS = {
   'admin.seeded': { category: 'ADMIN', label: 'Created the default super admin' },
   'admin.audit_exported': { category: 'ADMIN', label: 'Exported the audit log' },
   'admin.private_messages_viewed': { category: 'ADMIN', label: 'Read private messages' },
+  'data.cleared': { category: 'ADMIN', label: 'Removed stored data' },
+  'data.reset': { category: 'ADMIN', label: 'Reset all data' },
 
   'stream.started': { category: 'STREAM', label: 'Went live' },
   'stream.ended': { category: 'STREAM', label: 'Live ended' },
@@ -91,7 +93,15 @@ export const AUDIT_CATEGORY_LABELS: Record<AuditCategory, string> = {
 };
 
 export type AuditTargetType =
-  'USER' | 'STREAM' | 'MESSAGE' | 'ALERT' | 'PHRASE' | 'CONVERSATION' | 'APP_RELEASE';
+  | 'USER'
+  | 'STREAM'
+  | 'MESSAGE'
+  | 'ALERT'
+  | 'PHRASE'
+  | 'CONVERSATION'
+  | 'APP_RELEASE'
+  // One of the data sets on the console's Data page.
+  | 'DATA';
 
 export function isAuditAction(value: string): value is AuditAction {
   return Object.prototype.hasOwnProperty.call(AUDIT_ACTIONS, value);

@@ -31,6 +31,7 @@ describe('ChatService', () => {
       findUnique: jest.fn(),
       updateMany: jest.fn(),
       findFirst: jest.fn(),
+      deleteMany: jest.fn(),
     },
     stream: { update: jest.fn() },
     user: { findMany: jest.fn() },
@@ -55,6 +56,7 @@ describe('ChatService', () => {
   const storage = {
     publicUrl: jest.fn((key: string) => `https://media.example/${key}`),
     createUploadUrl: jest.fn(),
+    deleteUrls: jest.fn().mockResolvedValue(undefined),
   };
 
   const service = () =>
@@ -456,6 +458,62 @@ describe('ChatService', () => {
         [{ id: 'u-ana', username: 'ana' }],
         [{ id: 'u-ana', username: 'ana' }],
       ]);
+    });
+  });
+
+  describe('eraseAsAdmin', () => {
+    const stored = (id: string, overrides: Record<string, unknown> = {}) => ({
+      id,
+      streamId: LIVE,
+      text: `message ${id}`,
+      imageUrl: null,
+      userId: 'user-1',
+      user: { username: 'ana' },
+      stream: { hostId: 'host-1', pinnedMessageId: null },
+      ...overrides,
+    });
+
+    it('deletes the rows for good and tells the room, keeping what each said for the audit log', async () => {
+      prisma.chatMessage.findMany.mockResolvedValue([stored('m1'), stored('m2')]);
+      prisma.chatMessage.deleteMany.mockResolvedValue({ count: 2 });
+
+      await expect(service().eraseAsAdmin(['m1', 'm2', 'gone'], 'admin-1')).resolves.toBe(2);
+
+      expect(prisma.chatMessage.deleteMany).toHaveBeenCalledWith({
+        where: { id: { in: ['m1', 'm2'] } },
+      });
+      expect(prisma.chatMessage.updateMany).not.toHaveBeenCalled();
+      expect(events.emit).toHaveBeenCalledWith('chat_message.deleted', {
+        streamId: LIVE,
+        messageId: 'm1',
+        actorId: 'admin-1',
+        erased: { text: 'message m1', senderId: 'user-1', sender: 'ana', hostId: 'host-1' },
+      });
+      expect(events.emit).toHaveBeenCalledTimes(2);
+    });
+
+    it('takes a pinned one down from the top of chat, and deletes photo files too', async () => {
+      const photo = `https://media.example/${PHOTO_KEY}`;
+      prisma.chatMessage.findMany.mockResolvedValue([
+        stored('m1', { imageUrl: photo, stream: { hostId: 'host-1', pinnedMessageId: 'm1' } }),
+      ]);
+      prisma.chatMessage.deleteMany.mockResolvedValue({ count: 1 });
+
+      await service().eraseAsAdmin(['m1'], 'admin-1');
+
+      expect(events.emit).toHaveBeenCalledWith('chat_message.unpinned', {
+        streamId: LIVE,
+        actorId: 'admin-1',
+      });
+      expect(storage.deleteUrls).toHaveBeenCalledWith([photo]);
+    });
+
+    it('does nothing when none of them exist any more', async () => {
+      prisma.chatMessage.findMany.mockResolvedValue([]);
+
+      await expect(service().eraseAsAdmin(['gone'], 'admin-1')).resolves.toBe(0);
+      expect(prisma.chatMessage.deleteMany).not.toHaveBeenCalled();
+      expect(events.emit).not.toHaveBeenCalled();
     });
   });
 

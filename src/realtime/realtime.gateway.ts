@@ -30,6 +30,8 @@ import {
   ChatMessageDeletedPayload,
   ChatMessagePinnedPayload,
   ChatMessageUnpinnedPayload,
+  DataClearedPayload,
+  DataResetPayload,
   DirectMessageSentPayload,
   DirectMessagesReadPayload,
   GuestJoinedPayload,
@@ -474,6 +476,17 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   @OnEvent(DomainEvents.AccountIdentityLinked)
   handleAccountIdentityLinked(payload: AccountIdentityLinkedPayload) {
     if (payload.passwordRemoved) this.server.in(userRoom(payload.userId)).disconnectSockets(true);
+  }
+
+  // A super admin signed everyone else out, or removed every other account.
+  @OnEvent(DomainEvents.DataCleared)
+  handleDataCleared(payload: DataClearedPayload) {
+    if (payload.signedOut) this.server.except(userRoom(payload.actorId)).disconnectSockets(true);
+  }
+
+  @OnEvent(DomainEvents.DataReset)
+  handleDataReset(payload: DataResetPayload) {
+    this.server.except(userRoom(payload.actorId)).disconnectSockets(true);
   }
 
   // Before stream_ended, which empties the room (plan §6.8).

@@ -203,7 +203,7 @@ export class AdminStreamsService {
       select: { id: true },
     });
     if (!message) throw new NotFoundException('Message not found');
-    await this.chat.deleteAsAdmin(messageId, admin.id);
+    await this.chat.eraseAsAdmin([messageId], admin.id);
     return { ok: true };
   }
 

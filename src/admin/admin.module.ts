@@ -4,6 +4,7 @@ import { AuthModule } from '../auth/auth.module';
 import { ChatModule } from '../chat/chat.module';
 import { PresenceModule } from '../common/presence/presence.module';
 import { RateLimitModule } from '../common/rate-limit/rate-limit.module';
+import { StorageModule } from '../common/storage/storage.module';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { StreamsModule } from '../streams/streams.module';
 import { AdminGuard } from './admin.guard';
@@ -17,6 +18,8 @@ import {
   AdminBannedPhrasesController,
 } from './content/admin-content.controller';
 import { AdminContentService } from './content/admin-content.service';
+import { AdminDataController } from './data/admin-data.controller';
+import { AdminDataService } from './data/admin-data.service';
 import { AdminMessagesController } from './messages/admin-messages.controller';
 import { AdminMessagesService } from './messages/admin-messages.service';
 import { AdminOverviewController } from './overview/admin-overview.controller';
@@ -34,6 +37,7 @@ import { AdminUsersService } from './users/admin-users.service';
  */
 @Module({
   // AuthModule: sessions and JwtService. RealtimeModule: how many devices an alert reaches.
+  // StorageModule: the files removed data pointed at.
   imports: [
     AuthModule,
     StreamsModule,
@@ -42,6 +46,7 @@ import { AdminUsersService } from './users/admin-users.service';
     PresenceModule,
     RateLimitModule,
     AuditModule,
+    StorageModule,
   ],
   controllers: [
     AdminAuthController,
@@ -56,6 +61,7 @@ import { AdminUsersService } from './users/admin-users.service';
     AdminMessagesController,
     AdminChatController,
     AdminReleasesController,
+    AdminDataController,
   ],
   providers: [
     AdminGuard,
@@ -67,6 +73,7 @@ import { AdminUsersService } from './users/admin-users.service';
     AdminMessagesService,
     AdminChatService,
     AdminReleasesService,
+    AdminDataService,
   ],
 })
 export class AdminModule {}

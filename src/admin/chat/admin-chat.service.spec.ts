@@ -1,6 +1,8 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ChatModerationStatus } from '@prisma/client';
+import { ChatService } from '../../chat/chat.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { AdminPrincipal } from '../admin.guard';
 import { AdminChatService } from './admin-chat.service';
 
 const person = (id: string, name: string) => ({
@@ -26,9 +28,23 @@ describe('AdminChatService', () => {
     chatMessage: { groupBy: jest.fn(), findMany: jest.fn() },
     user: { findUnique: jest.fn() },
   };
-  const service = () => new AdminChatService(prisma as unknown as PrismaService);
+  const chat = { eraseAsAdmin: jest.fn() };
+  const service = () =>
+    new AdminChatService(prisma as unknown as PrismaService, chat as unknown as ChatService);
 
   beforeEach(() => jest.clearAllMocks());
+
+  describe('deleteMessages', () => {
+    it('erases the picked messages for good, each once, as the signed-in admin', async () => {
+      chat.eraseAsAdmin.mockResolvedValue(2);
+      const admin = { id: 'admin-1' } as AdminPrincipal;
+
+      await expect(service().deleteMessages(admin, ['m1', 'm2', 'm1'])).resolves.toEqual({
+        deleted: 2,
+      });
+      expect(chat.eraseAsAdmin).toHaveBeenCalledWith(['m1', 'm2'], 'admin-1');
+    });
+  });
 
   describe('hosts', () => {
     it('lists the hosts whose lives had chat that day, the latest message first', async () => {
