@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { AdminPermission, StreamStatus, UserStatus } from '@prisma/client';
+import { AdminPermission, ReportCaseStatus, StreamStatus, UserStatus } from '@prisma/client';
 import { LivePresenceService } from '../../common/presence/live-presence.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AdminPrincipal } from '../admin.guard';
@@ -43,6 +43,8 @@ export class AdminOverviewService {
       messages,
       streamsStarted,
       alertsSent,
+      openReports,
+      urgentReports,
       daily,
     ] = await Promise.all([
       this.presence
@@ -54,6 +56,8 @@ export class AdminOverviewService {
       this.prisma.chatMessage.count({ where: { createdAt: { gte: since } } }),
       this.prisma.stream.count({ where: { startedAt: { gte: since } } }),
       this.prisma.adminAlert.count({ where: { createdAt: { gte: since } } }),
+      this.prisma.reportCase.count({ where: { status: ReportCaseStatus.OPEN } }),
+      this.prisma.reportCase.count({ where: { status: ReportCaseStatus.OPEN, urgent: true } }),
       this.dailySeries(),
     ]);
 
@@ -69,6 +73,10 @@ export class AdminOverviewService {
       },
       users: { total: users, new24h: newUsers, suspended: suspendedUsers },
       activity24h: { messages, streamsStarted, alertsSent },
+      // Only for staff who may see reports.
+      reports: admin.permissions.includes(AdminPermission.VIEW_REPORTS)
+        ? { open: openReports, urgent: urgentReports }
+        : null,
       daily,
     };
   }

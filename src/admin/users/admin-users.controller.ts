@@ -26,9 +26,11 @@ import {
   ChangePermissionsDto,
   ChangeRoleDto,
   CreateStaffDto,
+  DeleteUserDto,
   EditUserProfileDto,
   SuspendUserDto,
 } from './admin-users.dto';
+import { AccountDeletionService } from '../../users/account-deletion.service';
 import { AdminUsersService } from './admin-users.service';
 
 @Controller('admin/users')
@@ -36,7 +38,10 @@ import { AdminUsersService } from './admin-users.service';
 @Throttle(ADMIN_API_THROTTLE)
 @RequirePermission(AdminPermission.VIEW_USERS)
 export class AdminUsersController {
-  constructor(private readonly users: AdminUsersService) {}
+  constructor(
+    private readonly users: AdminUsersService,
+    private readonly deletion: AccountDeletionService,
+  ) {}
 
   @Get()
   list(@Query() query: AdminUsersQueryDto) {
@@ -106,6 +111,18 @@ export class AdminUsersController {
     @Body() dto: ChangePermissionsDto,
   ) {
     return this.users.changePermissions(admin, id, dto.permissions);
+  }
+
+  // For someone who asked without the app (the /delete-account page).
+  @Post(':id/delete')
+  @HttpCode(HttpStatus.OK)
+  @SuperAdminOnly()
+  delete(
+    @CurrentAdmin() admin: AdminPrincipal,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: DeleteUserDto,
+  ) {
+    return this.deletion.deleteByStaff(admin.id, id, dto.reason);
   }
 }
 

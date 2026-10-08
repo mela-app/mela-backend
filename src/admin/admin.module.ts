@@ -5,8 +5,10 @@ import { ChatModule } from '../chat/chat.module';
 import { PresenceModule } from '../common/presence/presence.module';
 import { RateLimitModule } from '../common/rate-limit/rate-limit.module';
 import { StorageModule } from '../common/storage/storage.module';
+import { DirectMessagesModule } from '../direct-messages/direct-messages.module';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { StreamsModule } from '../streams/streams.module';
+import { UsersModule } from '../users/users.module';
 import { AdminGuard } from './admin.guard';
 import { AdminAuditController } from './audit/admin-audit.controller';
 import { AdminAccountController, AdminAuthController } from './auth/admin-auth.controller';
@@ -26,6 +28,8 @@ import { AdminOverviewController } from './overview/admin-overview.controller';
 import { AdminOverviewService } from './overview/admin-overview.service';
 import { AdminReleasesController } from './releases/admin-releases.controller';
 import { AdminReleasesService } from './releases/admin-releases.service';
+import { AdminReportsController } from './reports/admin-reports.controller';
+import { AdminReportsService } from './reports/admin-reports.service';
 import { AdminStreamsController } from './streams/admin-streams.controller';
 import { AdminStreamsService } from './streams/admin-streams.service';
 import { AdminStaffController, AdminUsersController } from './users/admin-users.controller';
@@ -37,7 +41,7 @@ import { AdminUsersService } from './users/admin-users.service';
  */
 @Module({
   // AuthModule: sessions and JwtService. RealtimeModule: how many devices an alert reaches.
-  // StorageModule: the files removed data pointed at.
+  // StorageModule: the files removed data pointed at. DirectMessagesModule: erasing a reported message.
   imports: [
     AuthModule,
     StreamsModule,
@@ -47,6 +51,8 @@ import { AdminUsersService } from './users/admin-users.service';
     RateLimitModule,
     AuditModule,
     StorageModule,
+    DirectMessagesModule,
+    UsersModule,
   ],
   controllers: [
     AdminAuthController,
@@ -62,6 +68,7 @@ import { AdminUsersService } from './users/admin-users.service';
     AdminChatController,
     AdminReleasesController,
     AdminDataController,
+    AdminReportsController,
   ],
   providers: [
     AdminGuard,
@@ -74,6 +81,7 @@ import { AdminUsersService } from './users/admin-users.service';
     AdminChatService,
     AdminReleasesService,
     AdminDataService,
+    AdminReportsService,
   ],
 })
 export class AdminModule {}

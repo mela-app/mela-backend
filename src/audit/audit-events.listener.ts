@@ -3,6 +3,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { AuditActorRole, GuestRequestInitiator, StreamEndReason } from '@prisma/client';
 import {
   AccountCredentialChangedPayload,
+  AccountDeletedPayload,
   AccountIdentityLinkedPayload,
   AccountPasswordSetPayload,
   AdminAlertSentPayload,
@@ -15,6 +16,7 @@ import {
   ChatMessageUnpinnedPayload,
   DataClearedPayload,
   DataResetPayload,
+  DirectMessageErasedPayload,
   DomainEvents,
   GuestJoinedPayload,
   GuestMicForceMuteChangedPayload,
@@ -26,6 +28,7 @@ import {
   RoomBanCreatedPayload,
   RoomBanLiftedPayload,
   RoomChatMuteChangedPayload,
+  ReportCaseResolvedPayload,
   StaffAccountCreatedPayload,
   StreamEndedPayload,
   StreamInviteSentPayload,
@@ -49,6 +52,7 @@ import {
 } from '../common/events/domain-events';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RequestContext } from '../common/request-context/request-context';
+import { DELETED_ACCOUNT_LABEL } from './audit-catalog';
 import { AuditEntry, AuditService } from './audit.service';
 
 const EXCERPT = 80;
@@ -626,6 +630,58 @@ export class AuditEventsListener {
       actorId: payload.actorId,
       metadata: { kept: payload.kept, usersRemoved: payload.usersRemoved },
     }));
+  }
+
+  @OnEvent(DomainEvents.ReportCaseResolved)
+  onReportResolved(payload: ReportCaseResolvedPayload) {
+    return this.track(async () => ({
+      action: payload.outcome === 'ACTIONED' ? 'report.actioned' : 'report.dismissed',
+      actorId: payload.actorId,
+      target: { type: 'REPORT', id: payload.caseId, label: payload.label },
+      reason: payload.note,
+      metadata: { targetType: payload.targetType, reporters: payload.reporterIds.length },
+    }));
+  }
+
+  // Not what it said: the audit log is read more widely than reports.
+  @OnEvent(DomainEvents.DirectMessageErased)
+  onPrivateMessageErased(payload: DirectMessageErasedPayload) {
+    return this.track(async () => {
+      const sender = await this.prisma.user.findUnique({
+        where: { id: payload.senderId },
+        select: { username: true },
+      });
+      return {
+        action: 'report.private_message_removed',
+        actorId: payload.actorId,
+        target: {
+          type: 'MESSAGE',
+          id: payload.messageId,
+          label: `Private message from ${sender ? `@${sender.username}` : 'a deleted account'}`,
+        },
+        metadata: { senderId: payload.senderId, recipientId: payload.recipientId },
+      };
+    });
+  }
+
+  // The account is gone, so neither entry names it.
+  @OnEvent(DomainEvents.AccountDeleted)
+  onAccountDeleted(payload: AccountDeletedPayload) {
+    return this.track(async () =>
+      payload.actorId
+        ? {
+            action: 'user.deleted',
+            actorId: payload.actorId,
+            target: { type: 'USER', id: payload.userId, label: DELETED_ACCOUNT_LABEL },
+            reason: payload.reason,
+          }
+        : {
+            action: 'account.deleted',
+            actorRole: AuditActorRole.USER,
+            actorLabel: DELETED_ACCOUNT_LABEL,
+            target: { type: 'USER', id: payload.userId, label: DELETED_ACCOUNT_LABEL },
+          },
+    );
   }
 
   @OnEvent(DomainEvents.BannedPhraseCreated)

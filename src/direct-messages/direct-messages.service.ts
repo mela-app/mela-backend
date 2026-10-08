@@ -13,6 +13,7 @@ import { BannedPhrasesService } from '../chat/banned-phrases.service';
 import { ChatTextError, cleanChatText } from '../chat/chat-text';
 import { hasDisallowedLink, parseLinkDomains } from '../chat/link-policy';
 import {
+  DirectMessageErasedPayload,
   DirectMessagePerson,
   DirectMessageSentPayload,
   DirectMessageSnapshot,
@@ -238,6 +239,43 @@ export class DirectMessagesService {
   /** The inbox badge: every unread message, except from anyone blocked either way. */
   async unreadCount(userId: string): Promise<{ count: number }> {
     return { count: await this.unreadTotal(userId) };
+  }
+
+  /**
+   * Staff erasing a reported message (docs/features/moderation.md): both
+   * people's apps drop it, and a conversation left empty goes too. False
+   * when it was already gone.
+   */
+  async erase(messageId: string, actorId: string): Promise<boolean> {
+    const message = await this.prisma.directMessage.findUnique({
+      where: { id: messageId },
+      select: { conversationId: true, senderId: true, recipientId: true },
+    });
+    if (!message) return false;
+    await this.prisma.$transaction(async (tx) => {
+      await tx.directMessage.delete({ where: { id: messageId } });
+      const newest = await tx.directMessage.findFirst({
+        where: { conversationId: message.conversationId },
+        orderBy: { id: 'desc' },
+        select: { createdAt: true },
+      });
+      if (newest) {
+        await tx.conversation.update({
+          where: { id: message.conversationId },
+          data: { lastMessageAt: newest.createdAt },
+        });
+      } else {
+        await tx.conversation.delete({ where: { id: message.conversationId } });
+      }
+    });
+    this.events.emit(DomainEvents.DirectMessageErased, {
+      messageId,
+      senderId: message.senderId,
+      recipientId: message.recipientId,
+      actorId,
+      recipientUnreadCount: await this.unreadTotal(message.recipientId),
+    } satisfies DirectMessageErasedPayload);
+    return true;
   }
 
   /** One conversation, oldest first - see ConversationHistoryQueryDto. Gone for someone the other side blocked. */

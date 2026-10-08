@@ -95,6 +95,12 @@ export const DomainEvents = {
   // A super admin removed stored data, or everything but their own account (docs/features/admin.md).
   DataCleared: 'data.cleared',
   DataReset: 'data.reset',
+  // Staff decided on what users reported (docs/features/moderation.md).
+  ReportCaseResolved: 'report_case.resolved',
+  // Staff erased a reported private message.
+  DirectMessageErased: 'direct_message.erased',
+  // An account and what it made are gone (docs/features/auth.md).
+  AccountDeleted: 'account.deleted',
 } as const;
 
 export type DomainEventName = (typeof DomainEvents)[keyof typeof DomainEvents];
@@ -584,4 +590,32 @@ export interface DataResetPayload {
   // What was left in place, e.g. 'auditLog'.
   kept: string[];
   usersRemoved: number;
+}
+
+export interface ReportCaseResolvedPayload {
+  caseId: string;
+  outcome: 'ACTIONED' | 'DISMISSED';
+  actorId: string;
+  targetType: string;
+  // How the case reads in the audit log, e.g. "Chat message from @ana".
+  label: string;
+  // Everyone who reported it and still has an account - each is told.
+  reporterIds: string[];
+  note: string | null;
+}
+
+export interface DirectMessageErasedPayload {
+  messageId: string;
+  senderId: string;
+  recipientId: string;
+  actorId: string;
+  // The recipient's unread total afterwards, for their badge.
+  recipientUnreadCount: number;
+}
+
+export interface AccountDeletedPayload {
+  userId: string;
+  // Staff who removed it from the console; null when they deleted it themselves.
+  actorId: string | null;
+  reason: string | null;
 }
