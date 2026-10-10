@@ -110,7 +110,55 @@ describe('LiveKitVideoProvider', () => {
       name: 'stream_s1',
       emptyTimeout: 300,
       departureTimeout: 90,
+      minPlayoutDelay: 400,
+      maxPlayoutDelay: 2000,
+      syncStreams: true,
     });
+  });
+
+  it('takes the playout delay from the settings', async () => {
+    const createRoom = jest
+      .spyOn(RoomServiceClient.prototype, 'createRoom')
+      .mockResolvedValue({} as never);
+    const provider = makeProvider({
+      ...CONFIGURED,
+      LIVEKIT_MIN_PLAYOUT_DELAY_MS: '250',
+      LIVEKIT_MAX_PLAYOUT_DELAY_MS: '1500',
+    });
+
+    await provider.openChannel('stream_s1');
+
+    expect(createRoom).toHaveBeenCalledWith(
+      expect.objectContaining({ minPlayoutDelay: 250, maxPlayoutDelay: 1500, syncStreams: true }),
+    );
+  });
+
+  it('leaves the playout delay to each receiver when the minimum is 0', async () => {
+    const createRoom = jest
+      .spyOn(RoomServiceClient.prototype, 'createRoom')
+      .mockResolvedValue({} as never);
+    const provider = makeProvider({ ...CONFIGURED, LIVEKIT_MIN_PLAYOUT_DELAY_MS: '0' });
+
+    await provider.openChannel('stream_s1');
+
+    expect(createRoom).toHaveBeenCalledWith({
+      name: 'stream_s1',
+      emptyTimeout: 300,
+      departureTimeout: 90,
+    });
+  });
+
+  it('refuses a playout delay setting it cannot use', () => {
+    expect(() => makeProvider({ ...CONFIGURED, LIVEKIT_MIN_PLAYOUT_DELAY_MS: 'soon' })).toThrow(
+      /LIVEKIT_MIN_PLAYOUT_DELAY_MS/,
+    );
+    expect(() =>
+      makeProvider({
+        ...CONFIGURED,
+        LIVEKIT_MIN_PLAYOUT_DELAY_MS: '3000',
+        LIVEKIT_MAX_PLAYOUT_DELAY_MS: '2000',
+      }),
+    ).toThrow(/must not be above/);
   });
 
   it('turns an unreachable server into a 503 for the app', async () => {

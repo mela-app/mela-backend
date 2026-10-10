@@ -79,6 +79,15 @@ export class StreamsController {
     return this.streamsService.watch(id, user?.id);
   }
 
+  // The host or a guest on stage gets back on air after their video connection dropped.
+  @Post(':id/publisher-token')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  publisherToken(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.streamsService.publisherToken(id, user.id);
+  }
+
   @Post(':id/end')
   @UseGuards(JwtAuthGuard)
   end(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {

@@ -431,6 +431,63 @@ describe('StreamsService', () => {
     expect(videoProvider.mintToken).not.toHaveBeenCalled();
   });
 
+  describe('publisherToken (getting back on air)', () => {
+    const live = {
+      id: 's1',
+      hostId: 'host-1',
+      status: StreamStatus.LIVE,
+      videoProvider: VideoProviderKind.LIVEKIT,
+      channelName: 'stream_s1',
+    };
+
+    it("mints the host a fresh publisher token on the live's own vendor", async () => {
+      prisma.stream.findUnique.mockResolvedValue(live);
+      const service = makeService();
+
+      const result = await service.publisherToken('s1', 'host-1');
+
+      expect(videoProviders.get).toHaveBeenCalledWith(VideoProviderKind.LIVEKIT);
+      expect(videoProvider.mintToken).toHaveBeenCalledWith({
+        channelName: 'stream_s1',
+        userId: 'host-1',
+        role: 'publisher',
+      });
+      expect(result.rtcToken).toMatchObject({
+        provider: VideoProviderKind.LIVEKIT,
+        token: 'token',
+      });
+    });
+
+    it('mints one for a guest still on stage', async () => {
+      prisma.stream.findUnique.mockResolvedValue(live);
+      guests.isActiveGuest.mockResolvedValueOnce(true);
+      const service = makeService();
+
+      await service.publisherToken('s1', 'guest-1');
+
+      expect(guests.isActiveGuest).toHaveBeenCalledWith('s1', 'guest-1');
+      expect(videoProvider.mintToken).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'guest-1', role: 'publisher' }),
+      );
+    });
+
+    it('refuses a viewer who is not on stage', async () => {
+      prisma.stream.findUnique.mockResolvedValue(live);
+      const service = makeService();
+
+      await expect(service.publisherToken('s1', 'viewer-1')).rejects.toThrow(ForbiddenException);
+      expect(videoProvider.mintToken).not.toHaveBeenCalled();
+    });
+
+    it('refuses once the live is over', async () => {
+      prisma.stream.findUnique.mockResolvedValue({ ...live, status: StreamStatus.ENDED });
+      const service = makeService();
+
+      await expect(service.publisherToken('s1', 'host-1')).rejects.toThrow(NotFoundException);
+      expect(videoProvider.mintToken).not.toHaveBeenCalled();
+    });
+  });
+
   describe('watch (the share page player)', () => {
     const live = {
       id: 's1',

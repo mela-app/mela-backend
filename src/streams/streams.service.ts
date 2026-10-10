@@ -384,6 +384,26 @@ export class StreamsService {
   }
 
   /**
+   * A fresh publishing token for whoever is broadcasting in a running live -
+   * the host, or a guest on stage - so an app whose video connection dropped
+   * for longer than the vendor's own reconnect window (or whose token ran out)
+   * can go back on air without ending the live. Viewers get theirs from join().
+   */
+  async publisherToken(streamId: string, requesterId: string) {
+    const stream = await this.getLiveOrThrow(streamId);
+    const isHost = this.permissions.canStartOrEndStream(requesterId, stream.hostId);
+    if (!isHost && !(await this.guests.isActiveGuest(streamId, requesterId))) {
+      throw new ForbiddenException('Only the host or a guest on stage can broadcast in this live');
+    }
+    const rtcToken = await this.videoProviders.get(stream.videoProvider).mintToken({
+      channelName: stream.channelName,
+      userId: requesterId,
+      role: 'publisher',
+    });
+    return { rtcToken };
+  }
+
+  /**
    * Ends every live whose host's app stopped sending heartbeats for the grace
    * window - a crash, a force-quit, lost signal. Returns how many it ended.
    */

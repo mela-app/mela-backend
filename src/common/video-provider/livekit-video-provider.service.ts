@@ -16,8 +16,28 @@ const DEFAULT_TTL_SECONDS = 15 * 60;
 const DEPARTURE_TIMEOUT_SECONDS = 90;
 // Closes a room whose host never connected.
 const EMPTY_TIMEOUT_SECONDS = 5 * 60;
+// How long receivers hold video before showing it (LiveKit's playout delay):
+// a floor that rides out jitter and gives lost packets time to be resent on
+// weak mobile links, and a ceiling the buffer may grow to when the network
+// gets worse. LiveKit's own preset for one-way broadcasts. Room-wide - the
+// host and guests watching each other get it too. 0 turns it off.
+const DEFAULT_MIN_PLAYOUT_DELAY_MS = 400;
+const DEFAULT_MAX_PLAYOUT_DELAY_MS = 2000;
 
 const UNAVAILABLE_MESSAGE = 'Live video is unavailable right now. Please try again in a moment.';
+
+// A whole number of milliseconds (LiveKit rounds down to 10 ms), or the default when unset.
+function playoutDelaySetting(config: ConfigService, name: string, fallback: number): number {
+  const raw = config.get<string>(name)?.trim();
+  if (!raw) return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0 || value > 10_000) {
+    throw new Error(
+      `${name} must be a whole number of milliseconds from 0 to 10000 (got "${raw}").`,
+    );
+  }
+  return value;
+}
 
 /**
  * Self-hosted LiveKit implementation of VideoProvider - see
@@ -33,6 +53,8 @@ export class LiveKitVideoProvider implements VideoProvider {
   private readonly apiKey: string;
   private readonly apiSecret: string;
   private readonly rooms: RoomServiceClient | null;
+  private readonly minPlayoutDelayMs: number;
+  private readonly maxPlayoutDelayMs: number;
 
   constructor(config: ConfigService) {
     this.url = config.get<string>('LIVEKIT_URL')?.trim() ?? '';
@@ -41,6 +63,23 @@ export class LiveKitVideoProvider implements VideoProvider {
 
     if (this.url && !/^wss?:\/\//.test(this.url)) {
       throw new Error(`LIVEKIT_URL must start with ws:// or wss:// (got "${this.url}").`);
+    }
+
+    this.minPlayoutDelayMs = playoutDelaySetting(
+      config,
+      'LIVEKIT_MIN_PLAYOUT_DELAY_MS',
+      DEFAULT_MIN_PLAYOUT_DELAY_MS,
+    );
+    this.maxPlayoutDelayMs = playoutDelaySetting(
+      config,
+      'LIVEKIT_MAX_PLAYOUT_DELAY_MS',
+      DEFAULT_MAX_PLAYOUT_DELAY_MS,
+    );
+    if (this.minPlayoutDelayMs > this.maxPlayoutDelayMs) {
+      throw new Error(
+        'LIVEKIT_MIN_PLAYOUT_DELAY_MS must not be above LIVEKIT_MAX_PLAYOUT_DELAY_MS ' +
+          `(got ${this.minPlayoutDelayMs} and ${this.maxPlayoutDelayMs}).`,
+      );
     }
 
     // The backend can reach LiveKit privately (e.g. http://127.0.0.1:7880 on
@@ -70,6 +109,14 @@ export class LiveKitVideoProvider implements VideoProvider {
         name: channelName,
         emptyTimeout: EMPTY_TIMEOUT_SECONDS,
         departureTimeout: DEPARTURE_TIMEOUT_SECONDS,
+        ...(this.minPlayoutDelayMs > 0 && {
+          minPlayoutDelay: this.minPlayoutDelayMs,
+          maxPlayoutDelay: this.maxPlayoutDelayMs,
+          // Holds the sound back with the video: without it, the picture
+          // would trail the voice by the delay (LiveKit plays the tracks
+          // independently otherwise).
+          syncStreams: true,
+        }),
       }),
     );
   }
