@@ -84,6 +84,13 @@ model User {
   lastLoginAt            DateTime?
   suspendedAt            DateTime?
   suspensionReason       String?
+  // The age check (18+, docs/features/legal.md): given at sign-up, or on the
+  // next launch by accounts made before it. A date, no time.
+  birthDate              DateTime?         @db.Date
+  // The Terms/Privacy version last accepted (LEGAL_VERSION) - each acceptance
+  // is also kept in legal_acceptances.
+  legalVersion           String?
+  legalAcceptedAt        DateTime?
   // Platform moderators only; always empty for everyone else.
   adminPermissions       AdminPermission[] @default([])
   profileVisibility      ProfileVisibility @default(EVERYONE)
@@ -97,6 +104,7 @@ model User {
 
   streams               Stream[]                @relation("StreamHost")
   sessions              UserSession[]
+  legalAcceptances      LegalAcceptance[]
   identities            UserIdentity[]
   chatMessages          ChatMessage[]
   // Rows where this user is the one following someone.
@@ -201,6 +209,22 @@ model UserSession {
   @@index([userId])
   @@index([pushToken])
   @@map("user_sessions")
+}
+
+// Every time someone accepted the Terms of Service and Privacy Policy, and
+// which version - the record of consent (docs/features/legal.md).
+model LegalAcceptance {
+  id         String           @id @default(uuid(7)) @db.Uuid
+  userId     String
+  version    String
+  // Where: the app (ANDROID/IOS) or the web player (WEB).
+  platform   SessionPlatform?
+  acceptedAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, acceptedAt])
+  @@map("legal_acceptances")
 }
 
 // Ways to sign in besides a password (docs/features/auth.md). A phone number comes next.

@@ -21,6 +21,7 @@ import {
   UserRegisteredPayload,
 } from '../../common/events/domain-events';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { checkNewAccountLegal } from '../../legal/legal-rules';
 import { AuthService, TokenPair } from '../auth.service';
 import { IdentityVerifier } from './firebase-identity.verifier';
 import { usernameCandidates } from './usernames';
@@ -46,6 +47,10 @@ export interface NewAccount {
   /** Required for an email sign-up, refused for Google. */
   password?: string;
   platform?: SessionPlatform;
+  /** YYYY-MM-DD - at least MINIMUM_AGE years ago (docs/features/legal.md). */
+  birthDate?: string;
+  /** The Terms/Privacy version agreed to - the one in force. */
+  acceptedLegalVersion?: string;
 }
 
 /**
@@ -94,7 +99,10 @@ export class IdentitySignInService {
     return { status: 'SIGNED_IN', tokens: await this.signIn(user, platform) };
   }
 
-  async createAccount(account: NewAccount): Promise<TokenPair> {
+  async createAccount(account: NewAccount, now: Date = new Date()): Promise<TokenPair> {
+    // First: 18+ and the Terms/Privacy in force agreed to - nothing else is
+    // looked at for someone who may not sign up at all.
+    const legal = checkNewAccountLegal(account, now);
     const identity = await this.verifier.verify(account.idToken);
     if (identity.method === 'email' && !account.password) {
       throw new BadRequestException({
@@ -122,7 +130,16 @@ export class IdentitySignInService {
           displayName: account.displayName,
           email: identity.email,
           passwordHash: account.password ? await argon2.hash(account.password) : null,
-          emailVerifiedAt: new Date(),
+          emailVerifiedAt: now,
+          birthDate: legal.birthDate,
+          legalVersion: legal.version,
+          legalAcceptedAt: now,
+          legalAcceptances: {
+            create: {
+              version: legal.version,
+              platform: account.platform ?? SessionPlatform.UNKNOWN,
+            },
+          },
           ...(identity.method === 'google' && {
             identities: {
               create: {

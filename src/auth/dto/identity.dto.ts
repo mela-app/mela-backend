@@ -34,6 +34,19 @@ export class IdentitySignupDto extends IdentityTokenDto {
   @MinLength(8, { message: 'Use at least 8 characters for your password' })
   @MaxLength(72) // argon2-safe upper bound
   password?: string;
+
+  // The age check (18+) and the Terms/Privacy version agreed to
+  // (docs/features/legal.md). Optional only so an app from before them is
+  // told to update instead of getting a validation error.
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  birthDate?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  acceptedLegalVersion?: string;
 }
 
 export class UsernameQueryDto {
