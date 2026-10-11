@@ -9,6 +9,6 @@ export class AppUpdateController {
   // Asked by every app on launch and when it comes back - signed in or not.
   @Get('update')
   check(@Query() query: AppUpdateQueryDto) {
-    return this.releases.check(query.platform, query.build);
+    return this.releases.check(query.platform, { version: query.version, build: query.build });
   }
 }

@@ -27,6 +27,7 @@ import { AuditModule } from './audit/audit.module';
 import { AdminModule } from './admin/admin.module';
 import { DirectMessagesModule } from './direct-messages/direct-messages.module';
 import { AppReleasesModule } from './app-releases/app-releases.module';
+import { LegalModule } from './legal/legal.module';
 import { ReportsModule } from './reports/reports.module';
 import { HealthController } from './health.controller';
 
@@ -69,6 +70,7 @@ import { HealthController } from './health.controller';
     DirectMessagesModule,
     AppReleasesModule,
     ReportsModule,
+    LegalModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

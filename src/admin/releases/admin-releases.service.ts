@@ -7,7 +7,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AppPlatform, Prisma } from '@prisma/client';
-import { compareVersions, downloadUrlProblem } from '../../app-releases/app-release.rules';
+import { compareVersions } from '../../app-releases/app-release.rules';
+import { storeLink } from '../../app-releases/store-link';
 import { AppReleaseChangedPayload, DomainEvents } from '../../common/events/domain-events';
 import { PageQueryDto, pageArgs, toPage } from '../../common/pagination/page-query.dto';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -34,7 +35,8 @@ const PLATFORM_NAMES: Record<AppPlatform, string> = { ANDROID: 'Android', IOS: '
 /**
  * App updates in the admin console (docs/features/app-updates.md): what was
  * published for each platform, and publishing, changing or withdrawing a
- * release. Every change reaches the open apps at once.
+ * release. A release is a version and what's new in it - phones compare
+ * versions and update from the store. Every change reaches the open apps at once.
  */
 @Injectable()
 export class AdminReleasesService {
@@ -59,63 +61,41 @@ export class AdminReleasesService {
     return { ...toPage(rows, total, query), platforms: { ANDROID: android, IOS: ios } };
   }
 
+  /** Each version is newer than the last - the store won't take the same one twice either. */
   async publish(admin: AdminPrincipal, dto: PublishReleaseDto) {
-    assertDownloadUrl(dto.downloadUrl);
     const name = PLATFORM_NAMES[dto.platform];
-    const newest = await this.prisma.appRelease.findFirst({
-      where: { platform: dto.platform },
-      orderBy: { build: 'desc' },
-      select: { version: true, build: true },
-    });
-    if (newest && dto.build <= newest.build) {
-      throw new ConflictException({
-        message: `Build ${dto.build} isn't newer than ${name} ${newest.version} (build ${newest.build})`,
-        code: 'BUILD_NOT_NEWER',
+    if (!storeLink(this.config, dto.platform)) {
+      throw new BadRequestException({
+        message: `There's no ${name} store listing yet - set IOS_INSTALL_URL to the App Store page first`,
+        code: 'NO_STORE_LINK',
       });
     }
-    if (newest && compareVersions(dto.version, newest.version) < 0) {
+    const newest = await this.newest(dto.platform);
+    if (newest && compareVersions(dto.version, newest.version) <= 0) {
       throw new ConflictException({
-        message: `Version ${dto.version} is older than ${name} ${newest.version}`,
-        code: 'VERSION_OLDER',
+        message: `Version ${dto.version} isn't newer than ${name} ${newest.version}`,
+        code: 'VERSION_NOT_NEWER',
       });
     }
 
-    let release: ReleaseView;
-    try {
-      release = await this.prisma.appRelease.create({
-        data: {
-          platform: dto.platform,
-          version: dto.version,
-          build: dto.build,
-          notes: dto.notes,
-          downloadUrl: dto.downloadUrl,
-          required: dto.required ?? false,
-          publishedById: admin.id,
-        },
-        select: RELEASE_SELECT,
-      });
-    } catch (error) {
-      // Someone published the same build a moment earlier.
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        throw new ConflictException({
-          message: `${name} build ${dto.build} is already published`,
-          code: 'BUILD_NOT_NEWER',
-        });
-      }
-      throw error;
-    }
+    const release = await this.prisma.appRelease.create({
+      data: {
+        platform: dto.platform,
+        version: dto.version,
+        notes: dto.notes,
+        required: dto.required ?? false,
+        publishedById: admin.id,
+      },
+      select: RELEASE_SELECT,
+    });
     this.announce('published', admin, release);
     return release;
   }
 
   async update(admin: AdminPrincipal, releaseId: string, dto: UpdateReleaseDto) {
     const release = await this.find(releaseId);
-    if (dto.downloadUrl !== undefined) assertDownloadUrl(dto.downloadUrl);
     const data: Prisma.AppReleaseUpdateInput = {};
     if (dto.notes !== undefined && dto.notes !== release.notes) data.notes = dto.notes;
-    if (dto.downloadUrl !== undefined && dto.downloadUrl !== release.downloadUrl) {
-      data.downloadUrl = dto.downloadUrl;
-    }
     if (dto.required !== undefined && dto.required !== release.required) {
       data.required = dto.required;
     }
@@ -150,30 +130,31 @@ export class AdminReleasesService {
   }
 
   private async platform(platform: AppPlatform) {
-    const [latest, required] = await Promise.all([
-      this.prisma.appRelease.findFirst({
-        where: { platform },
-        orderBy: { build: 'desc' },
-        select: RELEASE_SELECT,
-      }),
-      this.prisma.appRelease.findFirst({
-        where: { platform, required: true },
-        orderBy: { build: 'desc' },
-        select: RELEASE_SELECT,
-      }),
-    ]);
+    const releases = await this.releasesOf(platform);
     return {
-      latest,
-      // Builds below this one can't be used.
-      required,
-      // To start the next release's form with.
-      suggestedDownloadUrl: latest?.downloadUrl ?? this.installUrl(platform),
+      latest: releases.at(0) ?? null,
+      // Versions below this one can't be used.
+      required: releases.find((release) => release.required) ?? null,
+      // Where phones get it - null until there's a listing (iOS).
+      storeLink: storeLink(this.config, platform),
+      // To start the next release's form with: the next patch version.
+      suggestedVersion: releases.at(0) ? nextPatch(releases[0].version) : '1.0.0',
     };
   }
 
-  private installUrl(platform: AppPlatform): string | null {
-    const key = platform === AppPlatform.IOS ? 'IOS_INSTALL_URL' : 'ANDROID_INSTALL_URL';
-    return this.config.get<string>(key) || null;
+  private async newest(platform: AppPlatform): Promise<ReleaseView | null> {
+    return (await this.releasesOf(platform)).at(0) ?? null;
+  }
+
+  // Newest version first - not the order they were published in.
+  private async releasesOf(platform: AppPlatform): Promise<ReleaseView[]> {
+    const releases = await this.prisma.appRelease.findMany({
+      where: { platform },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+      select: RELEASE_SELECT,
+    });
+    return releases.sort((a, b) => compareVersions(b.version, a.version));
   }
 
   private announce(
@@ -195,7 +176,8 @@ export class AdminReleasesService {
   }
 }
 
-function assertDownloadUrl(url: string) {
-  const problem = downloadUrlProblem(url);
-  if (problem) throw new BadRequestException(problem);
+/** 1.2.0 -> 1.2.1. */
+function nextPatch(version: string): string {
+  const [major, minor, patch] = version.split('.').map(Number);
+  return `${major}.${minor}.${patch + 1}`;
 }

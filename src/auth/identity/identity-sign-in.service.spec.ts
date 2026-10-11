@@ -14,6 +14,10 @@ import { AuthService } from '../auth.service';
 import { IdentityVerifier } from './firebase-identity.verifier';
 import { IdentitySignInService } from './identity-sign-in.service';
 import { VerifiedIdentity } from './verified-identity';
+import { LEGAL_VERSION } from '../../legal/legal-rules';
+
+// Old enough, and the Terms/Privacy in force agreed to.
+const legal = { birthDate: '1995-04-20', acceptedLegalVersion: LEGAL_VERSION };
 
 describe('IdentitySignInService', () => {
   const prisma = {
@@ -213,6 +217,7 @@ describe('IdentitySignInService', () => {
           displayName: 'Ana',
           password: 'a-good-password',
           platform: SessionPlatform.IOS,
+          ...legal,
         }),
       ).resolves.toEqual(tokens);
 
@@ -222,6 +227,10 @@ describe('IdentitySignInService', () => {
         displayName: 'Ana',
         email: 'ana@example.com',
         emailVerifiedAt: expect.any(Date),
+        birthDate: new Date('1995-04-20T00:00:00Z'),
+        legalVersion: LEGAL_VERSION,
+        legalAcceptedAt: expect.any(Date),
+        legalAcceptances: { create: { version: LEGAL_VERSION, platform: SessionPlatform.IOS } },
       });
       expect(data).not.toHaveProperty('identities');
       expect(await argon2.verify(data.passwordHash, 'a-good-password')).toBe(true);
@@ -238,14 +247,19 @@ describe('IdentitySignInService', () => {
 
     it('needs a password', async () => {
       await expect(
-        service().createAccount({ idToken: 'token', username: 'ana', displayName: 'Ana' }),
+        service().createAccount({
+          idToken: 'token',
+          username: 'ana',
+          displayName: 'Ana',
+          ...legal,
+        }),
       ).rejects.toThrow(BadRequestException);
       expect(prisma.user.create).not.toHaveBeenCalled();
     });
   });
 
   describe('creating an account with Google', () => {
-    const newAccount = { idToken: 'token', username: 'abebe', displayName: 'Abebe' };
+    const newAccount = { idToken: 'token', username: 'abebe', displayName: 'Abebe', ...legal };
 
     it('links the Google account and has no password', async () => {
       await expect(service().createAccount(newAccount)).resolves.toEqual(tokens);
@@ -257,6 +271,12 @@ describe('IdentitySignInService', () => {
           email: 'abebe@gmail.com',
           passwordHash: null,
           emailVerifiedAt: expect.any(Date),
+          birthDate: new Date('1995-04-20T00:00:00Z'),
+          legalVersion: LEGAL_VERSION,
+          legalAcceptedAt: expect.any(Date),
+          legalAcceptances: {
+            create: { version: LEGAL_VERSION, platform: SessionPlatform.UNKNOWN },
+          },
           identities: {
             create: {
               provider: IdentityProvider.GOOGLE,
@@ -297,6 +317,54 @@ describe('IdentitySignInService', () => {
         select: { id: true },
       });
       expect(prisma.user.create).not.toHaveBeenCalled();
+    });
+
+    describe('the age check and the Terms', () => {
+      const now = new Date('2026-10-12T10:00:00Z');
+
+      it('only for people 18 or older - checked before anything else', async () => {
+        await expect(
+          service().createAccount({ ...newAccount, birthDate: '2008-10-13' }, now),
+        ).rejects.toMatchObject({ response: expect.objectContaining({ code: 'UNDER_AGE' }) });
+        expect(verifier.verify).not.toHaveBeenCalled();
+
+        // 18 today.
+        await expect(
+          service().createAccount({ ...newAccount, birthDate: '2008-10-12' }, now),
+        ).resolves.toEqual(tokens);
+      });
+
+      it('needs a real date of birth', async () => {
+        for (const birthDate of ['2001-02-30', '12/04/1995', '2027-01-01', '1899-12-31']) {
+          await expect(
+            service().createAccount({ ...newAccount, birthDate }, now),
+          ).rejects.toMatchObject({
+            response: expect.objectContaining({ code: 'INVALID_BIRTH_DATE' }),
+          });
+        }
+      });
+
+      it('needs the Terms and Privacy Policy in force accepted', async () => {
+        await expect(
+          service().createAccount({ ...newAccount, acceptedLegalVersion: '2020-01-01' }, now),
+        ).rejects.toMatchObject({
+          response: expect.objectContaining({
+            code: 'LEGAL_VERSION_OUTDATED',
+            version: LEGAL_VERSION,
+          }),
+        });
+      });
+
+      it('tells an app from before the age check to update', async () => {
+        await expect(
+          service().createAccount(
+            { idToken: 'token', username: 'abebe', displayName: 'Abebe' },
+            now,
+          ),
+        ).rejects.toMatchObject({
+          response: expect.objectContaining({ code: 'APP_UPDATE_REQUIRED' }),
+        });
+      });
     });
 
     it('says which field someone else took in the meantime', async () => {
