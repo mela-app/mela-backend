@@ -512,9 +512,10 @@ export interface AppReleaseChangedPayload {
   actorId: string;
   platform: AppPlatform;
   version: string;
-  build: number;
+  // Only on releases published before versions were compared.
+  build: number | null;
   required: boolean;
-  // 'updated' only: which of notes, downloadUrl and required changed.
+  // 'updated' only: which of notes and required changed.
   fields?: string[];
 }
 

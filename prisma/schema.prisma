@@ -809,13 +809,15 @@ model AppRelease {
   platform      AppPlatform
   // What people see, e.g. 1.2.0.
   version       String
-  // What phones compare: the number after + in pubspec.yaml (Android
-  // versionCode, iOS CFBundleVersion). Only ever goes up.
-  build         Int
+  // What phones compare is the version. The build (the number after + in
+  // pubspec.yaml) only on releases published before that - apps of then
+  // still send it.
+  build         Int?
   // What's new, one change per line.
   notes         String
-  // The store page or the APK.
-  downloadUrl   String
+  // A link of its own, on releases published before updates came from the
+  // store; null now: Google Play / the App Store (store-link.ts).
+  downloadUrl   String?
   required      Boolean     @default(false)
   publishedById String?
   createdAt     DateTime    @default(now())

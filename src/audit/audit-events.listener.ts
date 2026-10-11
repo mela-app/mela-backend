@@ -597,7 +597,7 @@ export class AuditEventsListener {
       target: {
         type: 'APP_RELEASE',
         id: payload.releaseId,
-        label: `${platform} ${payload.version} (${payload.build})`,
+        label: `${platform} ${payload.version}${payload.build === null ? '' : ` (${payload.build})`}`,
       },
       metadata: {
         platform: payload.platform,
