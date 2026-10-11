@@ -1,6 +1,7 @@
-import { ServiceUnavailableException } from '@nestjs/common';
+import { ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { RoomServiceClient, ServerError, TokenVerifier } from 'livekit-server-sdk';
+import { createHash } from 'crypto';
+import { AccessToken, RoomServiceClient, ServerError, TokenVerifier } from 'livekit-server-sdk';
 import { LiveKitVideoProvider } from './livekit-video-provider.service';
 
 const API_KEY = 'test-key';
@@ -187,5 +188,91 @@ describe('LiveKitVideoProvider', () => {
 
     await expect(provider.revokeToken('stream_s1', 'viewer-1')).resolves.toBeUndefined();
     expect(removeParticipant).toHaveBeenCalledWith('stream_s1', 'viewer-1');
+  });
+
+  describe('webhooks', () => {
+    // How the LiveKit server signs one: a token carrying the body's SHA-256.
+    async function signed(payload: object, secret = API_SECRET) {
+      const body = JSON.stringify(payload);
+      const token = new AccessToken(API_KEY, secret);
+      token.sha256 = createHash('sha256').update(body).digest('base64');
+      return { body, authorization: await token.toJwt() };
+    }
+
+    const publisher = { identity: 'host-1', permission: { canPublish: true } };
+
+    it('reads a broadcaster joining and leaving the room', async () => {
+      const provider = makeProvider();
+
+      const joined = await signed({
+        event: 'participant_joined',
+        room: { name: 'stream_s1' },
+        participant: publisher,
+      });
+      await expect(provider.receiveWebhook(joined.body, joined.authorization)).resolves.toEqual({
+        type: 'publisher_joined',
+        channelName: 'stream_s1',
+        userId: 'host-1',
+      });
+
+      const aborted = await signed({
+        event: 'participant_connection_aborted',
+        room: { name: 'stream_s1' },
+        participant: publisher,
+      });
+      await expect(provider.receiveWebhook(aborted.body, aborted.authorization)).resolves.toEqual({
+        type: 'publisher_left',
+        channelName: 'stream_s1',
+        userId: 'host-1',
+      });
+    });
+
+    it('reads a room closing', async () => {
+      const { body, authorization } = await signed({
+        event: 'room_finished',
+        room: { name: 'stream_s1' },
+      });
+
+      await expect(makeProvider().receiveWebhook(body, authorization)).resolves.toEqual({
+        type: 'room_finished',
+        channelName: 'stream_s1',
+      });
+    });
+
+    it("ignores viewers (they can't publish) and events nobody acts on", async () => {
+      const provider = makeProvider();
+      const viewer = await signed({
+        event: 'participant_left',
+        room: { name: 'stream_s1' },
+        participant: { identity: 'viewer-1', permission: { canPublish: false } },
+      });
+      const track = await signed({
+        event: 'track_published',
+        room: { name: 'stream_s1' },
+        participant: publisher,
+      });
+
+      await expect(provider.receiveWebhook(viewer.body, viewer.authorization)).resolves.toBeNull();
+      await expect(provider.receiveWebhook(track.body, track.authorization)).resolves.toBeNull();
+    });
+
+    it('refuses a webhook not signed with our key, or with its body changed', async () => {
+      const provider = makeProvider();
+      const forged = await signed(
+        { event: 'room_finished', room: { name: 'stream_s1' } },
+        'someone-elses-secret-at-least-32-chars',
+      );
+      const real = await signed({ event: 'room_finished', room: { name: 'stream_s1' } });
+
+      await expect(provider.receiveWebhook(forged.body, forged.authorization)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      await expect(
+        provider.receiveWebhook(real.body.replace('stream_s1', 'stream_s2'), real.authorization),
+      ).rejects.toThrow(UnauthorizedException);
+      await expect(provider.receiveWebhook(real.body, undefined)).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
   });
 });

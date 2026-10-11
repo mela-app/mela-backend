@@ -18,6 +18,7 @@ import {
   StreamEndReason,
   StreamLayout,
   StreamStatus,
+  StreamVisibility,
   UserStatus,
 } from '@prisma/client';
 import { PermissionsService } from '../common/permissions/permissions.service';
@@ -37,6 +38,9 @@ import {
   HOST_HEARTBEAT_TTL_SECONDS,
   LivePresenceService,
 } from '../common/presence/live-presence.service';
+import { MediaRoomEvent } from '../common/video-provider/video-provider.interface';
+import { EARLY_START_MS, LATE_GRACE_MS } from '../scheduled-lives/scheduled-live-window';
+import { canWatchLive, HostRelation, liveScore } from './live-audience';
 import { VideoProviderRegistry } from '../common/video-provider/video-provider.registry';
 import { agoraUidFor } from '../common/video-provider/agora-video-provider.service';
 import { GuestsService, MAX_ACTIVE_GUESTS } from '../guests/guests.service';
@@ -67,6 +71,8 @@ const STREAM_LIST_SELECT = {
   status: true,
   startedAt: true,
   endedAt: true,
+  thumbnailUrl: true,
+  visibility: true,
   host: HOST_PUBLIC_SELECT,
 } as const;
 
@@ -81,12 +87,44 @@ const STREAM_DETAIL_SELECT = {
   endedReason: true,
   peakViewerCount: true,
   likeCount: true,
+  thumbnailUrl: true,
+  visibility: true,
   host: HOST_PUBLIC_SELECT,
 } as const;
 
 // Lives are few (tens to hundreds), so the list is ranked in memory by the
 // viewer counts Redis holds; this caps how many a single request ranks.
 const MAX_RANKED_LIVES = 500;
+// A guest whose video left the media room gets this long to come back (the
+// app retries for about a minute) before they're taken off the stage.
+export const DROPPED_GUEST_GRACE_MS = 75_000;
+// How far back the categories the viewer's people stream are counted (For You).
+const AFFINITY_WINDOW_DAYS = 60;
+
+/** Said when a live is for the host's followers or friends only. */
+const RESTRICTED: Record<Exclude<StreamVisibility, 'PUBLIC'>, string> = {
+  FOLLOWERS: "This live is for the host's followers. Follow them to watch.",
+  FRIENDS: "This live is for the host's friends.",
+};
+
+/** Who a viewer follows, and which of those follow them back (friends). */
+interface ViewerTies {
+  following: Set<string>;
+  friends: Set<string>;
+}
+
+function relationTo(
+  hostId: string,
+  requesterId: string | undefined,
+  ties: ViewerTies | null,
+): HostRelation | null {
+  if (!requesterId || !ties) return null;
+  return {
+    isHost: hostId === requesterId,
+    follows: ties.following.has(hostId),
+    isFriend: ties.friends.has(hostId),
+  };
+}
 
 @Injectable()
 export class StreamsService {
@@ -123,6 +161,12 @@ export class StreamsService {
       await this.endStream(previousLive.id, StreamEndReason.REPLACED);
     }
 
+    // Before anything is created: a scheduled live that isn't the host's, or
+    // isn't coming up, is refused rather than silently ignored.
+    const scheduled = dto.scheduledLiveId
+      ? await this.scheduledLiveToStart(hostId, dto.scheduledLiveId)
+      : null;
+
     // Generate the id ourselves so the channel name can be derived and
     // stored in the same insert - no placeholder row, no race condition.
     const id = randomUUID();
@@ -137,6 +181,7 @@ export class StreamsService {
         title: dto.title,
         category: dto.category,
         layout: dto.layout,
+        visibility: dto.visibility ?? scheduled?.visibility,
         status: StreamStatus.LIVE,
         videoProvider: videoProvider.kind,
         channelName,
@@ -158,68 +203,113 @@ export class StreamsService {
 
     // Fan-out (follower notifications) happens entirely out of this request's
     // path - NotificationsService reacts to this on its own time (plan §6.11).
+    // Fulfils the scheduled live, conditionally: started from only once.
+    const fulfilled = scheduled
+      ? (
+          await this.prisma.scheduledLive.updateMany({
+            where: { id: scheduled.id, hostId, streamId: null, cancelledAt: null },
+            data: { streamId: stream.id },
+          })
+        ).count === 1
+      : false;
+
     this.events.emit(DomainEvents.StreamStarted, {
       streamId: stream.id,
       hostId,
       title: stream.title,
+      visibility: stream.visibility,
+      ...(fulfilled && scheduled ? { scheduledLiveId: scheduled.id } : {}),
     } satisfies StreamStartedPayload);
 
     return { stream, rtcToken, serverTime: new Date() };
   }
 
-  // Most-watched first, so a newcomer lands on the busiest rooms; ties keep
-  // the newest live first. [requesterId] is required when feed='following'.
+  /**
+   * Discovery (plan §6.10, docs/features/streams.md): the lives this viewer
+   * may watch - public ones, and followers' or friends' lives of hosts they
+   * qualify for - minus anyone blocked either way, ranked For You
+   * (liveScore: audience, likes a minute, freshness, the viewer's ties to the
+   * host and their people's categories). [query.q] searches titles and host
+   * names; feed=following keeps the hosts they follow.
+   */
   async listLive(query: ListStreamsQueryDto, requesterId?: string) {
-    let followedHostIds: string[] | undefined;
-    if (query.feed === 'following') {
-      if (!requesterId) throw new UnauthorizedException('Sign in to see who you follow');
-      const follows = await this.prisma.follow.findMany({
-        where: { followerId: requesterId },
-        select: { followeeId: true },
-      });
-      followedHostIds = follows.map((follow) => follow.followeeId);
+    if (query.feed === 'following' && !requesterId) {
+      throw new UnauthorizedException('Sign in to see who you follow');
     }
-    // Blocked either way (plan §6.4): hides their lives from discovery/feeds.
-    const blockedHostIds = requesterId
-      ? await this.social.blockedEitherWayUserIds(requesterId)
-      : [];
+    const [ties, blockedHostIds] = await Promise.all([
+      requesterId ? this.viewerTies(requesterId) : null,
+      requesterId ? this.social.blockedEitherWayUserIds(requesterId) : [],
+    ]);
     // Both conditions key on `hostId` - they must merge into one filter object,
     // or spreading two separate `{ hostId: ... }` objects would let the second
     // silently overwrite the first.
+    const followedHostIds = query.feed === 'following' ? [...(ties?.following ?? [])] : undefined;
     const hostIdFilter = followedHostIds
       ? { in: followedHostIds, ...(blockedHostIds.length > 0 ? { notIn: blockedHostIds } : {}) }
       : blockedHostIds.length > 0
         ? { notIn: blockedHostIds }
         : undefined;
+    const search = query.q
+      ? {
+          OR: [
+            { title: { contains: query.q, mode: 'insensitive' as const } },
+            { host: { displayName: { contains: query.q, mode: 'insensitive' as const } } },
+            { host: { username: { contains: query.q, mode: 'insensitive' as const } } },
+          ],
+        }
+      : {};
 
-    const lives = await this.prisma.stream.findMany({
+    const found = await this.prisma.stream.findMany({
       where: {
         status: StreamStatus.LIVE,
         ...(hostIdFilter && { hostId: hostIdFilter }),
         ...(query.category && {
           category: { equals: query.category, mode: 'insensitive' as const },
         }),
+        ...search,
       },
       select: STREAM_LIST_SELECT,
       orderBy: { startedAt: 'desc' },
       take: MAX_RANKED_LIVES,
     });
+    const lives = found.filter((live) =>
+      canWatchLive(live.visibility, relationTo(live.host.id, requesterId, ties)),
+    );
 
     const ids = lives.map((live) => live.id);
-    const [counts, paused] = await Promise.all([
+    const [counts, paused, likes, affinity] = await Promise.all([
       this.presence.viewerCounts(ids).catch((error) => {
-        this.logger.warn(`Viewer counts unavailable, listing by start time: ${error}`);
+        this.logger.warn(`Viewer counts unavailable, ranking without them: ${error}`);
         return new Map<string, number>();
       }),
       this.presence.pausedLives(ids).catch(() => new Set<string>()),
+      this.presence.likeCounts(ids).catch(() => new Map<string, number>()),
+      ties ? this.categoryAffinity(ties.following) : new Map<string, number>(),
     ]);
+    const now = new Date();
     const ranked = lives
-      .map((live) => ({
-        ...live,
-        viewerCount: counts.get(live.id) ?? 0,
-        paused: paused.has(live.id),
-      }))
-      .sort((a, b) => b.viewerCount - a.viewerCount);
+      .map((live) => {
+        const item = {
+          ...live,
+          viewerCount: counts.get(live.id) ?? 0,
+          paused: paused.has(live.id),
+        };
+        const score = liveScore(
+          {
+            viewerCount: item.viewerCount,
+            likeCount: likes.get(live.id) ?? 0,
+            startedAt: live.startedAt,
+            paused: item.paused,
+            followsHost: ties?.following.has(live.host.id) ?? false,
+            friendOfHost: ties?.friends.has(live.host.id) ?? false,
+            categoryAffinity: live.category ? (affinity.get(live.category.toLowerCase()) ?? 0) : 0,
+          },
+          now,
+        );
+        return { item, score };
+      })
+      .sort((a, b) => b.score - a.score || b.item.startedAt.getTime() - a.item.startedAt.getTime())
+      .map(({ item }) => item);
 
     const start = (query.page - 1) * query.limit;
     return {
@@ -230,13 +320,132 @@ export class StreamsService {
     };
   }
 
+  // The host's own scheduled live, coming up within the window a live may start from it.
+  private async scheduledLiveToStart(hostId: string, id: string) {
+    const now = Date.now();
+    const scheduled = await this.prisma.scheduledLive.findFirst({
+      where: {
+        id,
+        hostId,
+        cancelledAt: null,
+        streamId: null,
+        startsAt: {
+          gte: new Date(now - LATE_GRACE_MS),
+          lte: new Date(now + EARLY_START_MS),
+        },
+      },
+      select: { id: true, visibility: true },
+    });
+    if (!scheduled) {
+      throw new BadRequestException(
+        "That scheduled live can't be started now - it's over, cancelled, or more than an hour away",
+      );
+    }
+    return scheduled;
+  }
+
+  /**
+   * Whether [userId] (null: not signed in) may watch this live: its
+   * visibility, or - so a reconnect never locks them out of a live they're
+   * part of - being on its stage or moderating it.
+   */
+  async canWatch(
+    stream: { id: string; hostId: string; visibility: StreamVisibility },
+    userId: string | null | undefined,
+  ): Promise<boolean> {
+    if (stream.visibility === StreamVisibility.PUBLIC) return true;
+    if (!userId) return false;
+    if (userId === stream.hostId) return true;
+    const [follows, followedBack] = await Promise.all([
+      this.social.isFollowing(userId, stream.hostId),
+      this.social.isFollowing(stream.hostId, userId),
+    ]);
+    const relation = { isHost: false, follows, isFriend: follows && followedBack };
+    if (canWatchLive(stream.visibility, relation)) return true;
+    const [onStage, grant] = await Promise.all([
+      this.guests.isActiveGuest(stream.id, userId),
+      this.moderators.findActiveGrant(stream.id, userId),
+    ]);
+    return onStage || grant !== null;
+  }
+
+  private async assertCanWatch(
+    stream: { id: string; hostId: string; visibility: StreamVisibility },
+    userId: string | null | undefined,
+  ): Promise<void> {
+    if (stream.visibility === StreamVisibility.PUBLIC) return;
+    if (await this.canWatch(stream, userId)) return;
+    throw new ForbiddenException({
+      message: RESTRICTED[stream.visibility],
+      code: 'LIVE_RESTRICTED',
+    });
+  }
+
+  private async viewerTies(userId: string): Promise<ViewerTies> {
+    const following = (
+      await this.prisma.follow.findMany({
+        where: { followerId: userId },
+        select: { followeeId: true },
+      })
+    ).map((row) => row.followeeId);
+    const friends =
+      following.length === 0
+        ? []
+        : (
+            await this.prisma.follow.findMany({
+              where: { followeeId: userId, followerId: { in: following } },
+              select: { followerId: true },
+            })
+          ).map((row) => row.followerId);
+    return { following: new Set(following), friends: new Set(friends) };
+  }
+
+  // The share of the lives the viewer's followed hosts ran lately in each
+  // category (lower-cased), 0..1 - what For You takes as their interests.
+  private async categoryAffinity(following: Set<string>): Promise<Map<string, number>> {
+    if (following.size === 0) return new Map();
+    const since = new Date(Date.now() - AFFINITY_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+    const rows = await this.prisma.stream
+      .groupBy({
+        by: ['category'],
+        where: {
+          hostId: { in: [...following] },
+          startedAt: { gte: since },
+          category: { not: null },
+        },
+        _count: { _all: true },
+      })
+      .catch((error: unknown) => {
+        this.logger.warn(`Category interests unavailable: ${error}`);
+        return [];
+      });
+    const total = rows.reduce((sum, row) => sum + row._count._all, 0);
+    const shares = new Map<string, number>();
+    for (const row of rows) {
+      if (!row.category || total === 0) continue;
+      const key = row.category.toLowerCase();
+      shares.set(key, (shares.get(key) ?? 0) + row._count._all / total);
+    }
+    return shares;
+  }
+
   /** One stream's public state, live or not - for share links and the "LIVE has ended" screen. */
-  async getPublic(streamId: string) {
+  // A running live that's for followers or friends only stays unknown to
+  // anyone else; once over, it's just a past live.
+  async getPublic(streamId: string, requesterId?: string) {
     const stream = await this.prisma.stream.findUnique({
       where: { id: streamId },
       select: STREAM_DETAIL_SELECT,
     });
-    if (!stream) {
+    if (
+      !stream ||
+      (stream.status === StreamStatus.LIVE &&
+        stream.visibility !== StreamVisibility.PUBLIC &&
+        !(await this.canWatch(
+          { id: stream.id, hostId: stream.host.id, visibility: stream.visibility },
+          requesterId,
+        )))
+    ) {
       throw new NotFoundException('Stream not found');
     }
     // A live's counters are in Redis; an ended one's were saved on its row.
@@ -255,13 +464,14 @@ export class StreamsService {
   async findLive(streamId: string) {
     return this.prisma.stream.findFirst({
       where: { id: streamId, status: StreamStatus.LIVE },
-      select: { id: true, hostId: true, layout: true },
+      select: { id: true, hostId: true, layout: true, visibility: true },
     });
   }
 
   async join(streamId: string, viewerId: string) {
     const stream = await this.getLiveOrThrow(streamId);
     await this.assertNotBlocked(stream.hostId, viewerId);
+    await this.assertCanWatch(stream, viewerId);
     if (await this.roomBans.isBanned(stream.hostId, viewerId, streamId)) {
       throw new ForbiddenException('You are banned from this stream');
     }
@@ -328,6 +538,7 @@ export class StreamsService {
   async watch(streamId: string, userId?: string) {
     const stream = await this.getLiveOrThrow(streamId);
     if (userId) await this.assertNotBlocked(stream.hostId, userId);
+    await this.assertCanWatch(stream, userId);
     if (userId && (await this.roomBans.isBanned(stream.hostId, userId, streamId))) {
       throw new ForbiddenException('You are banned from this stream');
     }
@@ -395,7 +606,11 @@ export class StreamsService {
     if (!isHost && !(await this.guests.isActiveGuest(streamId, requesterId))) {
       throw new ForbiddenException('Only the host or a guest on stage can broadcast in this live');
     }
-    const rtcToken = await this.videoProviders.get(stream.videoProvider).mintToken({
+    const videoProvider = this.videoProviders.get(stream.videoProvider);
+    // The media server may have closed the room meanwhile (it restarted, or
+    // the room emptied out): open it again - a no-op when it's still there.
+    await videoProvider.openChannel(stream.channelName);
+    const rtcToken = await videoProvider.mintToken({
       channelName: stream.channelName,
       userId: requesterId,
       role: 'publisher',
@@ -416,12 +631,71 @@ export class StreamsService {
     });
     if (candidates.length === 0) return 0;
 
-    const connected = await this.presence.connectedHosts(candidates.map((live) => live.id));
-    const abandoned = candidates.filter((live) => !connected.has(live.id));
+    // Heartbeat on, or the host's video still reaching the media server.
+    const present = await this.presence.presentHosts(
+      candidates.map((live) => live.id),
+      now.getTime(),
+    );
+    const abandoned = candidates.filter((live) => !present.has(live.id));
     for (const live of abandoned) {
       await this.endStream(live.id, StreamEndReason.HOST_DISCONNECTED);
     }
     return abandoned.length;
+  }
+
+  /**
+   * What the media server said about a live's room (LiveKit webhooks,
+   * docs/features/video-provider.md):
+   * - the host's video in the room keeps the live on while their app's
+   *   realtime connection is down (presentHosts);
+   * - the host's video gone with no heartbeat either: the host is gone, so
+   *   the live ends now instead of at the next sweep;
+   * - a guest's video gone: they're taken off the stage unless it's back
+   *   within {@link DROPPED_GUEST_GRACE_MS} (vacateDroppedGuests);
+   * - the room closed with the host's app silent: the live ends. With the
+   *   host's app still there, it reopens the room as it reconnects.
+   */
+  async onMediaRoomEvent(event: MediaRoomEvent): Promise<void> {
+    const stream = await this.prisma.stream.findUnique({
+      where: { channelName: event.channelName },
+    });
+    if (!stream || stream.status !== StreamStatus.LIVE) return;
+    const heartbeat = async () => (await this.presence.connectedHosts([stream.id])).has(stream.id);
+
+    if (event.type === 'room_finished') {
+      if (!(await heartbeat())) await this.endStream(stream.id, StreamEndReason.HOST_DISCONNECTED);
+      return;
+    }
+    const joined = event.type === 'publisher_joined';
+    if (event.userId === stream.hostId) {
+      await this.presence.setHostMedia(stream.id, joined);
+      if (!joined && !(await heartbeat())) {
+        await this.endStream(stream.id, StreamEndReason.HOST_DISCONNECTED);
+      }
+      return;
+    }
+    if (joined) await this.presence.clearGuestGone(stream.id, event.userId);
+    else if (await this.guests.isActiveGuest(stream.id, event.userId)) {
+      await this.presence.noteGuestGone(stream.id, event.userId);
+    }
+  }
+
+  /**
+   * Takes off the stage every guest whose video left the media room and
+   * didn't come back in time - their app died, so their tile would freeze.
+   * Returns how many.
+   */
+  async vacateDroppedGuests(now = new Date()): Promise<number> {
+    const gone = await this.presence.takeGuestsGoneBefore(now.getTime() - DROPPED_GUEST_GRACE_MS);
+    let vacated = 0;
+    for (const { streamId, userId } of gone) {
+      const stream = await this.prisma.stream.findUnique({ where: { id: streamId } });
+      if (!stream || stream.status !== StreamStatus.LIVE) continue;
+      if (!(await this.guests.isActiveGuest(streamId, userId))) continue;
+      await this.vacateGuestSeat(stream, userId, false, userId);
+      vacated++;
+    }
+    return vacated;
   }
 
   // Viewers already in the room follow via the stream.layout_changed event;

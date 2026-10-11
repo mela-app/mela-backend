@@ -1,6 +1,6 @@
 import { Controller, Get, Param, Res, VERSION_NEUTRAL } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { StreamStatus } from '@prisma/client';
+import { StreamStatus, StreamVisibility } from '@prisma/client';
 import { isUUID } from 'class-validator';
 import type { Response } from 'express';
 import { PrismaService } from '../common/prisma/prisma.service';
@@ -44,10 +44,19 @@ export class WebFallbackController {
     const stream = isUUID(id)
       ? await this.prisma.stream.findUnique({
           where: { id },
-          select: { title: true, status: true, host: { select: { displayName: true } } },
+          select: {
+            title: true,
+            status: true,
+            thumbnailUrl: true,
+            visibility: true,
+            host: { select: { displayName: true } },
+          },
         })
       : null;
-    const isLive = stream?.status === StreamStatus.LIVE;
+    // A followers' or friends' live isn't played or described to a browser
+    // that can't say who it is: the app checks (docs/features/streams.md).
+    const isLive =
+      stream?.status === StreamStatus.LIVE && stream.visibility === StreamVisibility.PUBLIC;
     const scheme = this.config.getOrThrow<string>('APP_URL_SCHEME');
     const player = isLive ? this.playerConfig(id, scheme) : null;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -99,6 +108,9 @@ export class WebFallbackController {
 interface StreamPreview {
   title: string;
   status: StreamStatus;
+  visibility?: StreamVisibility;
+  // A recent frame of a running live: the link's preview picture.
+  thumbnailUrl?: string | null;
   host: { displayName: string };
 }
 
@@ -109,13 +121,25 @@ function renderPage(
   player: PlayerConfig | null,
 ): string {
   const deepLink = `${scheme}://live/${encodeURIComponent(id)}`;
-  const isLive = stream?.status === StreamStatus.LIVE;
-  const title = stream ? escapeHtml(stream.title) : 'This live has ended';
-  const description = stream
-    ? isLive
-      ? `${escapeHtml(stream.host.displayName)} is live now on Mela`
-      : `${escapeHtml(stream.host.displayName)}'s live has ended - check out their profile`
-    : "This live doesn't exist or has ended.";
+  const restricted =
+    stream?.status === StreamStatus.LIVE &&
+    stream.visibility !== undefined &&
+    stream.visibility !== StreamVisibility.PUBLIC;
+  const isLive = stream?.status === StreamStatus.LIVE && !restricted;
+  const title = restricted
+    ? 'A private live'
+    : stream
+      ? escapeHtml(stream.title)
+      : 'This live has ended';
+  const description = restricted
+    ? `${escapeHtml(stream!.host.displayName)} is live for their ${
+        stream!.visibility === StreamVisibility.FRIENDS ? 'friends' : 'followers'
+      } - open it in the app to watch.`
+    : stream
+      ? isLive
+        ? `${escapeHtml(stream.host.displayName)} is live now on Mela`
+        : `${escapeHtml(stream.host.displayName)}'s live has ended - check out their profile`
+      : "This live doesn't exist or has ended.";
   const playerTags = player
     ? `
 <link rel="stylesheet" href="/web/player.css" />
@@ -134,7 +158,13 @@ function renderPage(
 <meta property="og:type" content="video.other" />
 <meta property="og:title" content="${title}" />
 <meta property="og:description" content="${description}" />
-<meta name="description" content="${description}" />
+<meta name="description" content="${description}" />${
+    isLive && stream?.thumbnailUrl
+      ? `
+<meta property="og:image" content="${escapeHtml(stream.thumbnailUrl)}" />
+<meta name="twitter:card" content="summary_large_image" />`
+      : ''
+  }
 <style>
 :root { color-scheme: dark; }
 html, body { margin: 0; background: #0e0e14; color: #f5f5f7; font: 16px/1.5 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
@@ -152,7 +182,7 @@ html, body { margin: 0; background: #0e0e14; color: #f5f5f7; font: 16px/1.5 syst
 <div class="fallback">
 <main>
 <div class="logo">${MELA_LOGO_SVG}</div>
-${isLive ? '<div class="live">LIVE</div>' : ''}
+${isLive || restricted ? '<div class="live">LIVE</div>' : ''}
 <h1>${title}</h1>
 <p>${description}</p>
 <a class="open" href="${deepLink}">Open in Mela</a>

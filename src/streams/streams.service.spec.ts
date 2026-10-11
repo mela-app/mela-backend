@@ -13,6 +13,7 @@ import {
   StreamEndReason,
   StreamLayout,
   StreamStatus,
+  StreamVisibility,
   UserStatus,
   VideoProviderKind,
 } from '@prisma/client';
@@ -32,7 +33,9 @@ import { StreamsService } from './streams.service';
 
 describe('StreamsService', () => {
   const prisma = {
+    scheduledLive: { findFirst: jest.fn(), updateMany: jest.fn() },
     stream: {
+      groupBy: jest.fn().mockResolvedValue([]),
       create: jest.fn(),
       findUnique: jest.fn(),
       findFirst: jest.fn(),
@@ -47,7 +50,7 @@ describe('StreamsService', () => {
     },
     follow: {
       count: jest.fn(),
-      findMany: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
     },
     chatMessage: {
       findUnique: jest.fn().mockResolvedValue(null),
@@ -76,12 +79,18 @@ describe('StreamsService', () => {
     touchHost: jest.fn().mockResolvedValue(undefined),
     viewerCount: jest.fn().mockResolvedValue(0),
     viewerCounts: jest.fn().mockResolvedValue(new Map()),
+    likeCounts: jest.fn().mockResolvedValue(new Map()),
     viewerIds: jest.fn().mockResolvedValue([]),
     pausedLives: jest.fn().mockResolvedValue(new Set()),
     isPaused: jest.fn().mockResolvedValue(false),
     likeCount: jest.fn().mockResolvedValue(0),
     peakViewerCount: jest.fn().mockResolvedValue(0),
     connectedHosts: jest.fn().mockResolvedValue(new Set()),
+    presentHosts: jest.fn().mockResolvedValue(new Set()),
+    setHostMedia: jest.fn().mockResolvedValue(undefined),
+    noteGuestGone: jest.fn().mockResolvedValue(undefined),
+    clearGuestGone: jest.fn().mockResolvedValue(undefined),
+    takeGuestsGoneBefore: jest.fn().mockResolvedValue([]),
     clear: jest.fn().mockResolvedValue(undefined),
   };
   const social = {
@@ -231,6 +240,7 @@ describe('StreamsService', () => {
       id: 'old-stream',
       hostId: 'host-1',
       status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
     });
     prisma.stream.findUnique.mockResolvedValue({
       id: 'old-stream',
@@ -289,6 +299,7 @@ describe('StreamsService', () => {
       id: 's1',
       hostId: 'host-1',
       status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
       videoProvider: VideoProviderKind.AGORA,
       channelName: 'stream_s1',
     });
@@ -312,6 +323,7 @@ describe('StreamsService', () => {
       id: 's1',
       hostId: 'host-1',
       status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
       videoProvider: VideoProviderKind.AGORA,
       channelName: 'stream_s1',
     });
@@ -328,6 +340,7 @@ describe('StreamsService', () => {
       id: 's1',
       hostId: 'host-1',
       status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
       videoProvider: VideoProviderKind.AGORA,
       channelName: 'stream_s1',
       pinnedMessageId: 'm2',
@@ -349,6 +362,7 @@ describe('StreamsService', () => {
       id: 's1',
       hostId: 'host-1',
       status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
       videoProvider: VideoProviderKind.AGORA,
       channelName: 'stream_s1',
       pinnedMessageId: 'm1',
@@ -375,6 +389,7 @@ describe('StreamsService', () => {
       id: 's1',
       hostId: 'host-1',
       status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
       videoProvider: VideoProviderKind.AGORA,
       channelName: 'stream_s1',
     });
@@ -404,6 +419,7 @@ describe('StreamsService', () => {
       id: 's1',
       hostId: 'host-1',
       status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
       videoProvider: VideoProviderKind.AGORA,
       channelName: 'stream_s1',
     });
@@ -420,6 +436,7 @@ describe('StreamsService', () => {
       id: 's1',
       hostId: 'host-1',
       status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
       videoProvider: VideoProviderKind.AGORA,
       channelName: 'stream_s1',
     });
@@ -436,6 +453,7 @@ describe('StreamsService', () => {
       id: 's1',
       hostId: 'host-1',
       status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
       videoProvider: VideoProviderKind.LIVEKIT,
       channelName: 'stream_s1',
     };
@@ -447,6 +465,8 @@ describe('StreamsService', () => {
       const result = await service.publisherToken('s1', 'host-1');
 
       expect(videoProviders.get).toHaveBeenCalledWith(VideoProviderKind.LIVEKIT);
+      // Reopened if the media server closed it meanwhile (a no-op otherwise).
+      expect(videoProvider.openChannel).toHaveBeenCalledWith('stream_s1');
       expect(videoProvider.mintToken).toHaveBeenCalledWith({
         channelName: 'stream_s1',
         userId: 'host-1',
@@ -493,6 +513,7 @@ describe('StreamsService', () => {
       id: 's1',
       hostId: 'host-1',
       status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
       videoProvider: VideoProviderKind.AGORA,
       channelName: 'stream_s1',
     };
@@ -566,6 +587,7 @@ describe('StreamsService', () => {
       id: 's1',
       hostId: 'host-1',
       status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
       videoProvider: VideoProviderKind.LIVEKIT,
       channelName: 'stream_s1',
     });
@@ -596,6 +618,7 @@ describe('StreamsService', () => {
       id: 's1',
       hostId: 'host-1',
       status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
     });
     presence.peakViewerCount.mockResolvedValueOnce(42);
     presence.likeCount.mockResolvedValueOnce(1300);
@@ -648,6 +671,7 @@ describe('StreamsService', () => {
       id: 's1',
       hostId: 'host-1',
       status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
     });
     const service = makeService();
 
@@ -673,6 +697,7 @@ describe('StreamsService', () => {
       id: 's1',
       hostId: 'host-1',
       status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
       layout: StreamLayout.FULL,
     });
     prisma.stream.update.mockResolvedValue({ id: 's1', layout: StreamLayout.FLOATING });
@@ -696,6 +721,7 @@ describe('StreamsService', () => {
       id: 's1',
       hostId: 'host-1',
       status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
       layout: StreamLayout.FIT,
     });
     const service = makeService();
@@ -711,6 +737,7 @@ describe('StreamsService', () => {
       id: 's1',
       hostId: 'host-1',
       status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
       layout: StreamLayout.FULL,
     });
     const service = makeService();
@@ -739,6 +766,9 @@ describe('StreamsService', () => {
     const live = (id: string, minutesAgo: number) => ({
       id,
       title: id,
+      category: null,
+      visibility: StreamVisibility.PUBLIC,
+      host: { id: `host-${id}` },
       startedAt: new Date(Date.now() - minutesAgo * 60_000),
     });
 
@@ -841,7 +871,7 @@ describe('StreamsService', () => {
       ]);
     });
 
-    it('marks paused lives, still ranked by viewers', async () => {
+    it('marks paused lives, which sink below a running one of similar pull', async () => {
       prisma.stream.findMany.mockResolvedValue([live('on', 1), live('paused', 2)]);
       presence.viewerCounts.mockResolvedValue(
         new Map([
@@ -855,9 +885,219 @@ describe('StreamsService', () => {
       const result = await service.listLive({ page: 1, limit: 20 });
 
       expect(result.items.map((item) => [item.id, item.paused])).toEqual([
-        ['paused', true],
         ['on', false],
+        ['paused', true],
       ]);
+    });
+  });
+
+  describe("followers' and friends' lives", () => {
+    const friendsLive = {
+      id: 's1',
+      hostId: 'host-1',
+      status: StreamStatus.LIVE,
+      visibility: StreamVisibility.FRIENDS,
+      videoProvider: VideoProviderKind.LIVEKIT,
+      channelName: 'stream_s1',
+    };
+    // [viewer follows host, host follows viewer]
+    const ties = (follows: boolean, followedBack: boolean) =>
+      social.isFollowing.mockImplementation(async (follower: string) =>
+        follower === 'host-1' ? followedBack : follows,
+      );
+
+    afterEach(() => social.isFollowing.mockResolvedValue(false));
+
+    it("turns away someone who isn't a friend, saying why", async () => {
+      prisma.stream.findUnique.mockResolvedValue(friendsLive);
+      ties(true, false);
+      const service = makeService();
+
+      await expect(service.join('s1', 'viewer-1')).rejects.toMatchObject({
+        response: { code: 'LIVE_RESTRICTED', message: "This live is for the host's friends." },
+      });
+      expect(videoProvider.mintToken).not.toHaveBeenCalled();
+    });
+
+    it('lets a friend in', async () => {
+      prisma.stream.findUnique.mockResolvedValue(friendsLive);
+      ties(true, true);
+      const service = makeService();
+
+      await expect(service.join('s1', 'viewer-1')).resolves.toBeDefined();
+    });
+
+    it("a followers' live is for any follower", async () => {
+      const service = makeService();
+      const followersLive = { ...friendsLive, visibility: StreamVisibility.FOLLOWERS };
+      ties(true, false);
+      await expect(service.canWatch(followersLive, 'viewer-1')).resolves.toBe(true);
+      ties(false, true);
+      await expect(service.canWatch(followersLive, 'viewer-1')).resolves.toBe(false);
+    });
+
+    it('never locks out the host, a guest on stage or a moderator of the live', async () => {
+      const service = makeService();
+      ties(false, false);
+      await expect(service.canWatch(friendsLive, 'host-1')).resolves.toBe(true);
+      guests.isActiveGuest.mockResolvedValueOnce(true);
+      await expect(service.canWatch(friendsLive, 'guest-1')).resolves.toBe(true);
+      moderators.findActiveGrant.mockResolvedValueOnce({ capabilities: [] });
+      await expect(service.canWatch(friendsLive, 'mod-1')).resolves.toBe(true);
+      await expect(service.canWatch(friendsLive, 'stranger-1')).resolves.toBe(false);
+    });
+
+    it("the share page's player is for everyone only on a public live", async () => {
+      prisma.stream.findUnique.mockResolvedValue(friendsLive);
+      const service = makeService();
+
+      await expect(service.watch('s1')).rejects.toThrow(ForbiddenException);
+      expect(watchTickets.issue).not.toHaveBeenCalled();
+    });
+
+    it("a running restricted live is unknown to anyone who can't watch it; once over, it's just a past live", async () => {
+      prisma.stream.findUnique.mockResolvedValue({ ...friendsLive, host: { id: 'host-1' } });
+      ties(false, false);
+      const service = makeService();
+      await expect(service.getPublic('s1', 'viewer-1')).rejects.toThrow(NotFoundException);
+      await expect(service.getPublic('s1')).rejects.toThrow(NotFoundException);
+
+      prisma.stream.findUnique.mockResolvedValue({
+        ...friendsLive,
+        status: StreamStatus.ENDED,
+        likeCount: 3,
+        host: { id: 'host-1' },
+      });
+      await expect(service.getPublic('s1', 'viewer-1')).resolves.toMatchObject({ id: 's1' });
+    });
+
+    it('discovery shows each viewer only the lives they may watch', async () => {
+      const row = (id: string, hostId: string, visibility: StreamVisibility) => ({
+        id,
+        title: id,
+        category: null,
+        visibility,
+        host: { id: hostId },
+        startedAt: new Date(),
+      });
+      prisma.stream.findMany.mockResolvedValue([
+        row('public', 'stranger', StreamVisibility.PUBLIC),
+        row('followers', 'followed', StreamVisibility.FOLLOWERS),
+        row('friends-of-followed', 'followed', StreamVisibility.FRIENDS),
+        row('friends', 'friend', StreamVisibility.FRIENDS),
+        row('strangers-friends', 'stranger', StreamVisibility.FRIENDS),
+      ]);
+      // viewer follows 'followed' and 'friend'; only 'friend' follows back.
+      prisma.follow.findMany
+        .mockResolvedValueOnce([{ followeeId: 'followed' }, { followeeId: 'friend' }])
+        .mockResolvedValueOnce([{ followerId: 'friend' }]);
+      const service = makeService();
+
+      const signedIn = await service.listLive({ page: 1, limit: 20 }, 'viewer-1');
+      expect(signedIn.items.map((item) => item.id).sort()).toEqual([
+        'followers',
+        'friends',
+        'public',
+      ]);
+
+      const anonymous = await service.listLive({ page: 1, limit: 20 });
+      expect(anonymous.items.map((item) => item.id)).toEqual(['public']);
+    });
+
+    it('searches titles and host names, ignoring case', async () => {
+      prisma.stream.findMany.mockResolvedValue([]);
+      const service = makeService();
+
+      await service.listLive({ q: 'poker', page: 1, limit: 20 });
+
+      expect(prisma.stream.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            status: StreamStatus.LIVE,
+            OR: [
+              { title: { contains: 'poker', mode: 'insensitive' } },
+              { host: { displayName: { contains: 'poker', mode: 'insensitive' } } },
+              { host: { username: { contains: 'poker', mode: 'insensitive' } } },
+            ],
+          },
+        }),
+      );
+    });
+
+    it('goes live with the chosen audience, and says so to the notifications', async () => {
+      prisma.stream.create.mockImplementation(({ data }: Prisma.StreamCreateArgs) =>
+        Promise.resolve({ ...data }),
+      );
+      const service = makeService();
+
+      await service.goLive('host-1', {
+        title: 'Close friends',
+        visibility: StreamVisibility.FRIENDS,
+      });
+
+      expect(prisma.stream.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ visibility: StreamVisibility.FRIENDS }),
+        }),
+      );
+      expect(events.emit).toHaveBeenCalledWith(
+        'stream.started',
+        expect.objectContaining({ visibility: StreamVisibility.FRIENDS }),
+      );
+    });
+  });
+
+  describe('going live from a scheduled live', () => {
+    beforeEach(() => {
+      prisma.stream.create.mockImplementation(({ data }: Prisma.StreamCreateArgs) =>
+        Promise.resolve({ ...data }),
+      );
+    });
+
+    it('takes its audience, fulfils it, and tells the notifications whose reminders to honour', async () => {
+      prisma.scheduledLive.findFirst.mockResolvedValue({
+        id: 'e1',
+        visibility: StreamVisibility.FOLLOWERS,
+      });
+      prisma.scheduledLive.updateMany.mockResolvedValue({ count: 1 });
+      const service = makeService();
+
+      const result = await service.goLive('host-1', { title: 'Poker', scheduledLiveId: 'e1' });
+
+      expect(prisma.scheduledLive.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: 'e1',
+            hostId: 'host-1',
+            cancelledAt: null,
+            streamId: null,
+          }),
+        }),
+      );
+      expect(prisma.stream.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ visibility: StreamVisibility.FOLLOWERS }),
+        }),
+      );
+      expect(prisma.scheduledLive.updateMany).toHaveBeenCalledWith({
+        where: { id: 'e1', hostId: 'host-1', streamId: null, cancelledAt: null },
+        data: { streamId: result.stream.id },
+      });
+      expect(events.emit).toHaveBeenCalledWith(
+        'stream.started',
+        expect.objectContaining({ scheduledLiveId: 'e1' }),
+      );
+    });
+
+    it("refuses one that isn't the host's, or isn't coming up - before going live", async () => {
+      prisma.scheduledLive.findFirst.mockResolvedValue(null);
+      const service = makeService();
+
+      await expect(
+        service.goLive('host-1', { title: 'Poker', scheduledLiveId: 'e1' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.stream.create).not.toHaveBeenCalled();
+      expect(videoProvider.openChannel).not.toHaveBeenCalled();
     });
   });
 
@@ -866,6 +1106,7 @@ describe('StreamsService', () => {
       prisma.stream.findUnique.mockResolvedValue({
         id: 's1',
         status: StreamStatus.LIVE,
+        visibility: StreamVisibility.PUBLIC,
         likeCount: 0,
       });
       presence.viewerCount.mockResolvedValueOnce(12);
@@ -914,7 +1155,7 @@ describe('StreamsService', () => {
 
     it('ends lives whose host stopped sending heartbeats', async () => {
       prisma.stream.findMany.mockResolvedValue([{ id: 'alive' }, { id: 'gone' }]);
-      presence.connectedHosts.mockResolvedValue(new Set(['alive']));
+      presence.presentHosts.mockResolvedValue(new Set(['alive']));
       prisma.stream.findUnique.mockResolvedValue({ id: 'gone', status: StreamStatus.ENDED });
       const service = makeService();
 
@@ -944,7 +1185,139 @@ describe('StreamsService', () => {
           where: { status: StreamStatus.LIVE, startedAt: { lt: new Date('2026-09-25T11:58:30Z') } },
         }),
       );
+      expect(presence.presentHosts).not.toHaveBeenCalled();
+    });
+
+    it("asks with the sweep's own clock whether each host is still there", async () => {
+      prisma.stream.findMany.mockResolvedValue([{ id: 'live-1' }]);
+      presence.presentHosts.mockResolvedValue(new Set(['live-1']));
+      const service = makeService();
+
+      await expect(service.endAbandonedLives(now)).resolves.toBe(0);
+      expect(presence.presentHosts).toHaveBeenCalledWith(['live-1'], now.getTime());
+    });
+  });
+
+  describe('media room events (LiveKit webhooks)', () => {
+    const live = {
+      id: 's1',
+      hostId: 'host-1',
+      status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
+      videoProvider: VideoProviderKind.LIVEKIT,
+      channelName: 'stream_s1',
+    };
+
+    beforeEach(() => {
+      prisma.stream.findUnique.mockResolvedValue(live);
+    });
+
+    it("notes the host's video in the room, and its leaving", async () => {
+      presence.connectedHosts.mockResolvedValue(new Set(['s1']));
+      const service = makeService();
+
+      await service.onMediaRoomEvent({
+        type: 'publisher_joined',
+        channelName: 'stream_s1',
+        userId: 'host-1',
+      });
+      await service.onMediaRoomEvent({
+        type: 'publisher_left',
+        channelName: 'stream_s1',
+        userId: 'host-1',
+      });
+
+      expect(prisma.stream.findUnique).toHaveBeenCalledWith({
+        where: { channelName: 'stream_s1' },
+      });
+      expect(presence.setHostMedia).toHaveBeenNthCalledWith(1, 's1', true);
+      expect(presence.setHostMedia).toHaveBeenNthCalledWith(2, 's1', false);
+      // The app's still there (its heartbeat is on): it reconnects the video.
+      expect(prisma.stream.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("ends the live at once when the host's video left and their app is silent too", async () => {
+      presence.connectedHosts.mockResolvedValue(new Set());
+      const service = makeService();
+
+      await service.onMediaRoomEvent({
+        type: 'publisher_left',
+        channelName: 'stream_s1',
+        userId: 'host-1',
+      });
+
+      expect(prisma.stream.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ endedReason: StreamEndReason.HOST_DISCONNECTED }),
+        }),
+      );
+    });
+
+    it("a guest's video leaving puts them on notice; coming back clears it", async () => {
+      guests.isActiveGuest.mockResolvedValueOnce(true);
+      const service = makeService();
+
+      await service.onMediaRoomEvent({
+        type: 'publisher_left',
+        channelName: 'stream_s1',
+        userId: 'guest-1',
+      });
+      await service.onMediaRoomEvent({
+        type: 'publisher_joined',
+        channelName: 'stream_s1',
+        userId: 'guest-1',
+      });
+
+      expect(presence.noteGuestGone).toHaveBeenCalledWith('s1', 'guest-1');
+      expect(presence.clearGuestGone).toHaveBeenCalledWith('s1', 'guest-1');
+      expect(presence.setHostMedia).not.toHaveBeenCalled();
+    });
+
+    it('a closed room ends the live only when the host is gone too', async () => {
+      const service = makeService();
+
+      presence.connectedHosts.mockResolvedValueOnce(new Set(['s1']));
+      await service.onMediaRoomEvent({ type: 'room_finished', channelName: 'stream_s1' });
+      expect(prisma.stream.updateMany).not.toHaveBeenCalled();
+
+      presence.connectedHosts.mockResolvedValueOnce(new Set());
+      await service.onMediaRoomEvent({ type: 'room_finished', channelName: 'stream_s1' });
+      expect(prisma.stream.updateMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('ignores rooms of lives that are over', async () => {
+      prisma.stream.findUnique.mockResolvedValue({ ...live, status: StreamStatus.ENDED });
+      const service = makeService();
+
+      await service.onMediaRoomEvent({
+        type: 'publisher_left',
+        channelName: 'stream_s1',
+        userId: 'host-1',
+      });
+
+      expect(presence.setHostMedia).not.toHaveBeenCalled();
       expect(presence.connectedHosts).not.toHaveBeenCalled();
+    });
+
+    it('takes a guest whose video never came back off the stage', async () => {
+      presence.takeGuestsGoneBefore.mockResolvedValue([{ streamId: 's1', userId: 'guest-1' }]);
+      guests.isActiveGuest.mockResolvedValue(true);
+      const service = makeService();
+      const now = new Date('2026-10-10T12:00:00Z');
+
+      await expect(service.vacateDroppedGuests(now)).resolves.toBe(1);
+
+      expect(presence.takeGuestsGoneBefore).toHaveBeenCalledWith(now.getTime() - 75_000);
+      expect(guests.remove).toHaveBeenCalledWith('s1', 'host-1', 'guest-1', false, 'guest-1');
+      guests.isActiveGuest.mockResolvedValue(false);
+    });
+
+    it('leaves a dropped guest who already left the stage alone', async () => {
+      presence.takeGuestsGoneBefore.mockResolvedValue([{ streamId: 's1', userId: 'guest-1' }]);
+      const service = makeService();
+
+      await expect(service.vacateDroppedGuests()).resolves.toBe(0);
+      expect(guests.remove).not.toHaveBeenCalled();
     });
   });
 
@@ -963,6 +1336,7 @@ describe('StreamsService', () => {
       id: 's1',
       hostId: 'host-1',
       status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
       channelName: 'stream_s1',
       videoProvider: VideoProviderKind.LIVEKIT,
     };
@@ -1176,6 +1550,7 @@ describe('StreamsService', () => {
         id: 's1',
         hostId: 'host-1',
         status: StreamStatus.LIVE,
+        visibility: StreamVisibility.PUBLIC,
       });
       prisma.user.findUnique.mockResolvedValue({ id: 'troll-1' });
       moderators.findActiveGrant.mockReset().mockResolvedValue(null);
@@ -1274,6 +1649,7 @@ describe('StreamsService', () => {
         id: 's1',
         hostId: 'host-1',
         status: StreamStatus.LIVE,
+        visibility: StreamVisibility.PUBLIC,
       });
       prisma.user.findUnique.mockResolvedValue({ id: 'fan-1' });
       moderators.findActiveGrant.mockReset().mockResolvedValue(null);
@@ -1341,6 +1717,7 @@ describe('StreamsService', () => {
         id: 's1',
         hostId: 'host-1',
         status: StreamStatus.LIVE,
+        visibility: StreamVisibility.PUBLIC,
       });
       moderators.findActiveGrant.mockReset().mockResolvedValue(null);
     });
@@ -1409,6 +1786,7 @@ describe('StreamsService', () => {
         id: 's1',
         hostId: 'host-1',
         status: StreamStatus.LIVE,
+        visibility: StreamVisibility.PUBLIC,
       });
       moderators.findActiveGrant.mockReset().mockResolvedValue(null);
     });
@@ -1457,6 +1835,7 @@ describe('StreamsService', () => {
         id: 's1',
         hostId: 'host-1',
         status: StreamStatus.LIVE,
+        visibility: StreamVisibility.PUBLIC,
       });
       moderators.findActiveGrant.mockReset().mockResolvedValue(null);
     });
@@ -1550,6 +1929,7 @@ describe('StreamsService', () => {
           id: 's1',
           hostId: 'host-1',
           status: StreamStatus.LIVE,
+          visibility: StreamVisibility.PUBLIC,
           startedAt: new Date('2026-09-27T10:00:00Z'),
           endedAt: null,
           peakViewerCount: 0,
@@ -1590,6 +1970,7 @@ describe('StreamsService', () => {
         id: 's1',
         hostId: 'host-1',
         status: StreamStatus.LIVE,
+        visibility: StreamVisibility.PUBLIC,
       });
     });
 
@@ -1726,6 +2107,7 @@ describe('StreamsService', () => {
       id: 's1',
       hostId: 'host',
       status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
       videoProvider: VideoProviderKind.LIVEKIT,
       channelName: 'stream_s1',
     };
@@ -1847,6 +2229,7 @@ describe('StreamsService', () => {
         id: 's1',
         hostId: 'host-1',
         status: StreamStatus.LIVE,
+        visibility: StreamVisibility.PUBLIC,
         videoProvider: VideoProviderKind.LIVEKIT,
         channelName: 'stream_s1',
       });
@@ -2060,6 +2443,7 @@ describe('StreamsService', () => {
         id: 's1',
         hostId: 'host-1',
         status: StreamStatus.LIVE,
+        visibility: StreamVisibility.PUBLIC,
       });
       guests.activeGuests.mockResolvedValueOnce([
         { id: 'g1', username: 'g', displayName: 'G', avatarUrl: null, joinedAt: new Date() },
@@ -2086,6 +2470,7 @@ describe('StreamsService', () => {
         id: 's1',
         hostId: 'host-1',
         status: StreamStatus.LIVE,
+        visibility: StreamVisibility.PUBLIC,
         videoProvider: VideoProviderKind.LIVEKIT,
         channelName: 'stream_s1',
       });

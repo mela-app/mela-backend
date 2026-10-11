@@ -5,12 +5,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { StreamStatus } from '@prisma/client';
+import { StreamStatus, StreamVisibility } from '@prisma/client';
 import { DomainEvents, StreamInviteSentPayload } from '../common/events/domain-events';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RateLimit, RateLimitService } from '../common/rate-limit/rate-limit.service';
 import { RedisService } from '../common/redis/redis.service';
 import { SocialService } from '../social/social.service';
+import { canWatchLive } from '../streams/live-audience';
 
 const INVITE_CAP_PER_STREAM = 20;
 const INVITE_RATE_LIMIT: RateLimit = { capacity: 5, refillMs: 60_000 };
@@ -36,7 +37,7 @@ export class ShareService {
   ): Promise<{ invited: string[] }> {
     const stream = await this.prisma.stream.findUnique({
       where: { id: streamId },
-      select: { status: true },
+      select: { status: true, hostId: true, visibility: true },
     });
     if (!stream || stream.status !== StreamStatus.LIVE)
       throw new NotFoundException('This live has ended');
@@ -49,7 +50,12 @@ export class ShareService {
     // a client-supplied id list at face value.
     const candidates = [...new Set(userIds)].filter((id) => id !== senderId);
     const isFriend = await Promise.all(candidates.map((id) => this.social.isFriend(senderId, id)));
-    const friends = candidates.filter((_, index) => isFriend[index]);
+    const befriended = candidates.filter((_, index) => isFriend[index]);
+    // And only those who may watch it: a followers' or friends' live is the host's to open up.
+    const canWatch = await Promise.all(
+      befriended.map((id) => this.canWatch(stream.hostId, stream.visibility, id)),
+    );
+    const friends = befriended.filter((_, index) => canWatch[index]);
     if (friends.length === 0) return { invited: [] };
 
     const capKey = `invite:${streamId}:${senderId}`;
@@ -75,5 +81,22 @@ export class ShareService {
     } satisfies StreamInviteSentPayload);
 
     return { invited: toInvite };
+  }
+
+  private async canWatch(
+    hostId: string,
+    visibility: StreamVisibility,
+    userId: string,
+  ): Promise<boolean> {
+    if (visibility === StreamVisibility.PUBLIC) return true;
+    const [follows, followedBack] = await Promise.all([
+      this.social.isFollowing(userId, hostId),
+      this.social.isFollowing(hostId, userId),
+    ]);
+    return canWatchLive(visibility, {
+      isHost: userId === hostId,
+      follows,
+      isFriend: follows && followedBack,
+    });
   }
 }

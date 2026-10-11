@@ -62,7 +62,7 @@ describe('UsersService', () => {
       expect(social.getRelationshipSummary).toHaveBeenCalledWith('u1', 'viewer-1');
       expect(prisma.stream.findFirst).toHaveBeenCalledWith({
         where: { hostId: 'u1', status: StreamStatus.LIVE },
-        select: { id: true },
+        select: { id: true, visibility: true },
       });
       expect(profile).toEqual({
         ...profileRow,
@@ -176,7 +176,7 @@ describe('UsersService', () => {
 
       it("404s for someone the owner blocked, as if the account didn't exist", async () => {
         prisma.user.findUnique.mockResolvedValue(profileRow);
-        prisma.stream.findFirst.mockResolvedValue({ id: 'stream-1' });
+        prisma.stream.findFirst.mockResolvedValue({ id: 'stream-1', visibility: 'PUBLIC' });
         social.isBlockedByViewer.mockResolvedValue(true);
 
         await expect(service().findPublicProfile('u1', 'viewer-1')).rejects.toThrow(
@@ -187,7 +187,7 @@ describe('UsersService', () => {
 
       it("doesn't offer the live of someone this viewer blocked", async () => {
         prisma.user.findUnique.mockResolvedValue(profileRow);
-        prisma.stream.findFirst.mockResolvedValue({ id: 'stream-1' });
+        prisma.stream.findFirst.mockResolvedValue({ id: 'stream-1', visibility: 'PUBLIC' });
         social.getRelationshipSummary.mockResolvedValue({ ...relationship, isBlocked: true });
 
         const profile = await service().findPublicProfile('u1', 'viewer-1');
@@ -196,9 +196,28 @@ describe('UsersService', () => {
       });
     });
 
+    it("keeps a followers' or friends' live off the profile for who may not watch it", async () => {
+      prisma.user.findUnique.mockResolvedValue(profileRow);
+      prisma.stream.findFirst.mockResolvedValue({ id: 'stream-1', visibility: 'FRIENDS' });
+
+      await expect(service().findPublicProfile('u1', 'viewer-1')).resolves.toMatchObject({
+        liveStreamId: null,
+      });
+
+      social.getRelationshipSummary.mockResolvedValue({
+        ...relationship,
+        isFollowing: true,
+        isFollowedBy: true,
+        isFriend: true,
+      });
+      await expect(service().findPublicProfile('u1', 'viewer-1')).resolves.toMatchObject({
+        liveStreamId: 'stream-1',
+      });
+    });
+
     it('surfaces the current live id when the profile is live', async () => {
       prisma.user.findUnique.mockResolvedValue(profileRow);
-      prisma.stream.findFirst.mockResolvedValue({ id: 'stream-1' });
+      prisma.stream.findFirst.mockResolvedValue({ id: 'stream-1', visibility: 'PUBLIC' });
 
       const profile = await service().findPublicProfile('u1');
 

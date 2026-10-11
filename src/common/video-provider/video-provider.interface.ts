@@ -27,6 +27,15 @@ export type VideoCredentials =
     }
   | { provider: typeof VideoProviderKind.LIVEKIT; url: string; token: string; expiresAt: Date };
 
+/**
+ * What the media server reported about a live's room (LiveKit webhooks):
+ * someone who can broadcast - the host or a guest - joined or left it, or
+ * the room closed. Viewers' comings and goings aren't reported.
+ */
+export type MediaRoomEvent =
+  | { type: 'publisher_joined' | 'publisher_left'; channelName: string; userId: string }
+  | { type: 'room_finished'; channelName: string };
+
 /** What a client needs before joining anything (the pre-live camera preview). */
 export type VideoClientConfig =
   | { provider: typeof VideoProviderKind.AGORA; appId: string }
@@ -51,4 +60,7 @@ export interface VideoProvider {
   revokeToken(channelName: string, userId: string): Promise<void>;
   // Ends all media in the channel (stream ended or locked).
   closeChannel(channelName: string): Promise<void>;
+  // A vendor webhook about a channel, checked against its signature (only
+  // LiveKit sends them); null for what nobody acts on. Throws on a bad signature.
+  receiveWebhook?(body: string, authorization: string | undefined): Promise<MediaRoomEvent | null>;
 }

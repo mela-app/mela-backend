@@ -9,6 +9,8 @@ export interface PushJobData {
   title: string;
   body: string;
   data?: Record<string, string>;
+  /** Pushes sharing it replace each other on the phone (one per conversation). */
+  collapseKey?: string;
 }
 
 /** Queues a push job; PushProcessor decides (at send time) whether it's still worth sending. */

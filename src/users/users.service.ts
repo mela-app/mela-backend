@@ -12,6 +12,7 @@ import {
   visibilityShownTo,
 } from '../social/profile-visibility';
 import { SocialService } from '../social/social.service';
+import { canWatchLive } from '../streams/live-audience';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 
 const PUBLIC_PROFILE_SELECT = {
@@ -53,7 +54,7 @@ export class UsersService {
       this.social.getRelationshipSummary(id, requesterId),
       this.prisma.stream.findFirst({
         where: { hostId: id, status: StreamStatus.LIVE },
-        select: { id: true },
+        select: { id: true, visibility: true },
       }),
       requesterId && !isSelf
         ? this.social.isBlockedByViewer(id, requesterId)
@@ -81,8 +82,18 @@ export class UsersService {
       followerCount: canViewProfile ? followerCount : null,
       followingCount: canViewProfile ? followingCount : null,
       ...relation,
-      // Someone this viewer blocked can't be watched either.
-      liveStreamId: relation.isBlocked ? null : (liveStream?.id ?? null),
+      // Someone this viewer blocked can't be watched either, nor a followers'
+      // or friends' live by anyone else (docs/features/streams.md).
+      liveStreamId:
+        relation.isBlocked ||
+        !liveStream ||
+        !canWatchLive(liveStream.visibility, {
+          isHost: isSelf,
+          follows: relationship.isFollowing,
+          isFriend: relationship.isFriend,
+        })
+          ? null
+          : liveStream.id,
     };
   }
 

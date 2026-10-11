@@ -25,7 +25,7 @@ export class PushProcessor extends WorkerHost {
   }
 
   async process(job: Job<PushJobData>): Promise<void> {
-    const { recipientId, title, body, data } = job.data;
+    const { recipientId, title, body, data, collapseKey } = job.data;
     const sessions = await this.prisma.userSession.findMany({
       where: { userId: recipientId, pushToken: { not: null } },
       select: { pushToken: true },
@@ -35,7 +35,12 @@ export class PushProcessor extends WorkerHost {
       .filter((token): token is string => Boolean(token));
     if (tokens.length === 0) return;
 
-    const { invalidTokens } = await this.pushProvider.send(tokens, { title, body, data });
+    const { invalidTokens } = await this.pushProvider.send(tokens, {
+      title,
+      body,
+      data,
+      collapseKey,
+    });
     if (invalidTokens.length > 0) {
       await this.prisma.userSession.updateMany({
         where: { pushToken: { in: invalidTokens } },

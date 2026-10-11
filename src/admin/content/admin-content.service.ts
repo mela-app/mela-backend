@@ -70,9 +70,8 @@ export class AdminContentService {
       take: 100,
       select: { id: true, title: true, host: PERSON_SELECT },
     });
-    return {
-      items: lives.map((live) => ({ ...live, reach: this.realtime.connectedCount(live.id) })),
-    };
+    const reach = await Promise.all(lives.map((live) => this.realtime.connectedCount(live.id)));
+    return { items: lives.map((live, i) => ({ ...live, reach: reach[i] })) };
   }
 
   async sendAlert(admin: AdminPrincipal, dto: SendAlertDto) {
@@ -102,7 +101,7 @@ export class AdminContentService {
         message: dto.message,
         severity: dto.severity,
         createdById: admin.id,
-        recipientCount: this.realtime.connectedCount(streamId ?? undefined),
+        recipientCount: await this.realtime.connectedCount(streamId ?? undefined),
       },
     });
     this.events.emit(DomainEvents.AdminAlertSent, {

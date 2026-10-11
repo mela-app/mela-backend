@@ -1,13 +1,15 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
-import { GuestRequestInitiator, NotificationType, Prisma } from '@prisma/client';
+import { GuestRequestInitiator, NotificationType, Prisma, StreamVisibility } from '@prisma/client';
 import {
   AccountCredentialChangedPayload,
+  DirectMessageSentPayload,
   DomainEvents,
   GuestRequestCreatedPayload,
   ModeratorGrantedPayload,
   NotificationCreatedPayload,
   ReportCaseResolvedPayload,
+  ScheduledLiveStartingSoonPayload,
   StreamInviteSentPayload,
   StreamStartedPayload,
   UserFollowedPayload,
@@ -70,6 +72,7 @@ export interface SettingsView {
   pushStreamInvite: boolean;
   pushModeratorGranted: boolean;
   pushGuestInvite: boolean;
+  pushDirectMessages: boolean;
 }
 
 const DEFAULT_SETTINGS: SettingsView = {
@@ -78,7 +81,11 @@ const DEFAULT_SETTINGS: SettingsView = {
   pushStreamInvite: true,
   pushModeratorGranted: true,
   pushGuestInvite: true,
+  pushDirectMessages: true,
 };
+
+// A direct message's push shows this much of its text.
+const MESSAGE_PREVIEW_LENGTH = 140;
 
 // Which per-type toggle in NotificationSettings gates a push for that type -
 // none for security notices and report outcomes, which always push.
@@ -92,7 +99,22 @@ const SETTING_KEY_BY_TYPE: Record<NotificationType, keyof SettingsView | null> =
   PASSWORD_CHANGED: null,
   REPORT_ACTIONED: null,
   REPORT_DISMISSED: null,
+  SCHEDULED_LIVE_SOON: 'pushStreamStarted',
 };
+
+/** What a direct message's push says it is (its data.type) - not a NotificationType: no inbox row. */
+export const DIRECT_MESSAGE_PUSH_TYPE = 'DIRECT_MESSAGE';
+
+function settingsView(row: SettingsView): SettingsView {
+  return {
+    pushStreamStarted: row.pushStreamStarted,
+    pushNewFollower: row.pushNewFollower,
+    pushStreamInvite: row.pushStreamInvite,
+    pushModeratorGranted: row.pushModeratorGranted,
+    pushGuestInvite: row.pushGuestInvite,
+    pushDirectMessages: row.pushDirectMessages,
+  };
+}
 
 export interface Page<T> {
   items: T[];
@@ -127,13 +149,40 @@ export class NotificationsService {
       .set(cooldownKey, '1', 'EX', GOLIVE_COOLDOWN_SECONDS, 'NX');
     if (acquired !== 'OK') return;
 
-    const followers = await this.prisma.follow.findMany({
-      where: { followeeId: payload.hostId, notifyOnLive: true, follower: { status: 'ACTIVE' } },
-      select: { followerId: true },
-    });
-    if (followers.length === 0) return;
+    const [followers, reminded] = await Promise.all([
+      this.prisma.follow.findMany({
+        where: { followeeId: payload.hostId, notifyOnLive: true, follower: { status: 'ACTIVE' } },
+        select: { followerId: true },
+      }),
+      // Started from a scheduled live: whoever asked to be reminded, followers or not.
+      payload.scheduledLiveId
+        ? this.prisma.scheduledLiveReminder.findMany({
+            where: { scheduledLiveId: payload.scheduledLiveId, user: { status: 'ACTIVE' } },
+            select: { userId: true },
+          })
+        : [],
+    ]);
+    const candidates = [
+      ...new Set([...followers.map((row) => row.followerId), ...reminded.map((row) => row.userId)]),
+    ].filter((id) => id !== payload.hostId);
+    if (candidates.length === 0) return;
     const blocked = new Set(await this.social.blockedEitherWayUserIds(payload.hostId));
-    const recipientIds = followers.map((row) => row.followerId).filter((id) => !blocked.has(id));
+    let recipientIds = candidates.filter((id) => !blocked.has(id));
+    // Someone reminded who doesn't follow can only watch a public live.
+    if (payload.visibility && payload.visibility !== StreamVisibility.PUBLIC) {
+      const followerIds = new Set(followers.map((row) => row.followerId));
+      recipientIds = recipientIds.filter((id) => followerIds.has(id));
+    }
+    // A friends' live is only for followers the host follows back; a
+    // followers' live is for followers anyway (docs/features/streams.md).
+    if (payload.visibility === StreamVisibility.FRIENDS && recipientIds.length > 0) {
+      const followedBack = await this.prisma.follow.findMany({
+        where: { followerId: payload.hostId, followeeId: { in: recipientIds } },
+        select: { followeeId: true },
+      });
+      const friends = new Set(followedBack.map((row) => row.followeeId));
+      recipientIds = recipientIds.filter((id) => friends.has(id));
+    }
     if (recipientIds.length === 0) return;
 
     const host = await this.prisma.user.findUnique({
@@ -150,6 +199,30 @@ export class NotificationsService {
         streamId: payload.streamId,
         title: 'Live now',
         body: `${hostName} is live: ${payload.title}`,
+        actor: host,
+        streamTitle: payload.title,
+      });
+    }
+  }
+
+  // About ten minutes ahead (ScheduledLivesService.remindDue).
+  @OnEvent(DomainEvents.ScheduledLiveStartingSoon)
+  async onScheduledLiveStartingSoon(payload: ScheduledLiveStartingSoonPayload): Promise<void> {
+    const blocked = new Set(await this.social.blockedEitherWayUserIds(payload.hostId));
+    const recipientIds = payload.userIds.filter((id) => id !== payload.hostId && !blocked.has(id));
+    if (recipientIds.length === 0) return;
+    const host = await this.prisma.user.findUnique({
+      where: { id: payload.hostId },
+      select: PROFILE_SUMMARY_SELECT,
+    });
+    const hostName = host?.displayName ?? 'A host you follow';
+    for (let i = 0; i < recipientIds.length; i += FOLLOWER_FANOUT_CHUNK_SIZE) {
+      await this.fanOut(recipientIds.slice(i, i + FOLLOWER_FANOUT_CHUNK_SIZE), {
+        type: NotificationType.SCHEDULED_LIVE_SOON,
+        actorId: payload.hostId,
+        streamId: null,
+        title: 'Starting soon',
+        body: `${hostName} goes live soon: ${payload.title}`,
         actor: host,
         streamTitle: payload.title,
       });
@@ -346,15 +419,7 @@ export class NotificationsService {
 
   async getSettings(userId: string): Promise<SettingsView> {
     const row = await this.prisma.notificationSettings.findUnique({ where: { userId } });
-    return row
-      ? {
-          pushStreamStarted: row.pushStreamStarted,
-          pushNewFollower: row.pushNewFollower,
-          pushStreamInvite: row.pushStreamInvite,
-          pushModeratorGranted: row.pushModeratorGranted,
-          pushGuestInvite: row.pushGuestInvite,
-        }
-      : DEFAULT_SETTINGS;
+    return row ? settingsView(row) : DEFAULT_SETTINGS;
   }
 
   async updateSettings(userId: string, dto: UpdateNotificationSettingsDto): Promise<SettingsView> {
@@ -363,13 +428,39 @@ export class NotificationsService {
       create: { userId, ...DEFAULT_SETTINGS, ...dto },
       update: { ...dto },
     });
-    return {
-      pushStreamStarted: row.pushStreamStarted,
-      pushNewFollower: row.pushNewFollower,
-      pushStreamInvite: row.pushStreamInvite,
-      pushModeratorGranted: row.pushModeratorGranted,
-      pushGuestInvite: row.pushGuestInvite,
-    };
+    return settingsView(row);
+  }
+
+  /**
+   * A direct message from a friend while the app isn't open (docs/features/
+   * messages.md): a push only - messages have their own inbox and badge, so
+   * no notification row. The sender's name over the text; one notification
+   * per conversation on the phone, the latest replacing the earlier ones.
+   * A tap opens the conversation.
+   */
+  @OnEvent(DomainEvents.DirectMessageSent)
+  async onDirectMessageSent(payload: DirectMessageSentPayload): Promise<void> {
+    const { message, sender } = payload;
+    const settings = await this.prisma.notificationSettings.findUnique({
+      where: { userId: message.recipientId },
+      select: { pushDirectMessages: true },
+    });
+    if (settings && !settings.pushDirectMessages) return;
+    const text = message.text.trim();
+    await this.pushQueue
+      .enqueue({
+        recipientId: message.recipientId,
+        title: sender.displayName,
+        body:
+          text.length > MESSAGE_PREVIEW_LENGTH
+            ? `${text.slice(0, MESSAGE_PREVIEW_LENGTH - 1).trimEnd()}…`
+            : text,
+        data: { type: DIRECT_MESSAGE_PUSH_TYPE, actorId: sender.id },
+        collapseKey: `dm-${sender.id}`,
+      })
+      .catch((error) =>
+        this.logger.warn(`Could not queue a message push for ${message.recipientId}: ${error}`),
+      );
   }
 
   /** Writes one row per recipient, nudges each one's `user:{id}` room, and queues a push per this type's setting. */
@@ -412,6 +503,7 @@ export class NotificationsService {
             pushStreamInvite: true,
             pushModeratorGranted: true,
             pushGuestInvite: true,
+            pushDirectMessages: true,
           },
         })
       : [];

@@ -1,5 +1,5 @@
 import { ConfigService } from '@nestjs/config';
-import { StreamStatus } from '@prisma/client';
+import { StreamStatus, StreamVisibility } from '@prisma/client';
 import type { Response } from 'express';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { PlayerConfig, WebFallbackController } from './web-fallback.controller';
@@ -48,6 +48,7 @@ describe('WebFallbackController', () => {
     findUnique.mockResolvedValue({
       title: '<script>alert(1)</script> Big night',
       status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
       host: { displayName: 'Ana & "Co"' },
     });
 
@@ -66,6 +67,7 @@ describe('WebFallbackController', () => {
     findUnique.mockResolvedValue({
       title: 'Big night',
       status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
       host: { displayName: 'Ana' },
     });
 
@@ -89,6 +91,7 @@ describe('WebFallbackController', () => {
     findUnique.mockResolvedValue({
       title: 'Big night',
       status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
       host: { displayName: 'Ana' },
     });
 
@@ -106,6 +109,7 @@ describe('WebFallbackController', () => {
     findUnique.mockResolvedValue({
       title: 'Big night',
       status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
       host: { displayName: 'Ana' },
     });
     const settings: Record<string, string> = {
@@ -126,6 +130,7 @@ describe('WebFallbackController', () => {
     findUnique.mockResolvedValue({
       title: 'Big night',
       status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
       host: { displayName: 'Ana' },
     });
     await controller.show(LIVE, res);
@@ -162,6 +167,7 @@ describe('WebFallbackController', () => {
     findUnique.mockResolvedValue({
       title: 'Big night',
       status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
       host: { displayName: 'Ana' },
     });
     config.get.mockImplementation((key: string) =>
@@ -176,6 +182,49 @@ describe('WebFallbackController', () => {
     expect(playerConfig().androidInstallUrl).toBe(
       'https://x.example/</script><script>alert(1)</script>',
     );
+  });
+
+  it("previews a running live with its latest frame, escaped; an ended one's isn't shown", async () => {
+    findUnique.mockResolvedValue({
+      title: 'Big night',
+      status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
+      thumbnailUrl: 'https://media.example.com/thumbnails/a.jpg?x=1&y="2"',
+      host: { displayName: 'Ana' },
+    });
+    await controller.show(LIVE, res);
+    expect(page()).toContain(
+      '<meta property="og:image" content="https://media.example.com/thumbnails/a.jpg?x=1&amp;y=&quot;2&quot;" />',
+    );
+    expect(page()).toContain('<meta name="twitter:card" content="summary_large_image" />');
+
+    send.mockClear();
+    findUnique.mockResolvedValue({
+      title: 'Big night',
+      status: StreamStatus.ENDED,
+      thumbnailUrl: 'https://media.example.com/thumbnails/a.jpg',
+      host: { displayName: 'Ana' },
+    });
+    await controller.show(LIVE, res);
+    expect(page()).not.toContain('og:image');
+  });
+
+  it("keeps a followers' or friends' live private in a browser: no title, no player, the app instead", async () => {
+    findUnique.mockResolvedValue({
+      title: 'Secret plans',
+      status: StreamStatus.LIVE,
+      visibility: StreamVisibility.FRIENDS,
+      thumbnailUrl: 'https://media.example.com/thumbnails/a.jpg',
+      host: { displayName: 'Ana' },
+    });
+
+    await controller.show(LIVE, res);
+
+    expect(page()).toContain('<title>A private live - Mela</title>');
+    expect(page()).toContain('Ana is live for their friends - open it in the app to watch.');
+    expect(page()).not.toContain('Secret plans');
+    expect(page()).not.toContain('mela-player-config');
+    expect(page()).not.toContain('og:image');
   });
 
   it('shows just the preview for a live that is over - nothing to play', async () => {
@@ -206,6 +255,7 @@ describe('WebFallbackController', () => {
     findUnique.mockResolvedValue({
       title: 'Big night',
       status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
       host: { displayName: 'Ana' },
     });
     config.getOrThrow.mockImplementation(requiredSettings({ APP_URL_SCHEME: 'gamblinglive' }));
