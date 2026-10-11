@@ -7,7 +7,12 @@ import { PUSH_QUEUE, PushJobData } from './push-queue.service';
 
 /**
  * Runs each queued push job: sends to every device of the recipient that
- * has a token and prunes tokens the vendor reports as invalid. Sent even
+ * has a token and prunes tokens the vendor reports as invalid. A phone
+ * signed in to several accounts gets each one's pushes (docs/features/auth.md):
+ * every push says whose it is (`data.recipientId`, so a tap switches to that
+ * account), and on such a phone its title starts with the account's @username.
+ * Collapse keys are per account, so two accounts' conversations never replace
+ * each other. Sent even
  * when the recipient has a live socket - that socket survives a while with
  * the app in the background, where only the push is seen; in the
  * foreground the app shows the realtime banner and FCM displays nothing.
@@ -30,17 +35,46 @@ export class PushProcessor extends WorkerHost {
       where: { userId: recipientId, pushToken: { not: null } },
       select: { pushToken: true },
     });
-    const tokens = sessions
-      .map((session) => session.pushToken)
-      .filter((token): token is string => Boolean(token));
+    const tokens = [
+      ...new Set(
+        sessions
+          .map((session) => session.pushToken)
+          .filter((token): token is string => Boolean(token)),
+      ),
+    ];
     if (tokens.length === 0) return;
 
-    const { invalidTokens } = await this.pushProvider.send(tokens, {
+    // Phones where someone else is signed in too.
+    const sharedRows = await this.prisma.userSession.findMany({
+      where: { pushToken: { in: tokens }, userId: { not: recipientId } },
+      select: { pushToken: true },
+      distinct: ['pushToken'],
+    });
+    const shared = new Set(sharedRows.map((row) => row.pushToken));
+    const own = tokens.filter((token) => !shared.has(token));
+    const message = {
       title,
       body,
-      data,
-      collapseKey,
-    });
+      data: { ...data, recipientId },
+      collapseKey: collapseKey ? `${recipientId}:${collapseKey}` : undefined,
+    };
+
+    const invalidTokens: string[] = [];
+    if (own.length > 0) {
+      invalidTokens.push(...(await this.pushProvider.send(own, message)).invalidTokens);
+    }
+    if (shared.size > 0) {
+      const recipient = await this.prisma.user.findUnique({
+        where: { id: recipientId },
+        select: { username: true },
+      });
+      const labelled = recipient
+        ? { ...message, title: `@${recipient.username} · ${title}` }
+        : message;
+      invalidTokens.push(
+        ...(await this.pushProvider.send([...shared] as string[], labelled)).invalidTokens,
+      );
+    }
     if (invalidTokens.length > 0) {
       await this.prisma.userSession.updateMany({
         where: { pushToken: { in: invalidTokens } },

@@ -30,7 +30,7 @@ export class NotificationsController {
 
   @Put('push-token')
   setPushToken(@CurrentUser() user: AuthenticatedUser, @Body() dto: PushTokenDto) {
-    return this.notifications.setPushToken(user.sessionId, dto.token);
+    return this.notifications.setPushToken(user.sessionId, dto.token, dto.installationId, user.id);
   }
 
   @Delete('push-token')

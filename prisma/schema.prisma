@@ -187,7 +187,11 @@ model UserSession {
   // window in case that refresh's response never reached the device.
   previousRefreshTokenHash String?
   // Phase 5: this device's FCM token (plan §6.11) - null until `PUT /me/push-token`.
+  // Several accounts signed in on one phone share it (docs/features/auth.md).
   pushToken                String?
+  // The app install this session lives in - random per install, so the
+  // accounts on one phone can share its push token, and nobody else can.
+  installationId           String?
   rotatedAt                DateTime        @default(now())
   lastSeenAt               DateTime        @default(now())
   createdAt                DateTime        @default(now())
@@ -195,6 +199,7 @@ model UserSession {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([pushToken])
   @@map("user_sessions")
 }
 
