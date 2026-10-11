@@ -513,16 +513,40 @@ export class NotificationsService {
     throw new BadRequestException('Provide either "all" or a non-empty "ids"');
   }
 
-  async setPushToken(sessionId: string | undefined, token: string): Promise<{ ok: true }> {
+  /**
+   * This session's device token. Every account signed in on the same app
+   * install ([installationId]) shares it - up to five on one phone, each
+   * getting its own pushes (docs/features/auth.md); any other session
+   * holding it (an install that's gone, an older app, this same account's
+   * earlier sign-in on the phone) loses it - so nobody gets a push twice,
+   * and an account signed out of a phone stops getting pushes there.
+   */
+  async setPushToken(
+    sessionId: string | undefined,
+    token: string,
+    installationId?: string,
+    userId?: string,
+  ): Promise<{ ok: true }> {
     if (!sessionId) throw new BadRequestException('Sign in again on this device first');
-    // A device reused by another account after a sign-out: only the current session gets its pushes.
     await this.prisma.userSession.updateMany({
-      where: { pushToken: token, id: { not: sessionId } },
+      where: {
+        pushToken: token,
+        id: { not: sessionId },
+        ...(installationId
+          ? {
+              OR: [
+                { installationId: null },
+                { installationId: { not: installationId } },
+                ...(userId ? [{ userId }] : []),
+              ],
+            }
+          : {}),
+      },
       data: { pushToken: null },
     });
     const result = await this.prisma.userSession.updateMany({
       where: { id: sessionId },
-      data: { pushToken: token },
+      data: { pushToken: token, ...(installationId ? { installationId } : {}) },
     });
     if (result.count === 0) throw new NotFoundException('Session not found');
     return { ok: true };

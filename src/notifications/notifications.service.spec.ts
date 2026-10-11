@@ -603,6 +603,30 @@ describe('NotificationsService', () => {
       });
     });
 
+    it('lets every account on the same app install share the token, and nobody else', async () => {
+      prisma.userSession.updateMany.mockResolvedValue({ count: 1 });
+
+      await service().setPushToken('sess-2', 'tok', 'install-0123456789ab', 'u1');
+
+      expect(prisma.userSession.updateMany).toHaveBeenNthCalledWith(1, {
+        where: {
+          pushToken: 'tok',
+          id: { not: 'sess-2' },
+          // Signed in again on the same phone: the earlier session of the same account lets go too.
+          OR: [
+            { installationId: null },
+            { installationId: { not: 'install-0123456789ab' } },
+            { userId: 'u1' },
+          ],
+        },
+        data: { pushToken: null },
+      });
+      expect(prisma.userSession.updateMany).toHaveBeenNthCalledWith(2, {
+        where: { id: 'sess-2' },
+        data: { pushToken: 'tok', installationId: 'install-0123456789ab' },
+      });
+    });
+
     it('clearing with no sessionId is a harmless no-op', async () => {
       await expect(service().clearPushToken(undefined)).resolves.toEqual({ ok: true });
       expect(prisma.userSession.updateMany).not.toHaveBeenCalled();
