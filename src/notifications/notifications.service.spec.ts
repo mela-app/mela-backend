@@ -25,7 +25,7 @@ describe('NotificationsService', () => {
     notificationSettings: { findMany: jest.fn(), findUnique: jest.fn(), upsert: jest.fn() },
     userSession: { updateMany: jest.fn() },
   };
-  const redisClient = { set: jest.fn() };
+  const redisClient = { set: jest.fn(), incr: jest.fn(), expire: jest.fn() };
   const redis = { getClient: () => redisClient } as unknown as RedisService;
   const events = { emit: jest.fn() };
   const social = { blockedEitherWayUserIds: jest.fn().mockResolvedValue([]) };
@@ -167,6 +167,127 @@ describe('NotificationsService', () => {
       await service().onStreamStarted(payload);
 
       expect(prisma.notification.createManyAndReturn).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('onViewerJoinedLive', () => {
+    const KEBEDE = 'kebede';
+    const payload = {
+      streamId: STREAM,
+      hostId: HOST,
+      viewerId: KEBEDE,
+      visibility: 'PUBLIC' as const,
+    };
+    const kebede = {
+      id: KEBEDE,
+      username: 'kebede',
+      displayName: 'Kebede',
+      avatarUrl: null,
+      shareLiveJoins: true,
+      status: 'ACTIVE',
+    };
+
+    beforeEach(() => {
+      redisClient.set.mockResolvedValue('OK');
+      redisClient.incr.mockResolvedValue(1);
+      prisma.user.findUnique.mockImplementation(({ where }: { where: { id: string } }) =>
+        Promise.resolve(where.id === KEBEDE ? kebede : { id: HOST, displayName: 'Abebe' }),
+      );
+      prisma.stream.findUnique.mockResolvedValue({ title: 'Coffee talk' });
+      prisma.follow.findMany.mockResolvedValue([
+        { followerId: 'f1' },
+        { followerId: 'f2' },
+        { followerId: HOST },
+      ]);
+    });
+
+    const recipients = () =>
+      prisma.notification.createManyAndReturn.mock.calls.flatMap(
+        ([{ data }]: [{ data: Array<{ recipientId: string }> }]) =>
+          data.map((row) => row.recipientId),
+      );
+
+    it("tells the joiner's followers, not the host, with a push", async () => {
+      await service().onViewerJoinedLive(payload);
+
+      expect(recipients()).toEqual(['f1', 'f2']);
+      expect(prisma.notification.createManyAndReturn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.arrayContaining([
+            expect.objectContaining({
+              type: NotificationType.FOLLOWING_JOINED_LIVE,
+              actorId: KEBEDE,
+              streamId: STREAM,
+            }),
+          ]),
+        }),
+      );
+      expect(pushQueue.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'Joined a live', body: "Kebede joined Abebe's live" }),
+      );
+    });
+
+    it('only once per live per joiner', async () => {
+      redisClient.set.mockResolvedValue(null);
+
+      await service().onViewerJoinedLive(payload);
+
+      expect(redisClient.set).toHaveBeenCalledWith(
+        `notif:joined:${STREAM}:${KEBEDE}`,
+        '1',
+        'EX',
+        86400,
+        'NX',
+      );
+      expect(prisma.notification.createManyAndReturn).not.toHaveBeenCalled();
+    });
+
+    it('at most three an hour from the same joiner', async () => {
+      redisClient.incr.mockResolvedValue(4);
+
+      await service().onViewerJoinedLive(payload);
+
+      expect(prisma.notification.createManyAndReturn).not.toHaveBeenCalled();
+    });
+
+    it('nothing when the joiner stopped sharing their joins', async () => {
+      prisma.user.findUnique.mockResolvedValue({ ...kebede, shareLiveJoins: false });
+
+      await service().onViewerJoinedLive(payload);
+
+      expect(redisClient.set).not.toHaveBeenCalled();
+      expect(prisma.notification.createManyAndReturn).not.toHaveBeenCalled();
+    });
+
+    it('leaves out anyone blocked either way with the joiner or the host, and who turned it off', async () => {
+      social.blockedEitherWayUserIds.mockImplementation(async (id: string) =>
+        id === HOST ? ['f2'] : [],
+      );
+      prisma.follow.findMany.mockResolvedValue([
+        { followerId: 'f1' },
+        { followerId: 'f2' },
+        { followerId: 'f3' },
+      ]);
+      prisma.notificationSettings.findMany.mockImplementation(
+        ({ where }: { where: { pushFollowingJoinedLive?: boolean } }) =>
+          Promise.resolve(where.pushFollowingJoinedLive === false ? [{ userId: 'f3' }] : []),
+      );
+
+      await service().onViewerJoinedLive(payload);
+
+      expect(recipients()).toEqual(['f1']);
+    });
+
+    it("a friends' live: only followers who are the host's friends hear", async () => {
+      prisma.follow.findMany
+        .mockResolvedValueOnce([{ followerId: 'f1' }, { followerId: 'f2' }])
+        // Both follow the host; only f1 is followed back.
+        .mockResolvedValueOnce([{ followerId: 'f1' }, { followerId: 'f2' }])
+        .mockResolvedValueOnce([{ followeeId: 'f1' }]);
+
+      await service().onViewerJoinedLive({ ...payload, visibility: 'FRIENDS' });
+
+      expect(recipients()).toEqual(['f1']);
     });
   });
 
@@ -499,6 +620,7 @@ describe('NotificationsService', () => {
         pushModeratorGranted: true,
         pushGuestInvite: true,
         pushDirectMessages: true,
+        pushFollowingJoinedLive: true,
       });
     });
 
@@ -510,6 +632,7 @@ describe('NotificationsService', () => {
         pushModeratorGranted: true,
         pushGuestInvite: true,
         pushDirectMessages: true,
+        pushFollowingJoinedLive: true,
       });
 
       const result = await service().updateSettings('u1', { pushStreamStarted: false });

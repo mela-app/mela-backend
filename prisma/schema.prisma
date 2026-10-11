@@ -88,6 +88,12 @@ model User {
   adminPermissions       AdminPermission[] @default([])
   profileVisibility      ProfileVisibility @default(EVERYONE)
   profileSharing         ProfileSharing    @default(EVERYONE)
+  // Followers hear when this person joins someone's live (FOLLOWING_JOINED_LIVE).
+  shareLiveJoins         Boolean           @default(true)
+  // When the owner last changed them: a username once in 30 days, a display
+  // name once in 7 (docs/features/users.md). Staff fixes don't count.
+  usernameChangedAt      DateTime?
+  displayNameChangedAt   DateTime?
 
   streams               Stream[]                @relation("StreamHost")
   sessions              UserSession[]
@@ -460,6 +466,8 @@ enum NotificationType {
   REPORT_DISMISSED
   // A live the recipient asked to be reminded of starts soon (docs/features/streams.md).
   SCHEDULED_LIVE_SOON
+  // Someone the recipient follows joined a live (docs/features/notifications.md).
+  FOLLOWING_JOINED_LIVE
 }
 
 model Notification {
@@ -487,15 +495,18 @@ model Notification {
 // is always written); this only gates the push-queue side. One row per user,
 // created lazily on first read/write with every type defaulted to on.
 model NotificationSettings {
-  userId               String  @id
-  pushStreamStarted    Boolean @default(true)
-  pushNewFollower      Boolean @default(true)
-  pushStreamInvite     Boolean @default(true)
-  pushModeratorGranted Boolean @default(true)
-  pushGuestInvite      Boolean @default(true)
+  userId                  String  @id
+  pushStreamStarted       Boolean @default(true)
+  pushNewFollower         Boolean @default(true)
+  pushStreamInvite        Boolean @default(true)
+  pushModeratorGranted    Boolean @default(true)
+  pushGuestInvite         Boolean @default(true)
   // Direct messages from friends (docs/features/messages.md) - pushed only,
   // they have their own inbox instead of a notification row.
-  pushDirectMessages   Boolean @default(true)
+  pushDirectMessages      Boolean @default(true)
+  // Someone you follow joined a live. Unlike the others, off means no alert
+  // at all - in-app included - since it's chatter rather than something for you.
+  pushFollowingJoinedLive Boolean @default(true)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

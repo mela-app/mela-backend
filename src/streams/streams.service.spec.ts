@@ -1975,6 +1975,7 @@ describe('StreamsService', () => {
     });
 
     it('lets the host grant a moderator for this stream only while live', async () => {
+      presence.viewerIds.mockResolvedValueOnce(['u1']);
       const service = makeService();
 
       await service.grantModerator('s1', 'host-1', 'u1', [ModeratorCapability.PIN_MESSAGES]);
@@ -1982,6 +1983,60 @@ describe('StreamsService', () => {
       expect(moderators.grant).toHaveBeenCalledWith('host-1', 's1', 'u1', [
         ModeratorCapability.PIN_MESSAGES,
       ]);
+    });
+
+    it('only appoints someone in the live - watching it, or on its stage', async () => {
+      const service = makeService();
+
+      presence.viewerIds.mockResolvedValueOnce(['someone-else']);
+      await expect(
+        service.grantModerator('s1', 'host-1', 'u1', [ModeratorCapability.PIN_MESSAGES]),
+      ).rejects.toMatchObject({ response: { code: 'NOT_WATCHING' } });
+      expect(moderators.grant).not.toHaveBeenCalled();
+
+      presence.viewerIds.mockResolvedValueOnce([]);
+      guests.isActiveGuest.mockResolvedValueOnce(true);
+      await service.grantModerator('s1', 'host-1', 'u1', [ModeratorCapability.PIN_MESSAGES]);
+      expect(moderators.grant).toHaveBeenCalledTimes(1);
+    });
+
+    it('searches only among who is watching', async () => {
+      prisma.stream.findFirst.mockResolvedValue({ id: 's1', hostId: 'host-1', layout: 'FULL' });
+      presence.viewerIds.mockResolvedValueOnce(['v2', 'v1']);
+      prisma.user.findMany.mockResolvedValueOnce([{ id: 'v1', username: 'abebe' }]);
+      const service = makeService();
+
+      const result = await service.listViewers('s1', 'host-1', undefined, 30, 'abe');
+
+      expect(prisma.user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: { in: ['v1', 'v2'] },
+            OR: [
+              { username: { contains: 'abe', mode: 'insensitive' } },
+              { displayName: { contains: 'abe', mode: 'insensitive' } },
+            ],
+          },
+        }),
+      );
+      expect(result).toEqual({
+        items: [{ id: 'v1', username: 'abebe' }],
+        hasMore: false,
+        nextCursor: null,
+      });
+    });
+
+    it('nobody watching, nobody to find', async () => {
+      prisma.stream.findFirst.mockResolvedValue({ id: 's1', hostId: 'host-1', layout: 'FULL' });
+      presence.viewerIds.mockResolvedValueOnce([]);
+      const service = makeService();
+
+      await expect(service.listViewers('s1', 'host-1', undefined, 30, 'abe')).resolves.toEqual({
+        items: [],
+        hasMore: false,
+        nextCursor: null,
+      });
+      expect(prisma.user.findMany).not.toHaveBeenCalled();
     });
 
     it('refuses to grant a moderator for a stream that is not live', async () => {

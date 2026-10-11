@@ -25,4 +25,9 @@ export class UpdateNotificationSettingsDto {
   @IsOptional()
   @IsBoolean()
   pushDirectMessages?: boolean;
+
+  // Off means no alert at all, in-app included.
+  @IsOptional()
+  @IsBoolean()
+  pushFollowingJoinedLive?: boolean;
 }

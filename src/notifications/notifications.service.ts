@@ -13,11 +13,13 @@ import {
   StreamInviteSentPayload,
   StreamStartedPayload,
   UserFollowedPayload,
+  ViewerJoinedLivePayload,
 } from '../common/events/domain-events';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RedisService } from '../common/redis/redis.service';
 import { notBlockedEitherWayWith } from '../social/block-filters';
 import { SocialService } from '../social/social.service';
+import { canWatchLive } from '../streams/live-audience';
 import { MarkNotificationsReadDto } from './dto/mark-notifications-read.dto';
 import { UpdateNotificationSettingsDto } from './dto/notification-settings.dto';
 import { PushQueueService } from './push-queue.service';
@@ -30,6 +32,11 @@ const GOLIVE_COOLDOWN_SECONDS = 5 * 60;
 // Chunked so one go-live for a very-followed host never builds one giant
 // createMany call.
 const FOLLOWER_FANOUT_CHUNK_SIZE = 1000;
+// "Kebede joined Abebe's live" goes out once per live per joiner, and at
+// most this many an hour from the same joiner, so hopping between lives
+// doesn't flood their followers.
+const JOIN_NOTICE_HOURLY_CAP = 3;
+const JOIN_NOTICE_ONCE_SECONDS = 24 * 60 * 60;
 
 const NOTIFICATION_SELECT = {
   id: true,
@@ -73,6 +80,7 @@ export interface SettingsView {
   pushModeratorGranted: boolean;
   pushGuestInvite: boolean;
   pushDirectMessages: boolean;
+  pushFollowingJoinedLive: boolean;
 }
 
 const DEFAULT_SETTINGS: SettingsView = {
@@ -82,6 +90,7 @@ const DEFAULT_SETTINGS: SettingsView = {
   pushModeratorGranted: true,
   pushGuestInvite: true,
   pushDirectMessages: true,
+  pushFollowingJoinedLive: true,
 };
 
 // A direct message's push shows this much of its text.
@@ -100,6 +109,7 @@ const SETTING_KEY_BY_TYPE: Record<NotificationType, keyof SettingsView | null> =
   REPORT_ACTIONED: null,
   REPORT_DISMISSED: null,
   SCHEDULED_LIVE_SOON: 'pushStreamStarted',
+  FOLLOWING_JOINED_LIVE: 'pushFollowingJoinedLive',
 };
 
 /** What a direct message's push says it is (its data.type) - not a NotificationType: no inbox row. */
@@ -113,6 +123,7 @@ function settingsView(row: SettingsView): SettingsView {
     pushModeratorGranted: row.pushModeratorGranted,
     pushGuestInvite: row.pushGuestInvite,
     pushDirectMessages: row.pushDirectMessages,
+    pushFollowingJoinedLive: row.pushFollowingJoinedLive,
   };
 }
 
@@ -229,6 +240,114 @@ export class NotificationsService {
     }
   }
 
+  /**
+   * "Kebede joined Abebe's live" to Kebede's followers (client request,
+   * 2026-10) - once per live per joiner and {@link JOIN_NOTICE_HOURLY_CAP}
+   * an hour, never if Kebede stopped sharing joins. Only followers who may
+   * watch that live, nobody blocked either way with Kebede or the host, not
+   * the host, and nobody who switched these alerts off (in-app included).
+   */
+  @OnEvent(DomainEvents.ViewerJoinedLive)
+  async onViewerJoinedLive(payload: ViewerJoinedLivePayload): Promise<void> {
+    const viewer = await this.prisma.user.findUnique({
+      where: { id: payload.viewerId },
+      select: { ...PROFILE_SUMMARY_SELECT, shareLiveJoins: true, status: true },
+    });
+    if (!viewer || !viewer.shareLiveJoins || viewer.status !== 'ACTIVE') return;
+    if (!(await this.claimJoinNotice(payload.streamId, payload.viewerId))) return;
+
+    const followers = await this.prisma.follow.findMany({
+      where: { followeeId: payload.viewerId, status: 'ACTIVE', follower: { status: 'ACTIVE' } },
+      select: { followerId: true },
+    });
+    const [blockedByViewer, blockedByHost] = await Promise.all([
+      this.social.blockedEitherWayUserIds(payload.viewerId),
+      this.social.blockedEitherWayUserIds(payload.hostId),
+    ]);
+    const blocked = new Set([...blockedByViewer, ...blockedByHost]);
+    const candidates = followers
+      .map((row) => row.followerId)
+      .filter((id) => id !== payload.hostId && !blocked.has(id));
+    if (candidates.length === 0) return;
+
+    const [host, stream] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: payload.hostId },
+        select: PROFILE_SUMMARY_SELECT,
+      }),
+      this.prisma.stream.findUnique({ where: { id: payload.streamId }, select: { title: true } }),
+    ]);
+    const { displayName, id, username, avatarUrl } = viewer;
+    const actor = { id, username, displayName, avatarUrl };
+    for (let i = 0; i < candidates.length; i += FOLLOWER_FANOUT_CHUNK_SIZE) {
+      const chunk = candidates.slice(i, i + FOLLOWER_FANOUT_CHUNK_SIZE);
+      const [watchers, optedOut] = await Promise.all([
+        this.whoMayWatch(payload, chunk),
+        this.prisma.notificationSettings.findMany({
+          where: { userId: { in: chunk }, pushFollowingJoinedLive: false },
+          select: { userId: true },
+        }),
+      ]);
+      const off = new Set(optedOut.map((row) => row.userId));
+      await this.fanOut(
+        watchers.filter((recipientId) => !off.has(recipientId)),
+        {
+          type: NotificationType.FOLLOWING_JOINED_LIVE,
+          actorId: payload.viewerId,
+          streamId: payload.streamId,
+          title: 'Joined a live',
+          body: `${displayName} joined ${host?.displayName ?? 'a'}${host ? "'s" : ''} live`,
+          actor,
+          streamTitle: stream?.title ?? null,
+        },
+      );
+    }
+  }
+
+  // Once per live per joiner, then the hourly cap.
+  private async claimJoinNotice(streamId: string, viewerId: string): Promise<boolean> {
+    const client = this.redis.getClient();
+    const first = await client.set(
+      `notif:joined:${streamId}:${viewerId}`,
+      '1',
+      'EX',
+      JOIN_NOTICE_ONCE_SECONDS,
+      'NX',
+    );
+    if (first !== 'OK') return false;
+    const hourKey = `notif:joined:hour:${viewerId}`;
+    const count = await client.incr(hourKey);
+    if (count === 1) await client.expire(hourKey, 60 * 60);
+    return count <= JOIN_NOTICE_HOURLY_CAP;
+  }
+
+  // Of these, who may watch the live (docs/features/streams.md).
+  private async whoMayWatch(
+    payload: ViewerJoinedLivePayload,
+    userIds: string[],
+  ): Promise<string[]> {
+    if (payload.visibility === StreamVisibility.PUBLIC) return userIds;
+    const [followHost, followedByHost] = await Promise.all([
+      this.prisma.follow.findMany({
+        where: { followeeId: payload.hostId, followerId: { in: userIds }, status: 'ACTIVE' },
+        select: { followerId: true },
+      }),
+      this.prisma.follow.findMany({
+        where: { followerId: payload.hostId, followeeId: { in: userIds }, status: 'ACTIVE' },
+        select: { followeeId: true },
+      }),
+    ]);
+    const follows = new Set(followHost.map((row) => row.followerId));
+    const followedBack = new Set(followedByHost.map((row) => row.followeeId));
+    return userIds.filter((id) =>
+      canWatchLive(payload.visibility, {
+        isHost: false,
+        follows: follows.has(id),
+        isFriend: follows.has(id) && followedBack.has(id),
+      }),
+    );
+  }
+
   @OnEvent(DomainEvents.UserFollowed)
   async onUserFollowed(payload: UserFollowedPayload): Promise<void> {
     const follower = await this.prisma.user.findUnique({
@@ -263,7 +382,8 @@ export class NotificationsService {
     });
   }
 
-  // Emitted by ShareService, already filtered to friends and past the cap/rate limit (plan §6.12).
+  // Emitted by ShareService, already filtered (blocks, who may watch, once per
+  // person per live) and past the cap/rate limit (plan §6.12).
   @OnEvent(DomainEvents.StreamInviteSent)
   async onStreamInviteSent(payload: StreamInviteSentPayload): Promise<void> {
     const [sender, stream] = await Promise.all([
@@ -504,6 +624,7 @@ export class NotificationsService {
             pushModeratorGranted: true,
             pushGuestInvite: true,
             pushDirectMessages: true,
+            pushFollowingJoinedLive: true,
           },
         })
       : [];
