@@ -15,6 +15,7 @@ describe('NotificationsService', () => {
     user: { findUnique: jest.fn() },
     stream: { findUnique: jest.fn() },
     follow: { findMany: jest.fn() },
+    scheduledLiveReminder: { findMany: jest.fn() },
     notification: {
       createManyAndReturn: jest.fn(),
       findMany: jest.fn(),
@@ -58,6 +59,64 @@ describe('NotificationsService', () => {
 
   describe('onStreamStarted', () => {
     const payload = { streamId: STREAM, hostId: HOST, title: 'Poker night' };
+
+    it("a friends' live notifies only the followers the host follows back", async () => {
+      redisClient.set.mockResolvedValue('OK');
+      prisma.follow.findMany
+        .mockResolvedValueOnce([{ followerId: 'friend-1' }, { followerId: 'fan-1' }])
+        .mockResolvedValueOnce([{ followeeId: 'friend-1' }]);
+      prisma.user.findUnique.mockResolvedValue({ displayName: 'Kebede' });
+
+      await service().onStreamStarted({ ...payload, visibility: 'FRIENDS' });
+
+      expect(prisma.follow.findMany).toHaveBeenLastCalledWith({
+        where: { followerId: HOST, followeeId: { in: ['friend-1', 'fan-1'] } },
+        select: { followeeId: true },
+      });
+      expect(prisma.notification.createManyAndReturn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: [expect.objectContaining({ recipientId: 'friend-1' })],
+        }),
+      );
+    });
+
+    it('started from a scheduled live, also tells whoever asked to be reminded', async () => {
+      redisClient.set.mockResolvedValue('OK');
+      prisma.follow.findMany.mockResolvedValue([{ followerId: 'f1' }]);
+      prisma.scheduledLiveReminder.findMany.mockResolvedValue([
+        { userId: 'f1' },
+        { userId: 'stranger-1' },
+      ]);
+      prisma.user.findUnique.mockResolvedValue({ displayName: 'Kebede' });
+
+      await service().onStreamStarted({ ...payload, scheduledLiveId: 'e1', visibility: 'PUBLIC' });
+
+      expect(prisma.notification.createManyAndReturn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: [
+            expect.objectContaining({ recipientId: 'f1' }),
+            expect.objectContaining({ recipientId: 'stranger-1' }),
+          ],
+        }),
+      );
+    });
+
+    it("a followers' live leaves out reminded people who don't follow", async () => {
+      redisClient.set.mockResolvedValue('OK');
+      prisma.follow.findMany.mockResolvedValue([{ followerId: 'f1' }]);
+      prisma.scheduledLiveReminder.findMany.mockResolvedValue([{ userId: 'stranger-1' }]);
+      prisma.user.findUnique.mockResolvedValue({ displayName: 'Kebede' });
+
+      await service().onStreamStarted({
+        ...payload,
+        scheduledLiveId: 'e1',
+        visibility: 'FOLLOWERS',
+      });
+
+      expect(prisma.notification.createManyAndReturn).toHaveBeenCalledWith(
+        expect.objectContaining({ data: [expect.objectContaining({ recipientId: 'f1' })] }),
+      );
+    });
 
     it('does nothing when the per-host cooldown is still active', async () => {
       redisClient.set.mockResolvedValue(null);
@@ -439,6 +498,7 @@ describe('NotificationsService', () => {
         pushStreamInvite: true,
         pushModeratorGranted: true,
         pushGuestInvite: true,
+        pushDirectMessages: true,
       });
     });
 
@@ -449,6 +509,7 @@ describe('NotificationsService', () => {
         pushStreamInvite: true,
         pushModeratorGranted: true,
         pushGuestInvite: true,
+        pushDirectMessages: true,
       });
 
       const result = await service().updateSettings('u1', { pushStreamStarted: false });
@@ -456,6 +517,90 @@ describe('NotificationsService', () => {
       expect(result.pushStreamStarted).toBe(false);
       expect(prisma.notificationSettings.upsert).toHaveBeenCalledWith(
         expect.objectContaining({ where: { userId: 'u1' }, update: { pushStreamStarted: false } }),
+      );
+    });
+  });
+
+  describe('direct message pushes', () => {
+    const payload = (text: string) => ({
+      message: {
+        id: 'm1',
+        senderId: 'friend-1',
+        recipientId: 'me',
+        text,
+        clientId: null,
+        createdAt: new Date(),
+        readAt: null,
+      },
+      sender: { id: 'friend-1', username: 'abebe', displayName: 'Abebe', avatarUrl: null },
+      recipient: { id: 'me', username: 'me', displayName: 'Me', avatarUrl: null },
+      recipientUnreadCount: 1,
+    });
+
+    it("pushes the sender's name and text, one notification per conversation, no inbox row", async () => {
+      prisma.notificationSettings.findUnique.mockResolvedValue(null);
+
+      await service().onDirectMessageSent(payload('  See you at the live tonight  '));
+
+      expect(pushQueue.enqueue).toHaveBeenCalledWith({
+        recipientId: 'me',
+        title: 'Abebe',
+        body: 'See you at the live tonight',
+        data: { type: 'DIRECT_MESSAGE', actorId: 'friend-1' },
+        collapseKey: 'dm-friend-1',
+      });
+      expect(prisma.notification.createManyAndReturn).not.toHaveBeenCalled();
+    });
+
+    it('shortens a long message', async () => {
+      prisma.notificationSettings.findUnique.mockResolvedValue(null);
+
+      await service().onDirectMessageSent(payload('x'.repeat(500)));
+
+      const body = (pushQueue.enqueue.mock.calls[0][0] as { body: string }).body;
+      expect(body).toHaveLength(140);
+      expect(body.endsWith('…')).toBe(true);
+    });
+
+    it('respects the recipient turning message pushes off', async () => {
+      prisma.notificationSettings.findUnique.mockResolvedValue({ pushDirectMessages: false });
+
+      await service().onDirectMessageSent(payload('hi'));
+
+      expect(pushQueue.enqueue).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('scheduled lives starting soon', () => {
+    it("tells the reminded it's starting soon, from the host, skipping anyone blocked", async () => {
+      social.blockedEitherWayUserIds.mockResolvedValue(['u2']);
+      prisma.user.findUnique.mockResolvedValue({ id: HOST, displayName: 'Kebede' });
+
+      await service().onScheduledLiveStartingSoon({
+        scheduledLiveId: 'e1',
+        hostId: HOST,
+        title: 'Poker night',
+        startsAt: new Date(),
+        userIds: ['u1', 'u2'],
+      });
+
+      expect(prisma.notification.createManyAndReturn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: [
+            {
+              recipientId: 'u1',
+              type: NotificationType.SCHEDULED_LIVE_SOON,
+              actorId: HOST,
+              streamId: null,
+            },
+          ],
+        }),
+      );
+      expect(pushQueue.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: 'Starting soon',
+          body: 'Kebede goes live soon: Poker night',
+        }),
       );
     });
   });

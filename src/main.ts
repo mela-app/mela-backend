@@ -4,6 +4,7 @@ import { ValidationPipe, VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import compression from 'compression';
+import { raw } from 'express';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
@@ -23,6 +24,8 @@ async function bootstrap() {
   if (trustProxy)
     app.set('trust proxy', /^\d+$/.test(trustProxy) ? Number(trustProxy) : trustProxy);
 
+  // LiveKit signs its webhooks' exact bytes: that route gets them unparsed.
+  app.use('/v1/livekit/webhook', raw({ type: () => true, limit: '1mb' }));
   app.use(helmet());
   // Plan §7: smaller responses on slow mobile networks.
   app.use(compression());
@@ -31,7 +34,9 @@ async function bootstrap() {
   app.useGlobalFilters(new AllExceptionsFilter());
   // Credentials: the admin console keeps its refresh token in an httpOnly cookie.
   app.enableCors({ origin: corsOrigin, credentials: true });
-  app.useWebSocketAdapter(new RealtimeIoAdapter(app, corsOrigin));
+  const realtimeAdapter = new RealtimeIoAdapter(app, corsOrigin);
+  await realtimeAdapter.connectToRedis(config.getOrThrow<string>('REDIS_URL'));
+  app.useWebSocketAdapter(realtimeAdapter);
   // Lets a deploy's SIGTERM close sockets, Redis and Prisma cleanly.
   app.enableShutdownHooks();
 

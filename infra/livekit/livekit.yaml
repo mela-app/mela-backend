@@ -26,6 +26,20 @@ room:
 logging:
   level: info
 
+# Tell the API when a host's or guest's video joins or leaves a room
+# (POST /v1/livekit/webhook - docs/features/video-provider.md, "Weak
+# networks"): a live whose host's video still flows survives their app's
+# realtime connection dropping, a host who's gone for good ends at once, and
+# a guest whose app died leaves the stage instead of freezing there. Uncomment
+# and fill in: api_key is the key half of LIVEKIT_KEYS (the one the API's
+# LIVEKIT_API_KEY names - LiveKit refuses to start with an unknown one), and
+# the URL is the API on this server (LiveKit uses host networking, so
+# 127.0.0.1 and the API's published port API_PORT).
+# webhook:
+#   api_key: <api-key>
+#   urls:
+#     - http://127.0.0.1:<API_PORT>/v1/livekit/webhook
+
 # Optional TURN/TLS on port 443, for viewers behind firewalls that block
 # everything but HTTPS. It needs its own domain and certificate:
 # https://docs.livekit.io/transport/self-hosting/deployment/#improving-connectivity-with-turn

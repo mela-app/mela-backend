@@ -1,8 +1,20 @@
-import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { VideoProviderKind } from '@prisma/client';
-import { AccessToken, RoomServiceClient, ServerError, TrackSource } from 'livekit-server-sdk';
 import {
+  AccessToken,
+  RoomServiceClient,
+  ServerError,
+  TrackSource,
+  WebhookReceiver,
+} from 'livekit-server-sdk';
+import {
+  MediaRoomEvent,
   MintTokenParams,
   VideoClientConfig,
   VideoCredentials,
@@ -161,6 +173,40 @@ export class LiveKitVideoProvider implements VideoProvider {
         ignoreNotFound: true,
       },
     );
+  }
+
+  /**
+   * A LiveKit webhook (`webhook.urls` in livekit.yaml), checked against its
+   * signature - the `Authorization` header, signed with this API key. Null
+   * for what nobody acts on: viewers (they can't publish), tracks, egress.
+   */
+  async receiveWebhook(
+    body: string,
+    authorization: string | undefined,
+  ): Promise<MediaRoomEvent | null> {
+    this.assertConfigured();
+    const receiver = new WebhookReceiver(this.apiKey, this.apiSecret);
+    let event: Awaited<ReturnType<WebhookReceiver['receive']>>;
+    try {
+      event = await receiver.receive(body, authorization);
+    } catch {
+      throw new UnauthorizedException('Invalid webhook signature');
+    }
+    const channelName = event.room?.name;
+    if (!channelName) return null;
+    if (event.event === 'room_finished') return { type: 'room_finished', channelName };
+
+    const participant = event.participant;
+    if (!participant?.identity || !participant.permission?.canPublish) return null;
+    switch (event.event) {
+      case 'participant_joined':
+        return { type: 'publisher_joined', channelName, userId: participant.identity };
+      case 'participant_left':
+      case 'participant_connection_aborted':
+        return { type: 'publisher_left', channelName, userId: participant.identity };
+      default:
+        return null;
+    }
   }
 
   async closeChannel(channelName: string): Promise<void> {

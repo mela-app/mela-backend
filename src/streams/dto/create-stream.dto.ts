@@ -1,5 +1,5 @@
-import { StreamLayout } from '@prisma/client';
-import { IsEnum, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { StreamLayout, StreamVisibility } from '@prisma/client';
+import { IsEnum, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
 
 export class CreateStreamDto {
   @IsString()
@@ -16,4 +16,15 @@ export class CreateStreamDto {
   @IsOptional()
   @IsEnum(StreamLayout)
   layout?: StreamLayout;
+
+  // Who may watch (docs/features/streams.md). Omitted → everyone (PUBLIC).
+  @IsOptional()
+  @IsEnum(StreamVisibility)
+  visibility?: StreamVisibility;
+
+  // Going live from one of the host's scheduled lives: its reminders turn
+  // into "live now" notifications (docs/features/streams.md).
+  @IsOptional()
+  @IsUUID()
+  scheduledLiveId?: string;
 }

@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { StreamStatus } from '@prisma/client';
+import { StreamStatus, StreamVisibility } from '@prisma/client';
 import { DomainEvents } from '../common/events/domain-events';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RateLimitService } from '../common/rate-limit/rate-limit.service';
@@ -12,7 +12,7 @@ const SENDER = 'sender-1';
 
 describe('ShareService', () => {
   const prisma = { stream: { findUnique: jest.fn() } };
-  const social = { isFriend: jest.fn() };
+  const social = { isFriend: jest.fn(), isFollowing: jest.fn().mockResolvedValue(false) };
   const rateLimit = { take: jest.fn().mockResolvedValue(0) };
   const redisClient = {
     smembers: jest.fn().mockResolvedValue([]),
@@ -35,7 +35,11 @@ describe('ShareService', () => {
     jest.clearAllMocks();
     rateLimit.take.mockResolvedValue(0);
     redisClient.smembers.mockResolvedValue([]);
-    prisma.stream.findUnique.mockResolvedValue({ status: StreamStatus.LIVE });
+    prisma.stream.findUnique.mockResolvedValue({
+      status: StreamStatus.LIVE,
+      hostId: 'host-1',
+      visibility: StreamVisibility.PUBLIC,
+    });
   });
 
   it('404s inviting to a stream that is not live', async () => {
@@ -71,6 +75,24 @@ describe('ShareService', () => {
       streamId: STREAM,
       senderId: SENDER,
       recipientIds: ['f1', 'f2'],
+    });
+  });
+
+  it("invites to a friends' live only friends who are the host's friends too", async () => {
+    prisma.stream.findUnique.mockResolvedValue({
+      status: StreamStatus.LIVE,
+      hostId: 'host-1',
+      visibility: StreamVisibility.FRIENDS,
+    });
+    social.isFriend.mockResolvedValue(true);
+    // f1 and the host follow each other; f2 only follows the host.
+    social.isFollowing.mockImplementation(
+      async (follower: string, followee: string) =>
+        follower === 'f1' || followee === 'f1' || (follower === 'f2' && followee === 'host-1'),
+    );
+
+    await expect(service().sendInvites(STREAM, SENDER, ['f1', 'f2'])).resolves.toEqual({
+      invited: ['f1'],
     });
   });
 

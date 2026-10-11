@@ -13,6 +13,7 @@ import type {
   SessionPlatform,
   StreamEndReason,
   StreamLayout,
+  StreamVisibility,
   VideoProviderKind,
 } from '@prisma/client';
 
@@ -101,6 +102,10 @@ export const DomainEvents = {
   DirectMessageErased: 'direct_message.erased',
   // An account and what it made are gone (docs/features/auth.md).
   AccountDeleted: 'account.deleted',
+  // Viewers of a stopped API instance were removed (docs/features/realtime.md).
+  PresenceChanged: 'presence.changed',
+  // A scheduled live starts soon: its reminders go out (docs/features/streams.md).
+  ScheduledLiveStartingSoon: 'scheduled_live.starting_soon',
 } as const;
 
 export type DomainEventName = (typeof DomainEvents)[keyof typeof DomainEvents];
@@ -209,6 +214,10 @@ export interface StreamStartedPayload {
   streamId: string;
   hostId: string;
   title: string;
+  // Who may watch: a followers' or friends' live only notifies those who can.
+  visibility?: StreamVisibility;
+  // The scheduled live it was started from: whoever asked to be reminded is told too.
+  scheduledLiveId?: string;
 }
 
 // Already filtered to friends, under the cap, and past the rate limit by
@@ -618,4 +627,20 @@ export interface AccountDeletedPayload {
   // Staff who removed it from the console; null when they deleted it themselves.
   actorId: string | null;
   reason: string | null;
+}
+
+// LivePresenceService removed the viewers a stopped or crashed API instance
+// held; the gateway re-announces these lives' viewer counts.
+export interface PresenceChangedPayload {
+  streamIds: string[];
+}
+
+// About REMIND_BEFORE_MS before a scheduled live: the people who asked to be
+// reminded get a "starting soon" notification.
+export interface ScheduledLiveStartingSoonPayload {
+  scheduledLiveId: string;
+  hostId: string;
+  title: string;
+  startsAt: Date;
+  userIds: string[];
 }

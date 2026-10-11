@@ -19,6 +19,13 @@ export class ListStreamsQueryDto {
   @MaxLength(40)
   category?: string;
 
+  // Search: part of a live's title, or its host's name or username.
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() || undefined : value))
+  @IsString()
+  @MaxLength(60)
+  q?: string;
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()

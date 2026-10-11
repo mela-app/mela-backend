@@ -38,6 +38,15 @@ export class FcmPushProvider implements PushProvider {
         tokens,
         notification: { title: message.title, body: message.body },
         data: message.data,
+        ...(message.collapseKey && {
+          // Android shows one notification per tag; iOS groups by thread and
+          // replaces by collapse id.
+          android: { collapseKey: message.collapseKey, notification: { tag: message.collapseKey } },
+          apns: {
+            headers: { 'apns-collapse-id': message.collapseKey },
+            payload: { aps: { threadId: message.collapseKey } },
+          },
+        }),
       })
       .catch((error: unknown) => {
         this.logger.error(`FCM send failed: ${error}`);

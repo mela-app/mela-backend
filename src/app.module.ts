@@ -21,6 +21,7 @@ import { ModeratorsModule } from './moderators/moderators.module';
 import { RoomBansModule } from './room-bans/room-bans.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { ShareModule } from './share/share.module';
+import { ScheduledLivesModule } from './scheduled-lives/scheduled-lives.module';
 import { GuestsModule } from './guests/guests.module';
 import { AuditModule } from './audit/audit.module';
 import { AdminModule } from './admin/admin.module';
@@ -61,6 +62,7 @@ import { HealthController } from './health.controller';
     RoomBansModule,
     NotificationsModule,
     ShareModule,
+    ScheduledLivesModule,
     GuestsModule,
     AuditModule,
     AdminModule,

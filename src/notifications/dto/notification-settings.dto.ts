@@ -21,4 +21,8 @@ export class UpdateNotificationSettingsDto {
   @IsOptional()
   @IsBoolean()
   pushGuestInvite?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  pushDirectMessages?: boolean;
 }

@@ -23,7 +23,6 @@ import { ChatMessageView, ChatSendError, ChatService } from '../chat/chat.servic
 import { ChatDeleteDto, ChatSendDto, LikeSendDto } from '../chat/dto/chat-events.dto';
 import { LikesService } from '../chat/likes.service';
 import {
-  DomainEvents,
   AccountDeletedPayload,
   AccountIdentityLinkedPayload,
   AdminAlertSentPayload,
@@ -36,6 +35,7 @@ import {
   DirectMessageErasedPayload,
   DirectMessageSentPayload,
   DirectMessagesReadPayload,
+  DomainEvents,
   GuestJoinedPayload,
   GuestMicForceMuteChangedPayload,
   GuestPlacement,
@@ -51,6 +51,7 @@ import {
   ModeratorRevokedPayload,
   ModeratorUpdatedPayload,
   NotificationCreatedPayload,
+  PresenceChangedPayload,
   RecordingPermissionChangedPayload,
   RoomBanCreatedPayload,
   RoomChatMuteChangedPayload,
@@ -228,6 +229,10 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     }
     // Blocked either way with the host (plan §6.4).
     if (await this.social.isBlockedEitherWay(live.hostId, socket.data.userId)) {
+      return fail('NOT_ALLOWED');
+    }
+    // A followers' or friends' live (docs/features/streams.md).
+    if (!(await this.streams.canWatch(live, socket.data.userId))) {
       return fail('NOT_ALLOWED');
     }
 
@@ -531,10 +536,21 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     this.server.emit('app:update', { platform: payload.platform });
   }
 
-  /** Devices an alert would reach right now: every connected app, or one live's room. */
-  connectedCount(streamId?: string): number {
-    if (streamId) return this.server.sockets.adapter.rooms.get(streamRoom(streamId))?.size ?? 0;
-    return this.server.sockets.sockets.size;
+  /**
+   * Devices an alert would reach right now: every connected app, or one
+   * live's room - on every API instance (the Redis adapter asks the others).
+   */
+  async connectedCount(streamId?: string): Promise<number> {
+    const sockets = streamId
+      ? await this.server.in(streamRoom(streamId)).allSockets()
+      : await this.server.allSockets();
+    return sockets.size;
+  }
+
+  // Viewers of a stopped API instance were removed: their lives' counts changed.
+  @OnEvent(DomainEvents.PresenceChanged)
+  handlePresenceChanged(payload: PresenceChangedPayload) {
+    for (const streamId of payload.streamIds) this.viewerCounts.schedule(streamId);
   }
 
   // Broadcasts for every path that can delete a message (plan §6.9) - socket, or a future REST/admin one.

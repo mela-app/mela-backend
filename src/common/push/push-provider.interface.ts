@@ -3,6 +3,11 @@ export interface PushMessage {
   body: string;
   /** Delivered alongside the notification, e.g. `{streamId}` - lets a tap route without a fetch. */
   data?: Record<string, string>;
+  /**
+   * Pushes with the same key replace each other on the device instead of
+   * piling up - e.g. one notification per conversation, showing the latest.
+   */
+  collapseKey?: string;
 }
 
 /**

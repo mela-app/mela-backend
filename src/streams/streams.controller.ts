@@ -49,10 +49,15 @@ export class StreamsController {
     return this.streamsService.getVideoConfig();
   }
 
-  // Declared after 'config' so that path isn't taken for an id.
+  // Declared after 'config' so that path isn't taken for an id. Signed in or
+  // not: a running followers' or friends' live is only found by who may watch it.
   @Get(':id')
-  getOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.streamsService.getPublic(id);
+  @UseGuards(OptionalJwtAuthGuard)
+  getOne(
+    @CurrentUser() user: AuthenticatedUser | undefined,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.streamsService.getPublic(id, user?.id);
   }
 
   @Post()

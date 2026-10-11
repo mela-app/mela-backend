@@ -86,6 +86,7 @@ describe('RealtimeGateway', () => {
   const auth = { isSessionActive: jest.fn() };
   const streams = {
     findLive: jest.fn(),
+    canWatch: jest.fn().mockResolvedValue(true),
     participantSummaries: jest.fn(),
     canArrangeStage: jest.fn(),
   };
@@ -288,6 +289,25 @@ describe('RealtimeGateway', () => {
       const ack = await makeGateway().onStreamWatch(fakeSocket() as never, { streamId: LIVE });
 
       expect(ack).toEqual({ ok: false, error: 'NOT_ALLOWED' });
+    });
+  });
+
+  describe("followers' and friends' lives", () => {
+    it('keeps someone who may not watch the live out of its room', async () => {
+      streams.findLive.mockResolvedValue({
+        id: LIVE,
+        hostId: 'host-1',
+        layout: 'FULL',
+        visibility: 'FRIENDS',
+      });
+      streams.canWatch.mockResolvedValueOnce(false);
+      const socket = fakeSocket();
+
+      const ack = await makeGateway().onStreamJoin(socket as never, { streamId: LIVE });
+
+      expect(ack).toEqual({ ok: false, error: 'NOT_ALLOWED' });
+      expect(socket.join).not.toHaveBeenCalledWith(`stream:${LIVE}`);
+      expect(presence.addViewer).not.toHaveBeenCalled();
     });
   });
 
@@ -1575,22 +1595,33 @@ describe('RealtimeGateway', () => {
       expect(disconnectSockets).toHaveBeenCalledWith(true);
     });
 
-    it('counts the devices an alert would reach', () => {
+    it('counts the devices an alert would reach, on every API instance', async () => {
       const gateway = makeGateway();
+      const rooms: Record<string, Set<string>> = { [`stream:${LIVE}`]: new Set(['a', 'b']) };
       gateway.server = {
-        sockets: {
-          sockets: new Map([
-            ['a', {}],
-            ['b', {}],
-            ['c', {}],
-          ]),
-          adapter: { rooms: new Map([[`stream:${LIVE}`, new Set(['a', 'b'])]]) },
-        },
+        allSockets: jest.fn().mockResolvedValue(new Set(['a', 'b', 'c'])),
+        in: jest.fn((room: string) => ({
+          allSockets: jest.fn().mockResolvedValue(rooms[room] ?? new Set()),
+        })),
       } as never;
 
-      expect(gateway.connectedCount()).toBe(3);
-      expect(gateway.connectedCount(LIVE)).toBe(2);
-      expect(gateway.connectedCount(OTHER_LIVE)).toBe(0);
+      await expect(gateway.connectedCount()).resolves.toBe(3);
+      await expect(gateway.connectedCount(LIVE)).resolves.toBe(2);
+      await expect(gateway.connectedCount(OTHER_LIVE)).resolves.toBe(0);
+    });
+
+    it("re-announces the viewer count of lives a stopped instance's viewers left", () => {
+      jest.useFakeTimers();
+      try {
+        const gateway = makeGateway();
+        presence.viewerCount.mockResolvedValue(4);
+
+        gateway.handlePresenceChanged({ streamIds: [LIVE] });
+
+        expect(presence.viewerCount).toHaveBeenCalledWith(LIVE);
+      } finally {
+        jest.useRealTimers();
+      }
     });
   });
 });

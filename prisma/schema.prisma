@@ -89,48 +89,50 @@ model User {
   profileVisibility      ProfileVisibility @default(EVERYONE)
   profileSharing         ProfileSharing    @default(EVERYONE)
 
-  streams               Stream[]              @relation("StreamHost")
+  streams               Stream[]                @relation("StreamHost")
   sessions              UserSession[]
   identities            UserIdentity[]
   chatMessages          ChatMessage[]
   // Rows where this user is the one following someone.
-  following             Follow[]              @relation("Follower")
+  following             Follow[]                @relation("Follower")
   // Rows where this user is the one being followed.
-  followedBy            Follow[]              @relation("Followee")
+  followedBy            Follow[]                @relation("Followee")
   // Phase 4: moderation, block & delegated moderators (plan §6.4, §6.9).
-  moderatorsGranted     Moderator[]           @relation("ModeratorsGranted")
-  moderatingFor         Moderator[]           @relation("ModeratorOf")
-  blocksMade            Block[]               @relation("Blocker")
-  blockedBy             Block[]               @relation("Blocked")
-  roomBansIssued        RoomBan[]             @relation("RoomBansIssued")
-  roomBans              RoomBan[]             @relation("RoomBanned")
+  moderatorsGranted     Moderator[]             @relation("ModeratorsGranted")
+  moderatingFor         Moderator[]             @relation("ModeratorOf")
+  blocksMade            Block[]                 @relation("Blocker")
+  blockedBy             Block[]                 @relation("Blocked")
+  roomBansIssued        RoomBan[]               @relation("RoomBansIssued")
+  roomBans              RoomBan[]               @relation("RoomBanned")
   bannedPhrasesCreated  BannedPhrase[]
   // Phase 5: notifications & sharing (plan §6.11).
-  notificationsReceived Notification[]        @relation("NotificationsReceived")
-  notificationsActed    Notification[]        @relation("NotificationsActed")
+  notificationsReceived Notification[]          @relation("NotificationsReceived")
+  notificationsActed    Notification[]          @relation("NotificationsActed")
   notificationSettings  NotificationSettings?
   // Phase 6: guest management (plan §6.5, §6.6).
-  guestRequestsMade     GuestRequest[]        @relation("GuestRequester")
-  guestSeats            StreamGuest[]         @relation("GuestSeats")
+  guestRequestsMade     GuestRequest[]          @relation("GuestRequester")
+  guestSeats            StreamGuest[]           @relation("GuestSeats")
   // Phase 7: mute suite (plan §6.7).
-  roomChatMutes         RoomChatMute[]        @relation("RoomChatMuted")
-  roomChatMutesIssued   RoomChatMute[]        @relation("RoomChatMutesIssued")
-  personalMutesMade     PersonalChatMute[]    @relation("PersonalMutesMade")
-  personalMutedBy       PersonalChatMute[]    @relation("PersonalMutedBy")
+  roomChatMutes         RoomChatMute[]          @relation("RoomChatMuted")
+  roomChatMutesIssued   RoomChatMute[]          @relation("RoomChatMutesIssued")
+  personalMutesMade     PersonalChatMute[]      @relation("PersonalMutesMade")
+  personalMutedBy       PersonalChatMute[]      @relation("PersonalMutedBy")
   // Phase 8: admin console (plan §6.8).
-  streamsLocked         Stream[]              @relation("StreamLockedBy")
+  streamsLocked         Stream[]                @relation("StreamLockedBy")
   adminAlertsSent       AdminAlert[]
   auditLogs             AuditLog[]
-  recordingPermissions  RecordingPermission[] @relation("RecordingAllowed")
+  recordingPermissions  RecordingPermission[]   @relation("RecordingAllowed")
   // Direct messages between friends (docs/features/messages.md).
-  conversationsAsA      Conversation[]        @relation("ConversationUserA")
-  conversationsAsB      Conversation[]        @relation("ConversationUserB")
-  directMessagesSent    DirectMessage[]       @relation("DirectMessagesSent")
-  directMessagesInbox   DirectMessage[]       @relation("DirectMessagesReceived")
+  conversationsAsA      Conversation[]          @relation("ConversationUserA")
+  conversationsAsB      Conversation[]          @relation("ConversationUserB")
+  directMessagesSent    DirectMessage[]         @relation("DirectMessagesSent")
+  directMessagesInbox   DirectMessage[]         @relation("DirectMessagesReceived")
   appReleasesPublished  AppRelease[]
-  reportsMade           Report[]              @relation("ReportsMade")
-  reportCasesAgainst    ReportCase[]          @relation("ReportCasesAgainst")
-  reportCasesResolved   ReportCase[]          @relation("ReportCasesResolved")
+  scheduledLives        ScheduledLive[]         @relation("ScheduledLiveHost")
+  liveReminders         ScheduledLiveReminder[]
+  reportsMade           Report[]                @relation("ReportsMade")
+  reportCasesAgainst    ReportCase[]            @relation("ReportCasesAgainst")
+  reportCasesResolved   ReportCase[]            @relation("ReportCasesResolved")
 
   @@map("users")
 }
@@ -231,6 +233,16 @@ enum StreamLayout {
   MINIMAL
 }
 
+// Who may watch a live (docs/features/streams.md): everyone, or only the
+// host's followers, or only their friends (mutual follows). Chosen when the
+// host goes live; enforced on every way in - discovery, search, joining, the
+// share page, invites and go-live notifications.
+enum StreamVisibility {
+  PUBLIC
+  FOLLOWERS
+  FRIENDS
+}
+
 // Which media vendor carries a live. See docs/features/video-provider.md.
 enum VideoProviderKind {
   AGORA
@@ -256,6 +268,7 @@ model Stream {
   category        String?
   status          StreamStatus      @default(LIVE)
   layout          StreamLayout      @default(FULL)
+  visibility      StreamVisibility  @default(PUBLIC)
   // Fixed when the live starts, so switching VIDEO_PROVIDER never strands
   // a live that's already running on the other vendor.
   videoProvider   VideoProviderKind @default(AGORA)
@@ -268,6 +281,9 @@ model Stream {
   peakViewerCount Int               @default(0)
   // Likes collected, saved when the live ends (counted in Redis while live).
   likeCount       Int               @default(0)
+  // A recent frame of the live for discovery cards and link previews, sent
+  // by the host's app while live; removed (with the file) when it ends.
+  thumbnailUrl    String?
   // Phase 4: one pinned chat message at a time (plan §6.13).
   pinnedMessageId String?           @unique @db.Uuid
   // Phase 8: the admin kill switch (plan §6.8). Kept after an unlock, as history.
@@ -289,6 +305,8 @@ model Stream {
   chatMutes            RoomChatMute[]
   adminAlerts          AdminAlert[]
   recordingPermissions RecordingPermission[]
+  // The scheduled live this one fulfils, when the host started it from one.
+  scheduledLive        ScheduledLive?
 
   @@index([status])
   @@index([hostId, startedAt])
@@ -440,6 +458,8 @@ enum NotificationType {
   // What staff decided about something the recipient reported.
   REPORT_ACTIONED
   REPORT_DISMISSED
+  // A live the recipient asked to be reminded of starts soon (docs/features/streams.md).
+  SCHEDULED_LIVE_SOON
 }
 
 model Notification {
@@ -473,6 +493,9 @@ model NotificationSettings {
   pushStreamInvite     Boolean @default(true)
   pushModeratorGranted Boolean @default(true)
   pushGuestInvite      Boolean @default(true)
+  // Direct messages from friends (docs/features/messages.md) - pushed only,
+  // they have their own inbox instead of a notification row.
+  pushDirectMessages   Boolean @default(true)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -841,4 +864,46 @@ model Report {
   @@unique([caseId, reporterId])
   @@index([reporterId, createdAt])
   @@map("reports")
+}
+
+// A live a host announces ahead (docs/features/streams.md, "Scheduled
+// lives"): who may see it follows its visibility, like a live; anyone who
+// may asks to be reminded. A reminder goes out shortly before it starts, and
+// when the host goes live from it those people are told too - followers or
+// not. It's over once the host went live from it (streamId), cancelled it, or
+// it's long past its time.
+model ScheduledLive {
+  id          String           @id @default(uuid())
+  hostId      String
+  title       String
+  category    String?
+  visibility  StreamVisibility @default(PUBLIC)
+  startsAt    DateTime
+  // The live the host started from it.
+  streamId    String?          @unique
+  cancelledAt DateTime?
+  // When the "starting soon" reminder went out - once.
+  remindedAt  DateTime?
+  createdAt   DateTime         @default(now())
+
+  host      User                    @relation("ScheduledLiveHost", fields: [hostId], references: [id], onDelete: Cascade)
+  stream    Stream?                 @relation(fields: [streamId], references: [id], onDelete: SetNull)
+  reminders ScheduledLiveReminder[]
+
+  @@index([hostId, startsAt])
+  @@index([startsAt])
+  @@map("scheduled_lives")
+}
+
+model ScheduledLiveReminder {
+  scheduledLiveId String
+  userId          String
+  createdAt       DateTime @default(now())
+
+  scheduledLive ScheduledLive @relation(fields: [scheduledLiveId], references: [id], onDelete: Cascade)
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([scheduledLiveId, userId])
+  @@index([userId])
+  @@map("scheduled_live_reminders")
 }
