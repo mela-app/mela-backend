@@ -33,6 +33,7 @@ import {
   StreamStartedPayload,
   StreamUnlockedPayload,
   UserBlockedPayload,
+  ViewerJoinedLivePayload,
 } from '../common/events/domain-events';
 import {
   HOST_HEARTBEAT_TTL_SECONDS,
@@ -478,6 +479,14 @@ export class StreamsService {
     // Joining as audience means this user isn't publishing: a seat still held
     // (app killed while on stage) would otherwise be a frozen tile for everyone.
     await this.vacateGuestSeat(stream, viewerId, false, viewerId);
+    if (viewerId !== stream.hostId) {
+      this.events.emit(DomainEvents.ViewerJoinedLive, {
+        streamId,
+        hostId: stream.hostId,
+        viewerId,
+        visibility: stream.visibility,
+      } satisfies ViewerJoinedLivePayload);
+    }
     // A live keeps the vendor it started on, whatever VIDEO_PROVIDER is now.
     const [
       rtcToken,
@@ -896,6 +905,17 @@ export class StreamsService {
     if (!this.permissions.canManageModerators(requesterId, stream.hostId)) {
       throw new ForbiddenException('Only the host can appoint moderators');
     }
+    // Someone in the live: watching it, or on its stage (client feedback, 2026-10).
+    const [watching, onStage] = await Promise.all([
+      this.presence.viewerIds(streamId),
+      this.guests.isActiveGuest(streamId, userId),
+    ]);
+    if (!onStage && !watching.includes(userId)) {
+      throw new BadRequestException({
+        message: 'Only someone watching your live can be made a moderator',
+        code: 'NOT_WATCHING',
+      });
+    }
     return this.moderators.grant(stream.hostId, streamId, userId, capabilities);
   }
 
@@ -924,7 +944,13 @@ export class StreamsService {
    * Who's watching right now, paginated from presence (plan §6.13) - live
    * streams only, without anyone blocked either way with [requesterId].
    */
-  async listViewers(streamId: string, requesterId: string, cursor?: string, limit = 30) {
+  async listViewers(
+    streamId: string,
+    requesterId: string,
+    cursor?: string,
+    limit = 30,
+    search?: string,
+  ) {
     if (!(await this.findLive(streamId))) throw new NotFoundException('Stream is not live');
 
     const [viewerIds, blocked] = await Promise.all([
@@ -933,6 +959,25 @@ export class StreamsService {
     ]);
     const hidden = new Set(blocked);
     const allIds = viewerIds.filter((id) => !hidden.has(id)).sort();
+    // A search among who's watching: one page of matches, by username.
+    if (search) {
+      const items =
+        allIds.length === 0
+          ? []
+          : await this.prisma.user.findMany({
+              where: {
+                id: { in: allIds },
+                OR: [
+                  { username: { contains: search, mode: 'insensitive' } },
+                  { displayName: { contains: search, mode: 'insensitive' } },
+                ],
+              },
+              orderBy: { username: 'asc' },
+              take: limit,
+              select: PARTICIPANT_SELECT,
+            });
+      return { items, hasMore: false, nextCursor: null };
+    }
     const startIndex = cursor ? allIds.indexOf(cursor) + 1 : 0;
     const pageIds = allIds.slice(startIndex, startIndex + limit + 1);
     const hasMore = pageIds.length > limit;

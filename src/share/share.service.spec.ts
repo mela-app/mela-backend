@@ -11,8 +11,11 @@ const STREAM = 's1';
 const SENDER = 'sender-1';
 
 describe('ShareService', () => {
-  const prisma = { stream: { findUnique: jest.fn() } };
-  const social = { isFriend: jest.fn(), isFollowing: jest.fn().mockResolvedValue(false) };
+  const prisma = { stream: { findUnique: jest.fn() }, user: { findMany: jest.fn() } };
+  const social = {
+    isFollowing: jest.fn().mockResolvedValue(false),
+    blockedEitherWayUserIds: jest.fn().mockResolvedValue([]),
+  };
   const rateLimit = { take: jest.fn().mockResolvedValue(0) };
   const redisClient = {
     smembers: jest.fn().mockResolvedValue([]),
@@ -35,6 +38,11 @@ describe('ShareService', () => {
     jest.clearAllMocks();
     rateLimit.take.mockResolvedValue(0);
     redisClient.smembers.mockResolvedValue([]);
+    social.blockedEitherWayUserIds.mockResolvedValue([]);
+    // Every id asked about is an active account.
+    prisma.user.findMany.mockImplementation(({ where }: { where: { id: { in: string[] } } }) =>
+      Promise.resolve(where.id.in.map((id) => ({ id }))),
+    );
     prisma.stream.findUnique.mockResolvedValue({
       status: StreamStatus.LIVE,
       hostId: 'host-1',
@@ -56,17 +64,14 @@ describe('ShareService', () => {
     );
   });
 
-  it('drops non-friends and never invites yourself, silently', async () => {
-    social.isFriend.mockResolvedValueOnce(false); // u1 not a friend
-    const result = await service().sendInvites(STREAM, SENDER, ['u1', SENDER]);
+  it('never invites yourself, silently', async () => {
+    const result = await service().sendInvites(STREAM, SENDER, [SENDER]);
 
     expect(result).toEqual({ invited: [] });
     expect(events.emit).not.toHaveBeenCalled();
   });
 
-  it('invites friends and emits stream.invite_sent', async () => {
-    social.isFriend.mockResolvedValue(true);
-
+  it('invites anyone, friend or not, and emits stream.invite_sent', async () => {
     const result = await service().sendInvites(STREAM, SENDER, ['f1', 'f2']);
 
     expect(result).toEqual({ invited: ['f1', 'f2'] });
@@ -84,7 +89,6 @@ describe('ShareService', () => {
       hostId: 'host-1',
       visibility: StreamVisibility.FRIENDS,
     });
-    social.isFriend.mockResolvedValue(true);
     // f1 and the host follow each other; f2 only follows the host.
     social.isFollowing.mockImplementation(
       async (follower: string, followee: string) =>
@@ -96,8 +100,26 @@ describe('ShareService', () => {
     });
   });
 
+  it('sends each person a live only once', async () => {
+    redisClient.smembers.mockResolvedValue(['f1']);
+
+    await expect(service().sendInvites(STREAM, SENDER, ['f1', 'f2'])).resolves.toEqual({
+      invited: ['f2'],
+    });
+  });
+
+  it("skips anyone blocked by or blocking the sender or the host, and accounts that aren't active", async () => {
+    social.blockedEitherWayUserIds.mockImplementation(async (id: string) =>
+      id === SENDER ? ['b1'] : id === 'host-1' ? ['b2'] : [],
+    );
+    prisma.user.findMany.mockResolvedValue([{ id: 'b1' }, { id: 'b2' }, { id: 'ok' }]);
+
+    await expect(
+      service().sendInvites(STREAM, SENDER, ['b1', 'b2', 'suspended', 'ok']),
+    ).resolves.toEqual({ invited: ['ok'] });
+  });
+
   it('refuses once the per-stream cap is already used up', async () => {
-    social.isFriend.mockResolvedValue(true);
     redisClient.smembers.mockResolvedValue(Array.from({ length: 20 }, (_, i) => `already-${i}`));
 
     await expect(service().sendInvites(STREAM, SENDER, ['new-friend'])).rejects.toThrow(
@@ -106,7 +128,6 @@ describe('ShareService', () => {
   });
 
   it('only invites up to the remaining room under the cap', async () => {
-    social.isFriend.mockResolvedValue(true);
     redisClient.smembers.mockResolvedValue(Array.from({ length: 19 }, (_, i) => `already-${i}`));
 
     const result = await service().sendInvites(STREAM, SENDER, ['f1', 'f2']);

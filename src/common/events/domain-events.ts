@@ -106,6 +106,8 @@ export const DomainEvents = {
   PresenceChanged: 'presence.changed',
   // A scheduled live starts soon: its reminders go out (docs/features/streams.md).
   ScheduledLiveStartingSoon: 'scheduled_live.starting_soon',
+  // Someone signed in joined a live as a viewer: their followers may hear (docs/features/notifications.md).
+  ViewerJoinedLive: 'stream.viewer_joined',
 } as const;
 
 export type DomainEventName = (typeof DomainEvents)[keyof typeof DomainEvents];
@@ -643,4 +645,13 @@ export interface ScheduledLiveStartingSoonPayload {
   title: string;
   startsAt: Date;
   userIds: string[];
+}
+
+// Every join (StreamsService.join), reconnects included - the listener
+// decides whether it's worth telling anyone.
+export interface ViewerJoinedLivePayload {
+  streamId: string;
+  hostId: string;
+  viewerId: string;
+  visibility: StreamVisibility;
 }

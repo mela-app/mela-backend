@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ProfileSharing, ProfileVisibility, StreamStatus } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
@@ -8,7 +8,7 @@ import { UsersService } from './users.service';
 
 describe('UsersService', () => {
   const prisma = {
-    user: { findUnique: jest.fn(), update: jest.fn() },
+    user: { findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
     stream: { findFirst: jest.fn() },
   };
   const social = { getRelationshipSummary: jest.fn(), isBlockedByViewer: jest.fn() };
@@ -226,12 +226,101 @@ describe('UsersService', () => {
   });
 
   describe('updateOwnProfile', () => {
-    it('passes the dto straight through to Prisma', async () => {
-      prisma.user.update.mockResolvedValue(profileRow);
-      await service().updateOwnProfile('u1', { bio: 'hi' });
+    const now = new Date('2026-10-12T12:00:00Z');
+    const daysAgo = (days: number) => new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+    const names = (usernameChangedAt: Date | null, displayNameChangedAt: Date | null) => ({
+      username: 'ana',
+      displayName: 'Ana',
+      usernameChangedAt,
+      displayNameChangedAt,
+    });
+
+    beforeEach(() => {
+      prisma.user.findUnique.mockResolvedValue(names(null, null));
+      prisma.user.findFirst.mockResolvedValue(null);
+      prisma.user.update.mockImplementation(({ data }: { data: object }) =>
+        Promise.resolve({ ...profileRow, ...names(null, null), ...data }),
+      );
+    });
+
+    it('passes the rest of the dto straight through to Prisma', async () => {
+      await service().updateOwnProfile('u1', { bio: 'hi' }, now);
       expect(prisma.user.update).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: 'u1' }, data: { bio: 'hi' } }),
       );
+    });
+
+    it('changes the username and the display name, noting when, and says when they may change again', async () => {
+      const result = await service().updateOwnProfile(
+        'u1',
+        { username: 'ana_live', displayName: 'Ana B' },
+        now,
+      );
+
+      expect(prisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: {
+            username: 'ana_live',
+            usernameChangedAt: now,
+            displayName: 'Ana B',
+            displayNameChangedAt: now,
+          },
+        }),
+      );
+      expect(result.usernameChangeableAt).toEqual(new Date('2026-11-11T12:00:00Z'));
+      expect(result.displayNameChangeableAt).toEqual(new Date('2026-10-19T12:00:00Z'));
+      expect(result).not.toHaveProperty('usernameChangedAt');
+    });
+
+    it('a username once in 30 days', async () => {
+      prisma.user.findUnique.mockResolvedValue(names(daysAgo(29), null));
+      await expect(
+        service().updateOwnProfile('u1', { username: 'ana_live' }, now),
+      ).rejects.toMatchObject({
+        response: {
+          code: 'USERNAME_CHANGE_TOO_SOON',
+          message: 'You can change your username again on 2026-10-13',
+        },
+      });
+
+      prisma.user.findUnique.mockResolvedValue(names(daysAgo(31), null));
+      await expect(
+        service().updateOwnProfile('u1', { username: 'ana_live' }, now),
+      ).resolves.toBeDefined();
+    });
+
+    it('a display name once in 7 days', async () => {
+      prisma.user.findUnique.mockResolvedValue(names(null, daysAgo(6)));
+      await expect(
+        service().updateOwnProfile('u1', { displayName: 'Ana B' }, now),
+      ).rejects.toMatchObject({ response: { code: 'DISPLAY_NAME_CHANGE_TOO_SOON' } });
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it("sending the current names again isn't a change, and isn't counted", async () => {
+      prisma.user.findUnique.mockResolvedValue(names(daysAgo(1), daysAgo(1)));
+
+      await service().updateOwnProfile(
+        'u1',
+        { username: 'ana', displayName: 'Ana', bio: 'x' },
+        now,
+      );
+
+      expect(prisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { bio: 'x' } }),
+      );
+    });
+
+    it('refuses a username someone else has, whatever its case', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'u2' });
+
+      await expect(service().updateOwnProfile('u1', { username: 'Kebede' }, now)).rejects.toThrow(
+        ConflictException,
+      );
+      expect(prisma.user.findFirst).toHaveBeenCalledWith({
+        where: { username: { equals: 'Kebede', mode: 'insensitive' }, id: { not: 'u1' } },
+        select: { id: true },
+      });
     });
   });
 

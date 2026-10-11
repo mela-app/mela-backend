@@ -1,6 +1,6 @@
 import { ArrayMaxSize, ArrayNotEmpty, ArrayUnique, IsArray, IsUUID } from 'class-validator';
 
-/** "Send to friends" (plan §6.12) - the service still re-checks friendship server-side. */
+/** "Send to friends" (plan §6.12) - friends or anyone else; the service re-checks blocks and who may watch. */
 export class SendInvitesDto {
   @IsArray()
   @ArrayNotEmpty()

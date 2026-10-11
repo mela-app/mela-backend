@@ -122,7 +122,7 @@ export class StreamsController {
     @Param('id', ParseUUIDPipe) id: string,
     @Query() query: ViewersQueryDto,
   ) {
-    return this.streamsService.listViewers(id, user.id, query.cursor, query.limit);
+    return this.streamsService.listViewers(id, user.id, query.cursor, query.limit, query.q);
   }
 
   @Get(':id/mention-suggestions')
