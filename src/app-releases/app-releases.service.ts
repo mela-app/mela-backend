@@ -58,9 +58,11 @@ export class AppReleasesService {
       take: RELEASES_READ,
       select: RELEASE_SELECT,
     });
-    const newer = releases
+    const sorted = releases
       .filter((release) => isNewer(release, installed))
       .sort((a, b) => compareVersions(b.version, a.version));
+    const newer =
+      installed.version === undefined ? withLegacyBuilds(sorted, installed.build ?? 0) : sorted;
     const current = releases.find((release) =>
       installed.version !== undefined
         ? release.version === installed.version
@@ -100,6 +102,20 @@ function isNewer(release: Release, installed: Installed): boolean {
     return compareVersions(release.version, installed.version) > 0;
   if (release.build === null) return true;
   return installed.build !== undefined && release.build > installed.build;
+}
+
+/**
+ * An app from before versions were compared reads a release only with a
+ * build number, and compares them: one published since (no build of its
+ * own) gets one above [installedBuild], newer versions higher - so that app
+ * is offered, or required, the update rather than ignoring it.
+ */
+function withLegacyBuilds(newestFirst: Release[], installedBuild: number): Release[] {
+  return newestFirst.map((release, index) =>
+    release.build !== null
+      ? release
+      : { ...release, build: installedBuild + newestFirst.length - index },
+  );
 }
 
 function changeOf(release: Release) {
