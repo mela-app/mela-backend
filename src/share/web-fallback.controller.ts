@@ -1,3 +1,4 @@
+import { liveLabel } from '../streams/live-title';
 import { Controller, Get, Param, Res, VERSION_NEUTRAL } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { StreamStatus, StreamVisibility } from '@prisma/client';
@@ -129,7 +130,7 @@ function renderPage(
   const title = restricted
     ? 'A private live'
     : stream
-      ? escapeHtml(stream.title)
+      ? escapeHtml(liveLabel(stream.title, stream.host.displayName))
       : 'This live has ended';
   const description = restricted
     ? `${escapeHtml(stream!.host.displayName)} is live for their ${

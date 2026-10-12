@@ -46,7 +46,7 @@ export function caseLabel(targetType: ReportTargetType, snapshot: Prisma.JsonVal
   const who = shown.person?.username ? `@${shown.person.username}` : 'a deleted account';
   switch (targetType) {
     case ReportTargetType.LIVE:
-      return `Live "${shown.title ?? 'Untitled'}" by ${who}`;
+      return shown.title?.trim() ? `Live "${shown.title}" by ${who}` : `Live by ${who}`;
     case ReportTargetType.CHAT_MESSAGE:
       return `Chat message from ${who}`;
     case ReportTargetType.USER:

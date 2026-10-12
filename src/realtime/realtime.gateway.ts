@@ -30,6 +30,7 @@ import {
   ChatMessageDeletedPayload,
   ChatMessagePinnedPayload,
   ChatMessageUnpinnedPayload,
+  LiveBoardChangedPayload,
   DataClearedPayload,
   DataResetPayload,
   DirectMessageErasedPayload,
@@ -62,6 +63,7 @@ import {
   UserSessionsRevokedPayload,
   UserSuspendedPayload,
 } from '../common/events/domain-events';
+import { boardOf, LiveBoard } from '../live-board/live-board.service';
 import { LivePresenceService } from '../common/presence/live-presence.service';
 import { KeyedThrottle } from '../common/throttle/keyed-throttle';
 import { ModeratorsService } from '../moderators/moderators.service';
@@ -116,6 +118,8 @@ export interface RoomState {
   likeCount: number;
   // Who moderates the live: their messages carry a badge, and other moderators can't act on them.
   moderatorIds: string[];
+  // The live's board, for whoever arrives after it went up - null: none.
+  board: LiveBoard | null;
 }
 // Only about the joiner themselves - resent on every join, so a reconnect
 // catches up on a mute that started or lifted while they were offline.
@@ -249,7 +253,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       if (arrived) void this.announceArrival(live.id, socket.data.userId);
     }
     const [state, chatMute, canRecord] = await Promise.all([
-      this.roomState(live.id, live.layout),
+      this.roomState(live),
       this.roomChatMutes.findActive(live.id, socket.data.userId),
       this.recordingPermissions.isAllowed(live.id, socket.data.userId),
     ]);
@@ -293,7 +297,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       this.viewerCounts.schedule(live.id);
     }
     const [state, chat] = await Promise.all([
-      this.roomState(live.id, live.layout),
+      this.roomState(live),
       this.chat.history(live.id, { limit: WATCH_CHAT_SNAPSHOT }).catch(() => ({ messages: [] })),
     ]);
     return { ok: true, ...state, messages: chat.messages };
@@ -316,7 +320,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     if (request.paused !== undefined) await this.announcePaused(live.id, request.paused);
     await this.presence.touchHost(live.id);
     await this.announceHostAway(live.id, request.away ?? false);
-    return { ok: true, ...(await this.roomState(live.id, live.layout)) };
+    return { ok: true, ...(await this.roomState(live)) };
   }
 
   // Also how a host who was offline learns their live was ended meanwhile.
@@ -461,6 +465,14 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     this.pendingArrivals.delete(payload.streamId);
     this.server.to(room).emit('stream_ended', payload);
     this.server.in(room).socketsLeave(room);
+  }
+
+  // Written, edited, moved or taken down - everyone in the live, the web player too.
+  @OnEvent(DomainEvents.LiveBoardChanged)
+  handleLiveBoardChanged(payload: LiveBoardChangedPayload) {
+    this.server
+      .to(streamRoom(payload.streamId))
+      .emit('stream:board', { streamId: payload.streamId, board: payload.board });
   }
 
   @OnEvent(DomainEvents.StreamLayoutChanged)
@@ -852,7 +864,14 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     this.viewerCounts.schedule(streamId);
   }
 
-  private async roomState(streamId: string, layout: StreamLayout): Promise<RoomState> {
+  private async roomState(live: {
+    id: string;
+    layout: StreamLayout;
+    boardText: string | null;
+    boardX: number;
+    boardY: number;
+  }): Promise<RoomState> {
+    const streamId = live.id;
     const [viewerCount, hostAway, paused, likeCount, moderatorIds] = await Promise.all([
       this.presence.viewerCount(streamId),
       this.presence.isHostAway(streamId),
@@ -860,7 +879,15 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       this.presence.likeCount(streamId),
       this.moderators.listActiveUserIds(streamId),
     ]);
-    return { viewerCount, layout, hostAway, paused, likeCount, moderatorIds };
+    return {
+      viewerCount,
+      layout: live.layout,
+      hostAway,
+      paused,
+      likeCount,
+      moderatorIds,
+      board: boardOf(live),
+    };
   }
 
   private async announceModerators(streamId: string): Promise<void> {

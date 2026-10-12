@@ -1,12 +1,15 @@
 import { StreamLayout, StreamVisibility } from '@prisma/client';
-import { IsEnum, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
+import { IsEnum, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 
 export class CreateStreamDto {
+  // Not asked any more (client request, 2026-10) - older apps still send it.
+  // A live from a scheduled live takes that one's title.
+  @IsOptional()
   @IsString()
-  @MinLength(1)
   @MaxLength(100)
-  title!: string;
+  title?: string;
 
+  // Not asked any more either; older apps still send it.
   @IsOptional()
   @IsString()
   @MaxLength(50)

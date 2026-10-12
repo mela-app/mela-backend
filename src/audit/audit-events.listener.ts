@@ -245,7 +245,7 @@ export class AuditEventsListener {
       action: 'stream.started',
       actorId: payload.hostId,
       actorRole: AuditActorRole.HOST,
-      target: { type: 'STREAM', id: payload.streamId, label: payload.title },
+      target: { type: 'STREAM', id: payload.streamId, label: payload.title || null },
       streamId: payload.streamId,
     }));
   }
@@ -271,7 +271,7 @@ export class AuditEventsListener {
         action: 'stream.ended',
         actorId: byHost ? stream.hostId : null,
         actorRole: byHost ? AuditActorRole.HOST : AuditActorRole.SYSTEM,
-        target: { type: 'STREAM', id: payload.streamId, label: stream.title },
+        target: { type: 'STREAM', id: payload.streamId, label: stream.title || null },
         streamId: payload.streamId,
         metadata: {
           reason: payload.reason,
@@ -733,7 +733,7 @@ export class AuditEventsListener {
       where: { id: streamId },
       select: { title: true },
     });
-    return { type: 'STREAM', id: streamId, label: stream?.title ?? null };
+    return { type: 'STREAM', id: streamId, label: stream?.title || null };
   }
 
   private async hostOf(streamId: string): Promise<string | undefined> {

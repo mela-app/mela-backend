@@ -321,6 +321,12 @@ model Stream {
   thumbnailUrl    String?
   // Phase 4: one pinned chat message at a time (plan §6.13).
   pinnedMessageId String?           @unique @db.Uuid
+  // The board: a short see-through text the host or a moderator puts on the
+  // stage and drags anywhere (docs/features/streams.md) - null: none. Where
+  // it sits, 0 to 1 across and down the stage.
+  boardText       String?
+  boardX          Float             @default(0.5)
+  boardY          Float             @default(0.3)
   // Phase 8: the admin kill switch (plan §6.8). Kept after an unlock, as history.
   lockedById      String?
   lockedReason    String?
@@ -388,6 +394,8 @@ enum ModeratorCapability {
   FORCE_MUTE_GUESTS
   // Move and resize guests' tiles on everyone's stage.
   ARRANGE_GUESTS
+  // Write, edit, move and take down the live's board.
+  EDIT_BOARD
 }
 
 enum ModeratorStatus {
