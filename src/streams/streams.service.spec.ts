@@ -1024,6 +1024,17 @@ describe('StreamsService', () => {
       );
     });
 
+    it('a live has no title or game type of its own any more', async () => {
+      prisma.stream.create.mockImplementation(({ data }: Prisma.StreamCreateArgs) =>
+        Promise.resolve({ ...data }),
+      );
+
+      await makeService().goLive('host-1', {});
+
+      expect(prisma.stream.create.mock.calls[0][0].data).toMatchObject({ title: '' });
+      expect(prisma.stream.create.mock.calls[0][0].data.category).toBeUndefined();
+    });
+
     it('goes live with the chosen audience, and says so to the notifications', async () => {
       prisma.stream.create.mockImplementation(({ data }: Prisma.StreamCreateArgs) =>
         Promise.resolve({ ...data }),
@@ -1058,11 +1069,14 @@ describe('StreamsService', () => {
       prisma.scheduledLive.findFirst.mockResolvedValue({
         id: 'e1',
         visibility: StreamVisibility.FOLLOWERS,
+        title: 'Friday bingo',
       });
       prisma.scheduledLive.updateMany.mockResolvedValue({ count: 1 });
       const service = makeService();
 
-      const result = await service.goLive('host-1', { title: 'Poker', scheduledLiveId: 'e1' });
+      // The app no longer sends a title: the live takes the scheduled one's.
+      const result = await service.goLive('host-1', { scheduledLiveId: 'e1' });
+      expect(prisma.stream.create.mock.calls[0][0].data.title).toBe('Friday bingo');
 
       expect(prisma.scheduledLive.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({

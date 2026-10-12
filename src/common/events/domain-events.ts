@@ -38,6 +38,8 @@ export const DomainEvents = {
   ChatMessageDeleted: 'chat_message.deleted',
   ChatMessagePinned: 'chat_message.pinned',
   ChatMessageUnpinned: 'chat_message.unpinned',
+  // The live's board was written, edited, moved or taken down (docs/features/streams.md).
+  LiveBoardChanged: 'stream.board_changed',
   // Phase 5: notifications & sharing (plan §6.11).
   StreamStarted: 'stream.started',
   NotificationCreated: 'notification.created',
@@ -210,6 +212,13 @@ export interface ChatMessagePinnedPayload {
 export interface ChatMessageUnpinnedPayload {
   streamId: string;
   actorId: string;
+}
+
+// What everyone in the live shows now - null: taken down.
+export interface LiveBoardChangedPayload {
+  streamId: string;
+  actorId: string;
+  board: { text: string; x: number; y: number } | null;
 }
 
 export interface StreamStartedPayload {

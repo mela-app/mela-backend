@@ -141,7 +141,15 @@ describe('RealtimeGateway', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    streams.findLive.mockResolvedValue({ id: LIVE, hostId: 'host-1', layout: StreamLayout.SPLIT });
+    streams.findLive.mockResolvedValue({
+      id: LIVE,
+      hostId: 'host-1',
+      layout: StreamLayout.SPLIT,
+      // The board the host put up - late joiners get it with the room.
+      boardText: 'Round 3 at 8:30',
+      boardX: 0.2,
+      boardY: 0.1,
+    });
     presence.addViewer.mockResolvedValue({ viewerCount: 1, arrived: false });
     presence.claimArrivalNotice.mockResolvedValue(true);
     moderators.listActiveUserIds.mockResolvedValue(['mod-1']);
@@ -260,6 +268,7 @@ describe('RealtimeGateway', () => {
         paused: false,
         likeCount: 5,
         moderatorIds: ['mod-1'],
+        board: { text: 'Round 3 at 8:30', x: 0.2, y: 0.1 },
         messages: [message],
       });
       expect(socket.join).toHaveBeenCalledWith(`stream:${LIVE}`);
@@ -325,6 +334,7 @@ describe('RealtimeGateway', () => {
         paused: false,
         likeCount: 5,
         moderatorIds: ['mod-1'],
+        board: { text: 'Round 3 at 8:30', x: 0.2, y: 0.1 },
         chatMuted: false,
         chatMutedUntil: null,
         canRecord: false,

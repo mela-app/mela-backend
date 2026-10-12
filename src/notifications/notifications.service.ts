@@ -18,6 +18,7 @@ import {
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RedisService } from '../common/redis/redis.service';
 import { notBlockedEitherWayWith } from '../social/block-filters';
+import { titleSuffix } from '../streams/live-title';
 import { SocialService } from '../social/social.service';
 import { canWatchLive } from '../streams/live-audience';
 import { MarkNotificationsReadDto } from './dto/mark-notifications-read.dto';
@@ -209,7 +210,7 @@ export class NotificationsService {
         actorId: payload.hostId,
         streamId: payload.streamId,
         title: 'Live now',
-        body: `${hostName} is live: ${payload.title}`,
+        body: `${hostName} is live${titleSuffix(payload.title) || ' now'}`,
         actor: host,
         streamTitle: payload.title,
       });
@@ -398,7 +399,7 @@ export class NotificationsService {
       actorId: payload.senderId,
       streamId: payload.streamId,
       title: 'Live invite',
-      body: `${sender?.displayName ?? 'Someone'} invited you to a live${stream ? `: ${stream.title}` : ''}`,
+      body: `${sender?.displayName ?? 'Someone'} invited you to a live${titleSuffix(stream?.title)}`,
       actor: sender,
       streamTitle: stream?.title ?? null,
     });
@@ -425,7 +426,7 @@ export class NotificationsService {
       actorId: stream.hostId,
       streamId: payload.streamId,
       title: 'Invited on stage',
-      body: `${host?.displayName ?? 'A host'} invited you to join their live: ${stream.title}`,
+      body: `${host?.displayName ?? 'A host'} invited you to join their live${titleSuffix(stream.title)}`,
       actor: host,
       streamTitle: stream.title,
     });

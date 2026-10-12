@@ -1,0 +1,8 @@
+-- AlterEnum
+ALTER TYPE "ModeratorCapability" ADD VALUE 'EDIT_BOARD';
+
+-- AlterTable
+ALTER TABLE "streams" ADD COLUMN     "boardText" TEXT,
+ADD COLUMN     "boardX" DOUBLE PRECISION NOT NULL DEFAULT 0.5,
+ADD COLUMN     "boardY" DOUBLE PRECISION NOT NULL DEFAULT 0.3;
+

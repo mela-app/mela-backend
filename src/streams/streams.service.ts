@@ -179,7 +179,7 @@ export class StreamsService {
       data: {
         id,
         hostId,
-        title: dto.title,
+        title: dto.title?.trim() || scheduled?.title || '',
         category: dto.category,
         layout: dto.layout,
         visibility: dto.visibility ?? scheduled?.visibility,
@@ -335,7 +335,7 @@ export class StreamsService {
           lte: new Date(now + EARLY_START_MS),
         },
       },
-      select: { id: true, visibility: true },
+      select: { id: true, visibility: true, title: true },
     });
     if (!scheduled) {
       throw new BadRequestException(
@@ -465,7 +465,15 @@ export class StreamsService {
   async findLive(streamId: string) {
     return this.prisma.stream.findFirst({
       where: { id: streamId, status: StreamStatus.LIVE },
-      select: { id: true, hostId: true, layout: true, visibility: true },
+      select: {
+        id: true,
+        hostId: true,
+        layout: true,
+        visibility: true,
+        boardText: true,
+        boardX: true,
+        boardY: true,
+      },
     });
   }
 
