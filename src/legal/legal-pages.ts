@@ -229,6 +229,8 @@ the people watching; <strong>Mela does not record or store your lives</strong>, 
 <ul>
 <li>Your device type and app version, a random id for the app on your phone, and a push notification token.</li>
 <li>Your IP address and the times you use Mela, in our security logs and staff audit records.</li>
+<li>When the app crashes: a crash report - what went wrong in the app's code, the app version, your phone's model
+and Android version - so we can fix it. It doesn't include your name, your account or what you were watching.</li>
 </ul>
 
 <h2>3. How we use it</h2>
@@ -259,7 +261,8 @@ access is logged.</li>
 <p>We share information only with service providers that run parts of Mela for us, under contract, and only as
 needed:</p>
 <ul>
-<li><strong>Google Firebase</strong> - sign-in, email confirmation and push notifications.</li>
+<li><strong>Google Firebase</strong> - sign-in, email confirmation, push notifications and crash reports
+(Crashlytics).</li>
 <li><strong>Google Sign-In</strong> - if you choose to sign in with Google.</li>
 <li><strong>Hosting and storage providers</strong> - the servers and storage that run Mela, carry live video and hold
 pictures.</li>
@@ -276,7 +279,7 @@ trackers.</p>
 messages, follows and settings straight away.</li>
 <li>We keep a limited record afterwards only where we need it: reports and moderation records so our safety team can
 finish reviewing them, and security and audit records without your name or IP address.</li>
-<li>Security logs are kept for a limited time and then deleted.</li>
+<li>Security logs are kept for a limited time and then deleted; crash reports for at most 90 days.</li>
 </ul>
 
 <h2>7. Your choices and rights</h2>

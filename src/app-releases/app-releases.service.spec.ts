@@ -118,6 +118,25 @@ describe('AppReleasesService', () => {
       expect(check.current?.version).toBe('1.1.0');
     });
 
+    it('gets a build it can compare for every release published since, newest highest', async () => {
+      prisma.appRelease.findMany.mockResolvedValue([
+        release('1.3.0', 8, { required: true }),
+        release('1.2.0', 6),
+        release('1.1.0', 4, { build: 12 }),
+      ]);
+
+      const check = await service().check(AppPlatform.ANDROID, { build: 10 });
+
+      // That app skips a release without a build - it would have missed this one.
+      expect(check.status).toBe('REQUIRED');
+      expect(check.latest).toMatchObject({ version: '1.3.0', build: 13 });
+      expect(check.changes.map((change) => [change.version, change.build])).toEqual([
+        ['1.3.0', 13],
+        ['1.2.0', 12],
+        ['1.1.0', 12],
+      ]);
+    });
+
     it('an older release with its own link keeps it', async () => {
       prisma.appRelease.findMany.mockResolvedValue([
         release('1.2.0', 4, { build: 12, downloadUrl: 'https://example.com/mela-12.apk' }),
