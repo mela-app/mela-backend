@@ -8,6 +8,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StreamVisibility } from '@prisma/client';
 import { DomainEvents } from '../common/events/domain-events';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { HostingRestrictionsService } from '../hosting-restrictions/hosting-restrictions.service';
 import { SocialService } from '../social/social.service';
 import { LATE_GRACE_MS, REMIND_BEFORE_MS } from './scheduled-live-window';
 import { ScheduledLivesService } from './scheduled-lives.service';
@@ -36,11 +37,13 @@ describe('ScheduledLivesService', () => {
     isFollowing: jest.fn(),
   };
   const events = { emit: jest.fn() };
+  const hosting = { assertCanHost: jest.fn().mockResolvedValue(undefined) };
   const service = () =>
     new ScheduledLivesService(
       prisma as unknown as PrismaService,
       social as unknown as SocialService,
       events as unknown as EventEmitter2,
+      hosting as unknown as HostingRestrictionsService,
     );
   const host = { id: 'host-1', username: 'abebe', displayName: 'Abebe', avatarUrl: null };
   const row = (
@@ -263,6 +266,37 @@ describe('ScheduledLivesService', () => {
         title: 'Poker',
         startsAt: inMinutes(8),
         userIds: ['u1', 'u2'],
+      });
+    });
+  });
+
+  describe('a paused host (docs/features/hosting-restrictions.md)', () => {
+    it("can't announce a live", async () => {
+      const paused = new ForbiddenException({ code: 'HOSTING_RESTRICTED' });
+      hosting.assertCanHost.mockRejectedValueOnce(paused);
+
+      await expect(
+        service().create('host-1', { title: 'Friday poker', startsAt: inMinutes(60) }, now),
+      ).rejects.toBe(paused);
+      expect(prisma.scheduledLive.create).not.toHaveBeenCalled();
+    });
+
+    it('has what they announced cancelled', async () => {
+      await service().cancelForRestrictedHost(
+        {
+          restrictionId: 'r1',
+          userId: 'host-1',
+          streamId: null,
+          actorId: 'staff-1',
+          title: 'Abusive language',
+          endsAt: null,
+        },
+        now,
+      );
+
+      expect(prisma.scheduledLive.updateMany).toHaveBeenCalledWith({
+        where: expect.objectContaining({ hostId: 'host-1' }),
+        data: { cancelledAt: now },
       });
     });
   });

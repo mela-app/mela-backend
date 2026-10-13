@@ -6,6 +6,7 @@ import { PresenceModule } from '../common/presence/presence.module';
 import { RateLimitModule } from '../common/rate-limit/rate-limit.module';
 import { StorageModule } from '../common/storage/storage.module';
 import { DirectMessagesModule } from '../direct-messages/direct-messages.module';
+import { HostingRestrictionsModule } from '../hosting-restrictions/hosting-restrictions.module';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { StreamsModule } from '../streams/streams.module';
 import { UsersModule } from '../users/users.module';
@@ -22,6 +23,10 @@ import {
 import { AdminContentService } from './content/admin-content.service';
 import { AdminDataController } from './data/admin-data.controller';
 import { AdminDataService } from './data/admin-data.service';
+import {
+  AdminHostingReasonsController,
+  AdminHostingRestrictionsController,
+} from './hosting/admin-hosting.controller';
 import { AdminMessagesController } from './messages/admin-messages.controller';
 import { AdminMessagesService } from './messages/admin-messages.service';
 import { AdminOverviewController } from './overview/admin-overview.controller';
@@ -53,6 +58,7 @@ import { AdminUsersService } from './users/admin-users.service';
     StorageModule,
     DirectMessagesModule,
     UsersModule,
+    HostingRestrictionsModule,
   ],
   controllers: [
     AdminAuthController,
@@ -69,6 +75,8 @@ import { AdminUsersService } from './users/admin-users.service';
     AdminReleasesController,
     AdminDataController,
     AdminReportsController,
+    AdminHostingReasonsController,
+    AdminHostingRestrictionsController,
   ],
   providers: [
     AdminGuard,

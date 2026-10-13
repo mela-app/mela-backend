@@ -5,6 +5,7 @@ import { PresenceModule } from '../common/presence/presence.module';
 import { StorageModule } from '../common/storage/storage.module';
 import { VideoProviderModule } from '../common/video-provider/video-provider.module';
 import { GuestsModule } from '../guests/guests.module';
+import { HostingRestrictionsModule } from '../hosting-restrictions/hosting-restrictions.module';
 import { ModeratorsModule } from '../moderators/moderators.module';
 import { RecordingPermissionsModule } from '../recording-permissions/recording-permissions.module';
 import { RoomBansModule } from '../room-bans/room-bans.module';
@@ -30,6 +31,7 @@ import { StreamsService } from './streams.service';
     RoomChatMutesModule,
     RecordingPermissionsModule,
     StorageModule,
+    HostingRestrictionsModule,
   ],
   controllers: [StreamsController, LiveKitWebhookController, StreamThumbnailsController],
   providers: [StreamsService, LiveStreamSweeper, StreamThumbnailsService],

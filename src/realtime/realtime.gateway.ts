@@ -583,6 +583,32 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     this.server.to(streamRoom(payload.streamId)).emit('chat:unpinned', payload);
   }
 
+  // The user's own hosting changed (docs/features/hosting-restrictions.md):
+  // the app reloads GET /me/hosting. Nothing about why - that's in the reload.
+  @OnEvent(DomainEvents.HostingRestricted)
+  handleHostingRestricted(payload: { userId: string }) {
+    this.hostingChanged(payload.userId);
+  }
+
+  @OnEvent(DomainEvents.HostingRestrictionLifted)
+  handleHostingLifted(payload: { userId: string }) {
+    this.hostingChanged(payload.userId);
+  }
+
+  @OnEvent(DomainEvents.HostingRestrictionChanged)
+  handleHostingChanged(payload: { userId: string }) {
+    this.hostingChanged(payload.userId);
+  }
+
+  @OnEvent(DomainEvents.HostingAppealAnswered)
+  handleHostingAppealAnswered(payload: { userId: string }) {
+    this.hostingChanged(payload.userId);
+  }
+
+  private hostingChanged(userId: string) {
+    this.server.to(userRoom(userId)).emit('hosting:changed', {});
+  }
+
   // What a moderator may do reaches only their own sockets, on their private
   // room. Who moderates is the room's to know (stream:moderators).
   @OnEvent(DomainEvents.ModeratorGranted)

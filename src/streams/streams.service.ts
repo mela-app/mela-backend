@@ -16,6 +16,7 @@ import {
   RoomBanScope,
   Stream,
   StreamEndReason,
+  StreamGuestStatus,
   StreamLayout,
   StreamStatus,
   StreamVisibility,
@@ -26,6 +27,7 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import {
   DomainEvents,
   GuestPlacement,
+  HostingRestrictedPayload,
   LiveAccessRevokedPayload,
   StreamEndedPayload,
   StreamLayoutChangedPayload,
@@ -45,6 +47,7 @@ import { canWatchLive, HostRelation, liveScore } from './live-audience';
 import { VideoProviderRegistry } from '../common/video-provider/video-provider.registry';
 import { agoraUidFor } from '../common/video-provider/agora-video-provider.service';
 import { GuestsService, MAX_ACTIVE_GUESTS } from '../guests/guests.service';
+import { HostingRestrictionsService } from '../hosting-restrictions/hosting-restrictions.service';
 import { ModeratorsService } from '../moderators/moderators.service';
 import { RecordingPermissionsService } from '../recording-permissions/recording-permissions.service';
 import { RoomBansService } from '../room-bans/room-bans.service';
@@ -144,6 +147,7 @@ export class StreamsService {
     private readonly roomChatMutes: RoomChatMutesService,
     private readonly watchTickets: WatchTicketService,
     private readonly recordingPermissions: RecordingPermissionsService,
+    private readonly hosting: HostingRestrictionsService,
   ) {}
 
   getVideoConfig() {
@@ -151,6 +155,10 @@ export class StreamsService {
   }
 
   async goLive(hostId: string, dto: CreateStreamDto) {
+    // Staff paused their hosting (docs/features/hosting-restrictions.md):
+    // refused before anything else - their running live is left alone.
+    await this.hosting.assertCanHost(hostId);
+
     // A host can only have one live stream at a time - starting a new one
     // auto-ends any dangling previous one (e.g. the app crashed/disconnected
     // before the host could tap "End stream"), rather than leaving a zombie
@@ -1053,6 +1061,8 @@ export class StreamsService {
   async requestToJoinAsGuest(streamId: string, viewerId: string) {
     const stream = await this.getLiveOrThrow(streamId);
     await this.assertNotBlocked(stream.hostId, viewerId);
+    // Being on stage is streaming too: a paused host may watch, not join it.
+    await this.hosting.assertCanHost(viewerId);
     if (await this.roomBans.isBanned(stream.hostId, viewerId, streamId)) {
       throw new ForbiddenException('You are banned from this stream');
     }
@@ -1066,6 +1076,10 @@ export class StreamsService {
       throw new ForbiddenException('Only the host can invite someone on stage');
     }
     await this.assertNotBlocked(stream.hostId, userId);
+    // Without saying why: whose hosting is paused is between them and the team.
+    if (await this.hosting.isRestricted(userId)) {
+      throw new ForbiddenException("They can't join a stage right now");
+    }
     return this.guests.invite(streamId, stream.hostId, userId);
   }
 
@@ -1107,6 +1121,12 @@ export class StreamsService {
     const stream = await this.getLiveOrThrow(streamId);
     const request = await this.guests.findPendingOrThrow(streamId, requestId);
     await this.assertCanResolve(request, streamId, stream.hostId, requesterId);
+    // Paused after they asked, or accepting an invite while paused.
+    if (request.userId === requesterId) {
+      await this.hosting.assertCanHost(requesterId);
+    } else if (await this.hosting.isRestricted(request.userId)) {
+      throw new ForbiddenException("They can't join a stage right now");
+    }
 
     const activeCount = await this.guests.countActiveGuests(streamId);
     if (activeCount >= MAX_ACTIVE_GUESTS) {
@@ -1310,6 +1330,32 @@ export class StreamsService {
       this.logger.warn(
         `Could not apply ${blockerId}'s block of ${blockedId} to their lives: ${error}`,
       );
+    }
+  }
+
+  /**
+   * Staff paused someone's hosting (docs/features/hosting-restrictions.md):
+   * their running live ends at once, and they leave any stage they're on.
+   * Watching stays - only the streaming stops.
+   */
+  @OnEvent(DomainEvents.HostingRestricted)
+  async handleHostingRestricted({ userId, actorId }: HostingRestrictedPayload): Promise<void> {
+    try {
+      const own = await this.prisma.stream.findMany({
+        where: { hostId: userId, status: StreamStatus.LIVE },
+        select: { id: true },
+      });
+      for (const stream of own) await this.endStream(stream.id, StreamEndReason.HOST_RESTRICTED);
+
+      const seats = await this.prisma.stream.findMany({
+        where: {
+          status: StreamStatus.LIVE,
+          guests: { some: { userId, status: StreamGuestStatus.ACTIVE } },
+        },
+      });
+      for (const stream of seats) await this.vacateGuestSeat(stream, userId, true, actorId);
+    } catch (error) {
+      this.logger.warn(`Could not stop ${userId}'s streaming after their restriction: ${error}`);
     }
   }
 
