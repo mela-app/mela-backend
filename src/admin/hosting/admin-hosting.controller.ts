@@ -15,6 +15,7 @@ import { Throttle } from '@nestjs/throttler';
 import { AdminPermission } from '@prisma/client';
 import {
   AnswerAppealDto,
+  InForceQueryDto,
   LiftRestrictionDto,
   ListReasonsQueryDto,
   ListRestrictionsQueryDto,
@@ -74,6 +75,12 @@ export class AdminHostingRestrictionsController {
   @Get()
   list(@Query() query: ListRestrictionsQueryDto) {
     return this.restrictions.list({ ...query, filter: query.state });
+  }
+
+  // Before ':id', which would take the word for an id.
+  @Get('in-force')
+  inForce(@Query() query: InForceQueryDto) {
+    return this.restrictions.inForce(query.userIds);
   }
 
   @Get(':id')

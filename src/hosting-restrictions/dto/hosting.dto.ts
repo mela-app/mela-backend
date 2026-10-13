@@ -179,4 +179,28 @@ export class ListRestrictionsQueryDto extends PageQueryDto {
   @IsString()
   @MaxLength(64)
   userId?: string;
+
+  // The host's name or username.
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(100)
+  q?: string;
+}
+
+export class InForceQueryDto {
+  // Comma-separated, up to 100.
+  @Transform(({ value }) =>
+    typeof value === 'string'
+      ? value
+          .split(',')
+          .map((id) => id.trim())
+          .filter(Boolean)
+      : value,
+  )
+  @IsArray()
+  @ArrayMaxSize(100)
+  @IsString({ each: true })
+  @MaxLength(64, { each: true })
+  userIds!: string[];
 }
