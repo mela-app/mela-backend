@@ -1,12 +1,24 @@
 import { liveLabel } from '../streams/live-title';
-import { Controller, Get, Param, Res, VERSION_NEUTRAL } from '@nestjs/common';
+import { Controller, Get, Param, Req, Res, VERSION_NEUTRAL } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { StreamStatus, StreamVisibility } from '@prisma/client';
 import { isUUID } from 'class-validator';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { MELA_COLORS, MELA_LOGO_SVG } from './brand';
-import { escapeHtml, InstallLinks, installLinks, jsonForHtml } from './share-page';
+import {
+  androidGetAppUrl,
+  androidIntent,
+  appTarget,
+  escapeHtml,
+  getMelaUrl,
+  inAppBrowser,
+  InstallLinks,
+  installLinks,
+  jsonForHtml,
+  requestOrigin,
+  testerProgram,
+} from './share-page';
 
 /** Firebase's public web settings: the player's Continue with Google (docs/features/auth.md). */
 export interface FirebaseWebConfig {
@@ -41,7 +53,7 @@ export class WebFallbackController {
   ) {}
 
   @Get(':id')
-  async show(@Param('id') id: string, @Res() res: Response): Promise<void> {
+  async show(@Param('id') id: string, @Res() res: Response, @Req() req?: Request): Promise<void> {
     const stream = isUUID(id)
       ? await this.prisma.stream.findUnique({
           where: { id },
@@ -59,15 +71,38 @@ export class WebFallbackController {
     const isLive =
       stream?.status === StreamStatus.LIVE && stream.visibility === StreamVisibility.PUBLIC;
     const scheme = this.config.getOrThrow<string>('APP_URL_SCHEME');
-    const player = isLive ? this.playerConfig(id, scheme) : null;
+    const origin = requestOrigin(req);
+    const player = isLive ? this.playerConfig(id, scheme, origin) : null;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     if (player) res.setHeader('Content-Security-Policy', this.playerCsp(player.firebase));
-    res.send(renderPage(stream, id, scheme, player));
+    res.send(renderPage(stream, id, scheme, player, this.openLinks(id, scheme, origin, req)));
   }
 
-  private playerConfig(streamId: string, appScheme: string): PlayerConfig {
+  // Without Mela, Android lands on the early-access steps (or the store) and
+  // comes back to this live; another app's browser can't open apps, so goes
+  // to the steps page straight away (docs/features/share.md, "Early access").
+  private openLinks(id: string, scheme: string, origin: string, req?: Request): OpenLinks {
+    const deepLink = `${scheme}://live/${encodeURIComponent(id)}`;
+    const target = appTarget(`live/${id}`);
+    const agent = req?.get('user-agent') ?? '';
+    const getMela = testerProgram(this.config) ? getMelaUrl(origin, target) : null;
+    if (!target) return { open: deepLink, getMela: null };
+    if (inAppBrowser(agent) && getMela) return { open: getMela, getMela: null };
+    if (!/Android/i.test(agent)) return { open: deepLink, getMela };
+    const { androidPackage } = installLinks(this.config);
+    const fallback = androidGetAppUrl(this.config, origin, target);
+    return { open: androidIntent(scheme, androidPackage, target, fallback), getMela };
+  }
+
+  private playerConfig(streamId: string, appScheme: string, origin: string): PlayerConfig {
     const firebase = this.firebaseWebConfig();
-    return { streamId, appScheme, ...installLinks(this.config), ...(firebase && { firebase }) };
+    return {
+      streamId,
+      appScheme,
+      ...installLinks(this.config),
+      androidInstallUrl: androidGetAppUrl(this.config, origin, appTarget(`live/${streamId}`)),
+      ...(firebase && { firebase }),
+    };
   }
 
   private firebaseWebConfig(): FirebaseWebConfig | null {
@@ -106,6 +141,13 @@ export class WebFallbackController {
   }
 }
 
+/** Where the page's buttons go on this phone. */
+interface OpenLinks {
+  open: string;
+  // "New to Mela?" - the early-access steps, while Mela is a closed test.
+  getMela: string | null;
+}
+
 interface StreamPreview {
   title: string;
   status: StreamStatus;
@@ -120,8 +162,8 @@ function renderPage(
   id: string,
   scheme: string,
   player: PlayerConfig | null,
+  links: OpenLinks = { open: `${scheme}://live/${encodeURIComponent(id)}`, getMela: null },
 ): string {
-  const deepLink = `${scheme}://live/${encodeURIComponent(id)}`;
   const restricted =
     stream?.status === StreamStatus.LIVE &&
     stream.visibility !== undefined &&
@@ -175,6 +217,7 @@ html, body { margin: 0; background: #0e0e14; color: #f5f5f7; font: 16px/1.5 syst
 .fallback .live { display: inline-block; margin-top: 32px; padding: 2px 10px; border-radius: 999px; background: #ff3b5c; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; }
 .fallback h1 { margin: 16px 0 8px; font-size: 24px; line-height: 1.3; overflow-wrap: anywhere; }
 .fallback p { margin: 0; color: #9c9cac; }
+.fallback .get { display: block; margin-top: 16px; color: #7cc4e8; }
 .fallback .open { display: block; margin-top: 32px; padding: 14px 20px; border-radius: 999px; background: ${MELA_COLORS.teal}; color: #fff; font-weight: 700; text-decoration: none; }
 </style>${playerTags}
 </head>
@@ -186,7 +229,12 @@ html, body { margin: 0; background: #0e0e14; color: #f5f5f7; font: 16px/1.5 syst
 ${isLive || restricted ? '<div class="live">LIVE</div>' : ''}
 <h1>${title}</h1>
 <p>${description}</p>
-<a class="open" href="${deepLink}">Open in Mela</a>
+<a class="open" href="${escapeHtml(links.open)}">Open in Mela</a>${
+    links.getMela
+      ? `
+<a class="get" href="${escapeHtml(links.getMela)}">New to Mela? Get it here</a>`
+      : ''
+  }
 </main>
 </div>
 </div>

@@ -1,12 +1,22 @@
-import { Controller, Get, Param, Res, VERSION_NEUTRAL } from '@nestjs/common';
+import { Controller, Get, Param, Req, Res, VERSION_NEUTRAL } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { UserStatus } from '@prisma/client';
 import { isUUID } from 'class-validator';
 import { randomBytes } from 'crypto';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { MELA_COLORS, MELA_LOGO_SVG } from './brand';
-import { escapeHtml, InstallLinks, installLinks, jsonForHtml } from './share-page';
+import {
+  androidGetAppUrl,
+  androidIntent,
+  appTarget,
+  escapeHtml,
+  inAppBrowser,
+  InstallLinks,
+  installLinks,
+  jsonForHtml,
+  requestOrigin,
+} from './share-page';
 
 /** How the page's script sends a phone on - into the app, or to its store. */
 export interface ProfileOpenConfig {
@@ -14,6 +24,8 @@ export interface ProfileOpenConfig {
   androidIntent: string;
   // Only once Universal Links open the app before this page ever loads (APPLE_APP_ID).
   iosStoreUrl: string | null;
+  // Not from another app's browser (TikTok's): it can't open apps, so the button leads on instead.
+  autoOpen: boolean;
 }
 
 interface SharedProfile {
@@ -38,7 +50,7 @@ export class ProfileLinkController {
   ) {}
 
   @Get(':id')
-  async show(@Param('id') id: string, @Res() res: Response): Promise<void> {
+  async show(@Param('id') id: string, @Res() res: Response, @Req() req?: Request): Promise<void> {
     const user = isUUID(id)
       ? await this.prisma.user.findUnique({
           where: { id },
@@ -46,7 +58,13 @@ export class ProfileLinkController {
         })
       : null;
     const profile = user?.status === UserStatus.ACTIVE ? user : null;
-    const links = installLinks(this.config);
+    const origin = requestOrigin(req);
+    // Without Mela, Android gets the early-access steps (or the store), coming back to this profile.
+    const links = {
+      ...installLinks(this.config),
+      androidInstallUrl: androidGetAppUrl(this.config, origin, appTarget(`profile/${id}`)),
+    };
+    const inApp = inAppBrowser(req?.get('user-agent')) !== null;
     const nonce = randomBytes(16).toString('base64');
 
     res.status(profile ? 200 : 404);
@@ -55,7 +73,7 @@ export class ProfileLinkController {
     res.setHeader('Content-Security-Policy', this.csp(nonce));
     res.send(
       profile
-        ? renderProfile(profile, this.openConfig(id, links), links, this.deepLink(id), nonce)
+        ? renderProfile(profile, this.openConfig(id, links, inApp), links, this.deepLink(id), nonce)
         : renderUnavailable(links),
     );
   }
@@ -64,14 +82,17 @@ export class ProfileLinkController {
     return `${this.config.getOrThrow<string>('APP_URL_SCHEME')}://profile/${encodeURIComponent(userId)}`;
   }
 
-  private openConfig(userId: string, links: InstallLinks): ProfileOpenConfig {
+  private openConfig(userId: string, links: InstallLinks, inApp: boolean): ProfileOpenConfig {
     const scheme = this.config.getOrThrow<string>('APP_URL_SCHEME');
-    const androidIntent =
-      `intent://profile/${encodeURIComponent(userId)}#Intent;scheme=${scheme};` +
-      `package=${links.androidPackage};` +
-      `S.browser_fallback_url=${encodeURIComponent(links.androidInstallUrl)};end`;
+    const target = appTarget(`profile/${userId}`)!;
     const universalLinks = Boolean(this.config.get<string>('APPLE_APP_ID'));
-    return { androidIntent, iosStoreUrl: universalLinks ? links.iosInstallUrl : null };
+    return {
+      androidIntent: inApp
+        ? links.androidInstallUrl
+        : androidIntent(scheme, links.androidPackage, target, links.androidInstallUrl),
+      iosStoreUrl: universalLinks ? links.iosInstallUrl : null,
+      autoOpen: !inApp,
+    };
   }
 
   // Pictures over plain http too outside production: S3Mock on a development machine.
@@ -97,8 +118,8 @@ const OPEN_SCRIPT = `(function () {
   var ios = /iPhone|iPad|iPod/.test(agent) || (/Macintosh/.test(agent) && navigator.maxTouchPoints > 1);
   if (/Android/.test(agent)) {
     document.getElementById('open').href = config.androidIntent;
-    location.replace(config.androidIntent);
-  } else if (ios && config.iosStoreUrl) {
+    if (config.autoOpen) location.replace(config.androidIntent);
+  } else if (ios && config.iosStoreUrl && config.autoOpen) {
     location.replace(config.iosStoreUrl);
   }
 })();`;

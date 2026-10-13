@@ -30,6 +30,7 @@ import { RoomChatMutesService } from '../room-chat-mutes/room-chat-mutes.service
 import { SocialService } from '../social/social.service';
 import { WatchTicketService } from '../auth/watch-ticket.service';
 import { StreamsService } from './streams.service';
+import { HostingRestrictionsService } from '../hosting-restrictions/hosting-restrictions.service';
 
 describe('StreamsService', () => {
   const prisma = {
@@ -146,6 +147,11 @@ describe('StreamsService', () => {
     list: jest.fn(),
   };
 
+  const hosting = {
+    assertCanHost: jest.fn().mockResolvedValue(undefined),
+    isRestricted: jest.fn().mockResolvedValue(false),
+  };
+
   function makeService() {
     return new StreamsService(
       prisma as unknown as PrismaService,
@@ -160,12 +166,15 @@ describe('StreamsService', () => {
       roomChatMutes as unknown as RoomChatMutesService,
       watchTickets as unknown as WatchTicketService,
       recordingPermissions as unknown as RecordingPermissionsService,
+      hosting as unknown as HostingRestrictionsService,
     );
   }
 
   beforeEach(() => {
     jest.clearAllMocks();
     prisma.stream.updateMany.mockResolvedValue({ count: 1 });
+    hosting.assertCanHost.mockResolvedValue(undefined);
+    hosting.isRestricted.mockResolvedValue(false);
   });
 
   it("returns the active provider's config for the pre-publish camera preview", () => {
@@ -2562,6 +2571,71 @@ describe('StreamsService', () => {
 
       await new Promise(process.nextTick); // not awaited on purpose - see endStream()
       expect(guests.removeAllForEndedStream).toHaveBeenCalledWith('s1');
+    });
+  });
+
+  describe('hosting restrictions (docs/features/hosting-restrictions.md)', () => {
+    const paused = new ForbiddenException({ code: 'HOSTING_RESTRICTED' });
+
+    it('refuses to go live while their hosting is paused, leaving everything as it was', async () => {
+      hosting.assertCanHost.mockRejectedValueOnce(paused);
+
+      await expect(makeService().goLive('host-1', { title: '' })).rejects.toBe(paused);
+      expect(prisma.stream.findFirst).not.toHaveBeenCalled();
+      expect(videoProvider.openChannel).not.toHaveBeenCalled();
+      expect(prisma.stream.create).not.toHaveBeenCalled();
+    });
+
+    it("keeps a paused host off someone else's stage - asking, being invited or accepting", async () => {
+      prisma.stream.findUnique.mockResolvedValue({
+        id: 's1',
+        hostId: 'host-1',
+        status: 'LIVE',
+        videoProvider: 'LIVEKIT',
+        channelName: 'c1',
+      });
+      hosting.assertCanHost.mockRejectedValue(paused);
+      hosting.isRestricted.mockResolvedValue(true);
+      const service = makeService();
+
+      await expect(service.requestToJoinAsGuest('s1', 'viewer-1')).rejects.toBe(paused);
+      await expect(service.inviteGuest('s1', 'host-1', 'viewer-1')).rejects.toThrow(
+        "They can't join a stage right now",
+      );
+      expect(guests.request).not.toHaveBeenCalled();
+      expect(guests.invite).not.toHaveBeenCalled();
+
+      guests.findPendingOrThrow.mockResolvedValue({
+        id: 'r1',
+        userId: 'viewer-1',
+        initiatedBy: 'HOST',
+      });
+      await expect(service.acceptGuestRequest('s1', 'r1', 'viewer-1')).rejects.toBe(paused);
+      expect(guests.accept).not.toHaveBeenCalled();
+    });
+
+    it("ends the paused host's live and takes them off any stage", async () => {
+      const service = makeService();
+      const endStream = jest
+        .spyOn(service as unknown as { endStream: () => Promise<unknown> }, 'endStream')
+        .mockResolvedValue(undefined);
+      const vacate = jest
+        .spyOn(service as unknown as { vacateGuestSeat: () => Promise<void> }, 'vacateGuestSeat')
+        .mockResolvedValue(undefined);
+      const other = { id: 's2', hostId: 'host-2' };
+      prisma.stream.findMany.mockResolvedValueOnce([{ id: 's1' }]).mockResolvedValueOnce([other]);
+
+      await service.handleHostingRestricted({
+        restrictionId: 'r1',
+        userId: 'host-1',
+        streamId: 's1',
+        actorId: 'staff-1',
+        title: 'Abusive language',
+        endsAt: null,
+      });
+
+      expect(endStream).toHaveBeenCalledWith('s1', 'HOST_RESTRICTED');
+      expect(vacate).toHaveBeenCalledWith(other, 'host-1', true, 'staff-1');
     });
   });
 });

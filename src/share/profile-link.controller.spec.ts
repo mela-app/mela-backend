@@ -1,6 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { UserStatus } from '@prisma/client';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { ProfileLinkController, ProfileOpenConfig } from './profile-link.controller';
 
@@ -83,11 +83,49 @@ describe('ProfileLinkController', () => {
         `intent://profile/${USER}#Intent;scheme=melalive;package=com.melalive.app;` +
         'S.browser_fallback_url=https%3A%2F%2Fplay.google.com%2Fstore%2Fapps%2Fdetails%3Fid%3Dcom.melalive.app;end',
       iosStoreUrl: null,
+      autoOpen: true,
     });
     expect(page()).toContain(
       'href="https://play.google.com/store/apps/details?id=com.melalive.app">Get Mela for Android',
     );
     expect(page()).not.toContain('Get Mela for iPhone');
+  });
+
+  describe('early access (docs/features/share.md)', () => {
+    const request = (agent: string) =>
+      ({
+        protocol: 'https',
+        get: (name: string) => ({ host: 'melalive.app', 'user-agent': agent })[name.toLowerCase()],
+      }) as unknown as Request;
+    const getMela = `https://melalive.app/get-mela?open=${encodeURIComponent(`profile/${USER}`)}`;
+
+    beforeEach(() => {
+      settings({ ANDROID_TESTER_GROUP_URL: 'https://groups.google.com/g/mela-tester' });
+      findUnique.mockResolvedValue(ana);
+    });
+
+    it('sends Android without Mela to the tester steps, coming back to this profile', async () => {
+      await controller.show(USER, res, request('Mozilla/5.0 (Linux; Android 14) Chrome/129.0'));
+
+      expect(openConfig()).toEqual({
+        androidIntent:
+          `intent://profile/${USER}#Intent;scheme=melalive;package=com.melalive.app;` +
+          `S.browser_fallback_url=${encodeURIComponent(getMela)};end`,
+        iosStoreUrl: null,
+        autoOpen: true,
+      });
+      expect(page()).toContain(`href="${getMela}">Get Mela for Android`);
+    });
+
+    it("doesn't try to open the app from TikTok's browser: the button leads to the steps", async () => {
+      await controller.show(
+        USER,
+        res,
+        request('Mozilla/5.0 (Linux; Android 14; wv) Chrome/129.0 musical_ly_36.0.4'),
+      );
+
+      expect(openConfig()).toEqual({ androidIntent: getMela, iosStoreUrl: null, autoOpen: false });
+    });
   });
 
   it('uses the configured install links', async () => {

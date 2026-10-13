@@ -1,6 +1,13 @@
 import { Injectable } from '@nestjs/common';
-import { AdminPermission, ReportCaseStatus, StreamStatus, UserStatus } from '@prisma/client';
+import {
+  AdminPermission,
+  HostingAppealState,
+  ReportCaseStatus,
+  StreamStatus,
+  UserStatus,
+} from '@prisma/client';
 import { LivePresenceService } from '../../common/presence/live-presence.service';
+import { activeRestrictionWhere } from '../../hosting-restrictions/hosting-rules';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AdminPrincipal } from '../admin.guard';
 
@@ -45,6 +52,7 @@ export class AdminOverviewService {
       alertsSent,
       openReports,
       urgentReports,
+      hostingAppeals,
       daily,
     ] = await Promise.all([
       this.presence
@@ -58,6 +66,13 @@ export class AdminOverviewService {
       this.prisma.adminAlert.count({ where: { createdAt: { gte: since } } }),
       this.prisma.reportCase.count({ where: { status: ReportCaseStatus.OPEN } }),
       this.prisma.reportCase.count({ where: { status: ReportCaseStatus.OPEN, urgent: true } }),
+      // Appeals the team hasn't answered, on restrictions still in force.
+      this.prisma.hostingRestriction.count({
+        where: {
+          ...activeRestrictionWhere(new Date()),
+          appealState: HostingAppealState.WAITING_STAFF,
+        },
+      }),
       this.dailySeries(),
     ]);
 
@@ -76,6 +91,10 @@ export class AdminOverviewService {
       // Only for staff who may see reports.
       reports: admin.permissions.includes(AdminPermission.VIEW_REPORTS)
         ? { open: openReports, urgent: urgentReports }
+        : null,
+      // Only for staff who may see hosting restrictions.
+      hosting: admin.permissions.includes(AdminPermission.VIEW_HOSTING_RESTRICTIONS)
+        ? { waitingAppeals: hostingAppeals }
         : null,
       daily,
     };

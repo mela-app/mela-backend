@@ -40,6 +40,13 @@ export const DomainEvents = {
   ChatMessageUnpinned: 'chat_message.unpinned',
   // The live's board was written, edited, moved or taken down (docs/features/streams.md).
   LiveBoardChanged: 'stream.board_changed',
+  // Hosting restrictions (docs/features/hosting-restrictions.md).
+  HostingRestricted: 'hosting.restricted',
+  HostingRestrictionLifted: 'hosting.lifted',
+  HostingRestrictionChanged: 'hosting.changed',
+  HostingAppealSent: 'hosting.appeal_sent',
+  HostingAppealAnswered: 'hosting.appeal_answered',
+  HostingReasonSaved: 'hosting.reason_saved',
   // Phase 5: notifications & sharing (plan §6.11).
   StreamStarted: 'stream.started',
   NotificationCreated: 'notification.created',
@@ -219,6 +226,57 @@ export interface LiveBoardChangedPayload {
   streamId: string;
   actorId: string;
   board: { text: string; x: number; y: number } | null;
+}
+
+// Staff paused [userId]'s hosting, because of [streamId]: their live ends,
+// they're taken off any stage, their scheduled lives are cancelled.
+export interface HostingRestrictedPayload {
+  restrictionId: string;
+  userId: string;
+  streamId: string | null;
+  actorId: string;
+  title: string;
+  endsAt: Date | null;
+}
+
+export interface HostingRestrictionLiftedPayload {
+  restrictionId: string;
+  userId: string;
+  streamId: string | null;
+  actorId: string;
+  reply: string | null;
+}
+
+// Staff changed how long it lasts, or their note.
+export interface HostingRestrictionChangedPayload {
+  restrictionId: string;
+  userId: string;
+  streamId: string | null;
+  actorId: string;
+  fields: string[];
+}
+
+export interface HostingAppealSentPayload {
+  restrictionId: string;
+  userId: string;
+  streamId: string | null;
+}
+
+// KEEP: still restricted; ASK: the team wants more from the host.
+export interface HostingAppealAnsweredPayload {
+  restrictionId: string;
+  userId: string;
+  streamId: string | null;
+  actorId: string;
+  decision: 'KEEP' | 'ASK';
+  reply: string;
+}
+
+export interface HostingReasonSavedPayload {
+  reasonId: string;
+  actorId: string;
+  title: string;
+  change: 'created' | 'updated' | 'archived' | 'restored';
 }
 
 export interface StreamStartedPayload {

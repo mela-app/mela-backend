@@ -62,6 +62,28 @@ export const AUDIT_ACTIONS = {
     category: 'MODERATION',
     label: 'Removed a reported private message',
   },
+  'hosting.restricted': { category: 'MODERATION', label: "Paused someone's hosting" },
+  'hosting.lifted': { category: 'MODERATION', label: "Gave someone's hosting back" },
+  'hosting.changed': { category: 'MODERATION', label: 'Changed a hosting restriction' },
+  'hosting.appeal_sent': { category: 'MODERATION', label: 'Appealed a hosting restriction' },
+  'hosting.appeal_kept': {
+    category: 'MODERATION',
+    label: 'Kept a hosting restriction after an appeal',
+  },
+  'hosting.appeal_asked': {
+    category: 'MODERATION',
+    label: 'Asked a host for more about their appeal',
+  },
+  'hosting_reason.created': { category: 'SETTINGS', label: 'Added a hosting restriction reason' },
+  'hosting_reason.updated': { category: 'SETTINGS', label: 'Changed a hosting restriction reason' },
+  'hosting_reason.archived': {
+    category: 'SETTINGS',
+    label: 'Archived a hosting restriction reason',
+  },
+  'hosting_reason.restored': {
+    category: 'SETTINGS',
+    label: 'Restored a hosting restriction reason',
+  },
 
   'guest.requested': { category: 'GUEST', label: 'Asked to join the stage' },
   'guest.invited': { category: 'GUEST', label: 'Invited someone on stage' },
@@ -111,7 +133,9 @@ export type AuditTargetType =
   // One of the data sets on the console's Data page.
   | 'DATA'
   // A case on the console's Reports page.
-  | 'REPORT';
+  | 'REPORT'
+  // A saved reason for pausing someone's hosting.
+  | 'HOSTING_REASON';
 
 // What entries say instead of a deleted account's name.
 export const DELETED_ACCOUNT_LABEL = 'Deleted account';

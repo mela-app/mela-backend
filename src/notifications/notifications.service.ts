@@ -6,6 +6,9 @@ import {
   DirectMessageSentPayload,
   DomainEvents,
   GuestRequestCreatedPayload,
+  HostingAppealAnsweredPayload,
+  HostingRestrictedPayload,
+  HostingRestrictionLiftedPayload,
   ModeratorGrantedPayload,
   NotificationCreatedPayload,
   ReportCaseResolvedPayload,
@@ -111,6 +114,9 @@ const SETTING_KEY_BY_TYPE: Record<NotificationType, keyof SettingsView | null> =
   REPORT_DISMISSED: null,
   SCHEDULED_LIVE_SOON: 'pushStreamStarted',
   FOLLOWING_JOINED_LIVE: 'pushFollowingJoinedLive',
+  HOSTING_RESTRICTED: null,
+  HOSTING_RESTORED: null,
+  HOSTING_APPEAL_ANSWERED: null,
 };
 
 /** What a direct message's push says it is (its data.type) - not a NotificationType: no inbox row. */
@@ -471,6 +477,52 @@ export class NotificationsService {
       body: actioned
         ? 'We looked into something you reported and took action.'
         : "We looked into something you reported. It doesn't go against our guidelines.",
+      actor: null,
+      streamTitle: null,
+    });
+  }
+
+  // About the recipient's own hosting (docs/features/hosting-restrictions.md):
+  // from the team, not a person, so no actor; the app opens the hosting screen.
+  @OnEvent(DomainEvents.HostingRestricted)
+  async onHostingRestricted(payload: HostingRestrictedPayload): Promise<void> {
+    await this.hostingNotice(payload.userId, NotificationType.HOSTING_RESTRICTED, {
+      title: 'Your hosting is paused',
+      body: `${payload.title}. You can still watch and chat - tap to see why or to appeal.`,
+    });
+  }
+
+  @OnEvent(DomainEvents.HostingRestrictionLifted)
+  async onHostingLifted(payload: HostingRestrictionLiftedPayload): Promise<void> {
+    await this.hostingNotice(payload.userId, NotificationType.HOSTING_RESTORED, {
+      title: 'You can go live again',
+      body: payload.reply ?? 'The Mela team gave your hosting back.',
+    });
+  }
+
+  @OnEvent(DomainEvents.HostingAppealAnswered)
+  async onHostingAppealAnswered(payload: HostingAppealAnsweredPayload): Promise<void> {
+    await this.hostingNotice(payload.userId, NotificationType.HOSTING_APPEAL_ANSWERED, {
+      title:
+        payload.decision === 'ASK' ? 'The Mela team needs more from you' : 'The Mela team answered',
+      body: payload.reply,
+    });
+  }
+
+  private hostingNotice(
+    userId: string,
+    type: NotificationType,
+    text: { title: string; body: string },
+  ): Promise<void> {
+    return this.fanOut([userId], {
+      type,
+      actorId: null,
+      streamId: null,
+      title: text.title,
+      body:
+        text.body.length > MESSAGE_PREVIEW_LENGTH
+          ? `${text.body.slice(0, MESSAGE_PREVIEW_LENGTH - 1)}…`
+          : text.body,
       actor: null,
       streamTitle: null,
     });

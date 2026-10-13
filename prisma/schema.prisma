@@ -35,6 +35,10 @@ enum AdminPermission {
   // What users reported (docs/features/moderation.md): MANAGE decides on it.
   VIEW_REPORTS
   MANAGE_REPORTS
+  // Pausing someone's hosting, and answering their appeals
+  // (docs/features/hosting-restrictions.md): MANAGE restricts, lifts and replies.
+  VIEW_HOSTING_RESTRICTIONS
+  MANAGE_HOSTING_RESTRICTIONS
 }
 
 enum UserStatus {
@@ -102,51 +106,56 @@ model User {
   usernameChangedAt      DateTime?
   displayNameChangedAt   DateTime?
 
-  streams               Stream[]                @relation("StreamHost")
+  streams               Stream[]                    @relation("StreamHost")
   sessions              UserSession[]
   legalAcceptances      LegalAcceptance[]
+  hostingRestrictions   HostingRestriction[]        @relation("HostingRestricted")
+  hostingRestricted     HostingRestriction[]        @relation("HostingRestrictedBy")
+  hostingLifted         HostingRestriction[]        @relation("HostingLiftedBy")
+  hostingMessages       HostingRestrictionMessage[]
+  hostingReasons        HostingRestrictionReason[]
   identities            UserIdentity[]
   chatMessages          ChatMessage[]
   // Rows where this user is the one following someone.
-  following             Follow[]                @relation("Follower")
+  following             Follow[]                    @relation("Follower")
   // Rows where this user is the one being followed.
-  followedBy            Follow[]                @relation("Followee")
+  followedBy            Follow[]                    @relation("Followee")
   // Phase 4: moderation, block & delegated moderators (plan §6.4, §6.9).
-  moderatorsGranted     Moderator[]             @relation("ModeratorsGranted")
-  moderatingFor         Moderator[]             @relation("ModeratorOf")
-  blocksMade            Block[]                 @relation("Blocker")
-  blockedBy             Block[]                 @relation("Blocked")
-  roomBansIssued        RoomBan[]               @relation("RoomBansIssued")
-  roomBans              RoomBan[]               @relation("RoomBanned")
+  moderatorsGranted     Moderator[]                 @relation("ModeratorsGranted")
+  moderatingFor         Moderator[]                 @relation("ModeratorOf")
+  blocksMade            Block[]                     @relation("Blocker")
+  blockedBy             Block[]                     @relation("Blocked")
+  roomBansIssued        RoomBan[]                   @relation("RoomBansIssued")
+  roomBans              RoomBan[]                   @relation("RoomBanned")
   bannedPhrasesCreated  BannedPhrase[]
   // Phase 5: notifications & sharing (plan §6.11).
-  notificationsReceived Notification[]          @relation("NotificationsReceived")
-  notificationsActed    Notification[]          @relation("NotificationsActed")
+  notificationsReceived Notification[]              @relation("NotificationsReceived")
+  notificationsActed    Notification[]              @relation("NotificationsActed")
   notificationSettings  NotificationSettings?
   // Phase 6: guest management (plan §6.5, §6.6).
-  guestRequestsMade     GuestRequest[]          @relation("GuestRequester")
-  guestSeats            StreamGuest[]           @relation("GuestSeats")
+  guestRequestsMade     GuestRequest[]              @relation("GuestRequester")
+  guestSeats            StreamGuest[]               @relation("GuestSeats")
   // Phase 7: mute suite (plan §6.7).
-  roomChatMutes         RoomChatMute[]          @relation("RoomChatMuted")
-  roomChatMutesIssued   RoomChatMute[]          @relation("RoomChatMutesIssued")
-  personalMutesMade     PersonalChatMute[]      @relation("PersonalMutesMade")
-  personalMutedBy       PersonalChatMute[]      @relation("PersonalMutedBy")
+  roomChatMutes         RoomChatMute[]              @relation("RoomChatMuted")
+  roomChatMutesIssued   RoomChatMute[]              @relation("RoomChatMutesIssued")
+  personalMutesMade     PersonalChatMute[]          @relation("PersonalMutesMade")
+  personalMutedBy       PersonalChatMute[]          @relation("PersonalMutedBy")
   // Phase 8: admin console (plan §6.8).
-  streamsLocked         Stream[]                @relation("StreamLockedBy")
+  streamsLocked         Stream[]                    @relation("StreamLockedBy")
   adminAlertsSent       AdminAlert[]
   auditLogs             AuditLog[]
-  recordingPermissions  RecordingPermission[]   @relation("RecordingAllowed")
+  recordingPermissions  RecordingPermission[]       @relation("RecordingAllowed")
   // Direct messages between friends (docs/features/messages.md).
-  conversationsAsA      Conversation[]          @relation("ConversationUserA")
-  conversationsAsB      Conversation[]          @relation("ConversationUserB")
-  directMessagesSent    DirectMessage[]         @relation("DirectMessagesSent")
-  directMessagesInbox   DirectMessage[]         @relation("DirectMessagesReceived")
+  conversationsAsA      Conversation[]              @relation("ConversationUserA")
+  conversationsAsB      Conversation[]              @relation("ConversationUserB")
+  directMessagesSent    DirectMessage[]             @relation("DirectMessagesSent")
+  directMessagesInbox   DirectMessage[]             @relation("DirectMessagesReceived")
   appReleasesPublished  AppRelease[]
-  scheduledLives        ScheduledLive[]         @relation("ScheduledLiveHost")
+  scheduledLives        ScheduledLive[]             @relation("ScheduledLiveHost")
   liveReminders         ScheduledLiveReminder[]
-  reportsMade           Report[]                @relation("ReportsMade")
-  reportCasesAgainst    ReportCase[]            @relation("ReportCasesAgainst")
-  reportCasesResolved   ReportCase[]            @relation("ReportCasesResolved")
+  reportsMade           Report[]                    @relation("ReportsMade")
+  reportCasesAgainst    ReportCase[]                @relation("ReportCasesAgainst")
+  reportCasesResolved   ReportCase[]                @relation("ReportCasesResolved")
 
   @@map("users")
 }
@@ -293,6 +302,8 @@ enum StreamEndReason {
   REPLACED
   // Phase 8: an admin locked it (plan §6.8).
   LOCKED
+  // The host's hosting was paused by staff (docs/features/hosting-restrictions.md).
+  HOST_RESTRICTED
 }
 
 // Phase 1: go-live/watch. See docs/features/streams.md.
@@ -346,6 +357,7 @@ model Stream {
   chatMutes            RoomChatMute[]
   adminAlerts          AdminAlert[]
   recordingPermissions RecordingPermission[]
+  hostingRestrictions  HostingRestriction[]
   // The scheduled live this one fulfils, when the host started it from one.
   scheduledLive        ScheduledLive?
 
@@ -505,6 +517,10 @@ enum NotificationType {
   SCHEDULED_LIVE_SOON
   // Someone the recipient follows joined a live (docs/features/notifications.md).
   FOLLOWING_JOINED_LIVE
+  // About the recipient's own hosting (docs/features/hosting-restrictions.md) - always pushed.
+  HOSTING_RESTRICTED
+  HOSTING_RESTORED
+  HOSTING_APPEAL_ANSWERED
 }
 
 model Notification {
@@ -956,4 +972,91 @@ model ScheduledLiveReminder {
   @@id([scheduledLiveId, userId])
   @@index([userId])
   @@map("scheduled_live_reminders")
+}
+
+// Hosting restrictions (docs/features/hosting-restrictions.md): staff pause
+// someone's hosting - going live, joining a stage, scheduling a live -
+// because of a live; watching, chat and messages stay as they are. Until
+// staff lift it (or the time they set runs out), and the host may appeal.
+
+// The reasons staff wrote, to pick from next time - or write a new one.
+model HostingRestrictionReason {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  // What the host reads as the heading, e.g. "Abusive language in your live".
+  title       String
+  // What the host is told, in full.
+  message     String
+  // No longer offered; restrictions that used it keep their own copy.
+  archived    Boolean  @default(false)
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy    User?                @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  restrictions HostingRestriction[]
+
+  @@index([archived, createdAt])
+  @@map("hosting_restriction_reasons")
+}
+
+enum HostingAppealState {
+  // The host hasn't written.
+  NONE
+  // The host wrote: the team's turn.
+  WAITING_STAFF
+  // The team asked for more: the host's turn.
+  WAITING_HOST
+  // The team kept the restriction; the host may write again a day later.
+  KEPT
+}
+
+model HostingRestriction {
+  id          String             @id @default(uuid(7)) @db.Uuid
+  userId      String
+  // The live it's about - its page in the console shows it with the appeal.
+  streamId    String?
+  reasonId    String?            @db.Uuid
+  // What the host is shown - copied from the reason, or written for this one.
+  title       String
+  message     String
+  // Staff only.
+  note        String?
+  // Null: until the team lifts it.
+  endsAt      DateTime?
+  liftedAt    DateTime?
+  liftedById  String?
+  appealState HostingAppealState @default(NONE)
+  keptAt      DateTime?
+  createdById String?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  user      User                        @relation("HostingRestricted", fields: [userId], references: [id], onDelete: Cascade)
+  stream    Stream?                     @relation(fields: [streamId], references: [id], onDelete: SetNull)
+  reason    HostingRestrictionReason?   @relation(fields: [reasonId], references: [id], onDelete: SetNull)
+  createdBy User?                       @relation("HostingRestrictedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  liftedBy  User?                       @relation("HostingLiftedBy", fields: [liftedById], references: [id], onDelete: SetNull)
+  messages  HostingRestrictionMessage[]
+
+  @@index([userId, liftedAt])
+  @@index([streamId, createdAt])
+  @@index([appealState, updatedAt])
+  @@map("hosting_restrictions")
+}
+
+// The appeal: the host's messages (with pictures) and the team's replies.
+model HostingRestrictionMessage {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  restrictionId String   @db.Uuid
+  authorId      String?
+  fromStaff     Boolean
+  text          String
+  imageUrls     String[] @default([])
+  createdAt     DateTime @default(now())
+
+  restriction HostingRestriction @relation(fields: [restrictionId], references: [id], onDelete: Cascade)
+  author      User?              @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([restrictionId, createdAt])
+  @@map("hosting_restriction_messages")
 }

@@ -5,10 +5,15 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { Prisma, StreamVisibility } from '@prisma/client';
-import { DomainEvents, ScheduledLiveStartingSoonPayload } from '../common/events/domain-events';
+import {
+  DomainEvents,
+  HostingRestrictedPayload,
+  ScheduledLiveStartingSoonPayload,
+} from '../common/events/domain-events';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { HostingRestrictionsService } from '../hosting-restrictions/hosting-restrictions.service';
 import { notBlockedEitherWayWith } from '../social/block-filters';
 import { SocialService } from '../social/social.service';
 import { canWatchLive } from '../streams/live-audience';
@@ -64,9 +69,11 @@ export class ScheduledLivesService {
     private readonly prisma: PrismaService,
     private readonly social: SocialService,
     private readonly events: EventEmitter2,
+    private readonly hosting: HostingRestrictionsService,
   ) {}
 
   async create(hostId: string, dto: CreateScheduledLiveDto, now = new Date()) {
+    await this.hosting.assertCanHost(hostId, now);
     const lead = dto.startsAt.getTime() - now.getTime();
     if (!Number.isFinite(lead) || lead < MIN_LEAD_MS) {
       throw new BadRequestException('Pick a time at least 5 minutes from now');
@@ -138,6 +145,15 @@ export class ScheduledLivesService {
     });
     const visible = await this.visibleTo(rows, viewerId);
     return { items: await this.withReminded(visible, viewerId) };
+  }
+
+  /** Their hosting was paused: what they announced won't happen, so nobody waits for it. */
+  @OnEvent(DomainEvents.HostingRestricted)
+  async cancelForRestrictedHost({ userId }: HostingRestrictedPayload, now = new Date()) {
+    await this.prisma.scheduledLive.updateMany({
+      where: { hostId: userId, ...upcomingWhere(now) },
+      data: { cancelledAt: now },
+    });
   }
 
   async cancel(id: string, hostId: string) {

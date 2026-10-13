@@ -22,6 +22,12 @@ import {
   GuestMicForceMuteChangedPayload,
   GuestRemovedPayload,
   GuestRequestCreatedPayload,
+  HostingAppealAnsweredPayload,
+  HostingAppealSentPayload,
+  HostingReasonSavedPayload,
+  HostingRestrictedPayload,
+  HostingRestrictionChangedPayload,
+  HostingRestrictionLiftedPayload,
   ModeratorGrantedPayload,
   ModeratorRevokedPayload,
   ModeratorUpdatedPayload,
@@ -640,6 +646,75 @@ export class AuditEventsListener {
       target: { type: 'REPORT', id: payload.caseId, label: payload.label },
       reason: payload.note,
       metadata: { targetType: payload.targetType, reporters: payload.reporterIds.length },
+    }));
+  }
+
+  // Hosting restrictions: on the host, and on the live it was about.
+  @OnEvent(DomainEvents.HostingRestricted)
+  onHostingRestricted(payload: HostingRestrictedPayload) {
+    return this.track(async () => ({
+      action: 'hosting.restricted',
+      actorId: payload.actorId,
+      target: await this.userTarget(payload.userId),
+      streamId: payload.streamId,
+      reason: payload.title,
+      metadata: {
+        restrictionId: payload.restrictionId,
+        endsAt: payload.endsAt ? payload.endsAt.toISOString() : null,
+      },
+    }));
+  }
+
+  @OnEvent(DomainEvents.HostingRestrictionLifted)
+  onHostingLifted(payload: HostingRestrictionLiftedPayload) {
+    return this.track(async () => ({
+      action: 'hosting.lifted',
+      actorId: payload.actorId,
+      target: await this.userTarget(payload.userId),
+      streamId: payload.streamId,
+      metadata: { restrictionId: payload.restrictionId },
+    }));
+  }
+
+  @OnEvent(DomainEvents.HostingRestrictionChanged)
+  onHostingChanged(payload: HostingRestrictionChangedPayload) {
+    return this.track(async () => ({
+      action: 'hosting.changed',
+      actorId: payload.actorId,
+      target: await this.userTarget(payload.userId),
+      streamId: payload.streamId,
+      metadata: { restrictionId: payload.restrictionId, fields: payload.fields },
+    }));
+  }
+
+  @OnEvent(DomainEvents.HostingAppealSent)
+  onHostingAppealSent(payload: HostingAppealSentPayload) {
+    return this.track(async () => ({
+      action: 'hosting.appeal_sent',
+      actorId: payload.userId,
+      target: await this.userTarget(payload.userId),
+      streamId: payload.streamId,
+      metadata: { restrictionId: payload.restrictionId },
+    }));
+  }
+
+  @OnEvent(DomainEvents.HostingAppealAnswered)
+  onHostingAppealAnswered(payload: HostingAppealAnsweredPayload) {
+    return this.track(async () => ({
+      action: payload.decision === 'KEEP' ? 'hosting.appeal_kept' : 'hosting.appeal_asked',
+      actorId: payload.actorId,
+      target: await this.userTarget(payload.userId),
+      streamId: payload.streamId,
+      metadata: { restrictionId: payload.restrictionId },
+    }));
+  }
+
+  @OnEvent(DomainEvents.HostingReasonSaved)
+  onHostingReasonSaved(payload: HostingReasonSavedPayload) {
+    return this.track(async () => ({
+      action: `hosting_reason.${payload.change}` as const,
+      actorId: payload.actorId,
+      target: { type: 'HOSTING_REASON', id: payload.reasonId, label: payload.title },
     }));
   }
 
