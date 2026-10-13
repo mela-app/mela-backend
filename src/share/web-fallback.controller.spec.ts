@@ -1,6 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { StreamStatus, StreamVisibility } from '@prisma/client';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { PlayerConfig, WebFallbackController } from './web-fallback.controller';
 
@@ -269,5 +269,50 @@ describe('WebFallbackController', () => {
 
     expect(findUnique).not.toHaveBeenCalled();
     expect(page()).toContain("This live doesn't exist or has ended.");
+  });
+
+  describe('early access (docs/features/share.md)', () => {
+    const request = (agent: string) =>
+      ({
+        protocol: 'https',
+        get: (name: string) => ({ host: 'melalive.app', 'user-agent': agent })[name.toLowerCase()],
+      }) as unknown as Request;
+    const getMela = `https://melalive.app/get-mela?open=${encodeURIComponent(`live/${LIVE}`)}`;
+    const android = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) Chrome/129.0 Mobile Safari/537.36';
+
+    beforeEach(() => {
+      config.get.mockImplementation((key: string) =>
+        key === 'ANDROID_TESTER_GROUP_URL' ? 'https://groups.google.com/g/mela-tester' : undefined,
+      );
+      findUnique.mockResolvedValue({
+        title: 'Big night',
+        status: StreamStatus.LIVE,
+        visibility: StreamVisibility.PUBLIC,
+        host: { displayName: 'Ana' },
+      });
+    });
+
+    it("the player's Get the app, and Open in Mela without the app, go to the tester steps for this live", async () => {
+      await controller.show(LIVE, res, request(android));
+
+      expect(playerConfig().androidInstallUrl).toBe(getMela);
+      expect(page()).toContain(
+        `href="intent://live/${LIVE}#Intent;scheme=gamblinglive;package=com.gamblinglive.app;` +
+          `S.browser_fallback_url=${encodeURIComponent(getMela)};end">Open in Mela`,
+      );
+      expect(page()).toContain(`href="${getMela}">New to Mela? Get it here`);
+    });
+
+    it("from TikTok's browser, Open in Mela goes straight to the steps - it can't open apps", async () => {
+      await controller.show(
+        LIVE,
+        res,
+        request(
+          `${android.replace('Pixel 8', 'Pixel 8; wv')} musical_ly_36.0.4 BytedanceWebview/d8a21c6`,
+        ),
+      );
+
+      expect(page()).toContain(`href="${getMela}">Open in Mela`);
+    });
   });
 });
