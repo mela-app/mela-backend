@@ -71,6 +71,48 @@ describe('HostingRestrictionsService', () => {
     });
   });
 
+  describe('for the console', () => {
+    it('gives one restriction in force per host, the newest, and asks nothing for no hosts', async () => {
+      prisma.hostingRestriction.findMany.mockResolvedValueOnce([
+        { id: 'new', userId: 'host-1' },
+        { id: 'old', userId: 'host-1' },
+        { id: 'r2', userId: 'host-2' },
+      ]);
+
+      const rows = await service().inForce(['host-1', 'host-2', 'host-3'], now);
+
+      expect(rows.map((row) => row.id)).toEqual(['new', 'r2']);
+      expect(prisma.hostingRestriction.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            userId: { in: ['host-1', 'host-2', 'host-3'] },
+            liftedAt: null,
+            OR: [{ endsAt: null }, { endsAt: { gt: now } }],
+          },
+        }),
+      );
+      expect(await service().inForce([], now)).toEqual([]);
+      expect(prisma.hostingRestriction.findMany).toHaveBeenCalledTimes(1);
+    });
+
+    it("finds restrictions by the host's name or username", async () => {
+      await service().list({ q: ' ana ', filter: 'all', page: 1, pageSize: 20 }, now);
+
+      expect(prisma.hostingRestriction.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            user: {
+              OR: [
+                { username: { contains: 'ana', mode: 'insensitive' } },
+                { displayName: { contains: 'ana', mode: 'insensitive' } },
+              ],
+            },
+          },
+        }),
+      );
+    });
+  });
+
   describe('restricting', () => {
     beforeEach(() => {
       prisma.user.findUnique.mockResolvedValue({ id: 'host-1' });

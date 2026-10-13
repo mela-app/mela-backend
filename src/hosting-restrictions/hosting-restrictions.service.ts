@@ -398,14 +398,54 @@ export class HostingRestrictionsService {
     return this.detail(id, now);
   }
 
+  /**
+   * The restriction in force on each of [userIds] that has one - for the
+   * console's host lists (Live chat, Lives), which only need a badge.
+   */
+  async inForce(userIds: string[], now: Date = new Date()) {
+    if (userIds.length === 0) return [];
+    const rows = await this.prisma.hostingRestriction.findMany({
+      where: { userId: { in: userIds }, ...activeRestrictionWhere(now) },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        userId: true,
+        streamId: true,
+        title: true,
+        endsAt: true,
+        appealState: true,
+        createdAt: true,
+      },
+    });
+    // One each (the newest), should two ever overlap.
+    const seen = new Set<string>();
+    return rows.filter((row) => !seen.has(row.userId) && seen.add(row.userId));
+  }
+
   /** A page of restrictions, newest activity first, and how many wait for the team. */
   async list(
-    query: PageQueryDto & { filter?: RestrictionFilter; streamId?: string; userId?: string },
+    query: PageQueryDto & {
+      filter?: RestrictionFilter;
+      streamId?: string;
+      userId?: string;
+      q?: string;
+    },
     now: Date = new Date(),
   ) {
+    const q = query.q?.trim();
     const where: Prisma.HostingRestrictionWhereInput = {
       ...(query.streamId ? { streamId: query.streamId } : {}),
       ...(query.userId ? { userId: query.userId } : {}),
+      ...(q
+        ? {
+            user: {
+              OR: [
+                { username: { contains: q, mode: 'insensitive' } },
+                { displayName: { contains: q, mode: 'insensitive' } },
+              ],
+            },
+          }
+        : {}),
       ...this.filterWhere(query.filter ?? 'all', now),
     };
     const [rows, total, waiting, active] = await Promise.all([
