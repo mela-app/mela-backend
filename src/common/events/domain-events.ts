@@ -102,6 +102,8 @@ export const DomainEvents = {
   GuestSpotlightChanged: 'guest.spotlight_changed',
   // An app update was published, changed or withdrawn (docs/features/app-updates.md).
   AppReleaseChanged: 'app_release.changed',
+  // Staff changed the camera effects the app offers (docs/features/camera-effects.md).
+  CameraEffectChanged: 'camera_effect.changed',
   // A super admin removed stored data, or everything but their own account (docs/features/admin.md).
   DataCleared: 'data.cleared',
   DataReset: 'data.reset',
@@ -573,6 +575,15 @@ export interface AdminAlertSentPayload {
 
 // RealtimeGateway tells every open app (`app:update`), and each asks
 // GET /v1/app/update again. The release as it is after the change.
+export interface CameraEffectChangedPayload {
+  change: 'created' | 'updated' | 'deleted';
+  // An effect (any kind), or one of the Effects panel's categories.
+  target: 'effect' | 'category';
+  id: string;
+  actorId: string;
+  name: string;
+}
+
 export interface AppReleaseChangedPayload {
   change: 'published' | 'updated' | 'withdrawn';
   releaseId: string;

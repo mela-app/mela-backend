@@ -72,22 +72,21 @@ describe('ProfileLinkController', () => {
     expect(page()).not.toContain('"Co"');
   });
 
-  it('opens the profile in the app, or sends Android to the store', async () => {
+  it('opens the profile in the app, or sends Android to the store - telling a fresh install where to go', async () => {
     findUnique.mockResolvedValue(ana);
 
     await controller.show(USER, res);
 
+    const store = `https://play.google.com/store/apps/details?id=com.melalive.app&referrer=${encodeURIComponent(`mela_open=profile/${USER}`)}`;
     expect(page()).toContain(`href="melalive://profile/${USER}"`);
     expect(openConfig()).toEqual({
       androidIntent:
         `intent://profile/${USER}#Intent;scheme=melalive;package=com.melalive.app;` +
-        'S.browser_fallback_url=https%3A%2F%2Fplay.google.com%2Fstore%2Fapps%2Fdetails%3Fid%3Dcom.melalive.app;end',
+        `S.browser_fallback_url=${encodeURIComponent(store)};end`,
       iosStoreUrl: null,
       autoOpen: true,
     });
-    expect(page()).toContain(
-      'href="https://play.google.com/store/apps/details?id=com.melalive.app">Get Mela for Android',
-    );
+    expect(page()).toContain(`href="${store.replace(/&/g, '&amp;')}">Get Mela for Android`);
     expect(page()).not.toContain('Get Mela for iPhone');
   });
 

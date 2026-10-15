@@ -79,7 +79,8 @@ describe('WebFallbackController', () => {
       streamId: LIVE,
       appScheme: 'gamblinglive',
       androidPackage: 'com.gamblinglive.app',
-      androidInstallUrl: 'https://play.google.com/store/apps/details?id=com.gamblinglive.app',
+      // Play hands the referrer to a fresh install, which opens this live.
+      androidInstallUrl: `https://play.google.com/store/apps/details?id=com.gamblinglive.app&referrer=${encodeURIComponent(`mela_open=live/${LIVE}`)}`,
       iosInstallUrl: null,
     });
     expect(header('Content-Type')).toBe('text/html; charset=utf-8');

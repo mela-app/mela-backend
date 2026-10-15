@@ -39,6 +39,10 @@ enum AdminPermission {
   // (docs/features/hosting-restrictions.md): MANAGE restricts, lifts and replies.
   VIEW_HOSTING_RESTRICTIONS
   MANAGE_HOSTING_RESTRICTIONS
+  // The camera effects, makeup, backgrounds and beauty the app offers hosts
+  // (docs/features/camera-effects.md): MANAGE uploads, edits and publishes.
+  VIEW_CAMERA_EFFECTS
+  MANAGE_CAMERA_EFFECTS
 }
 
 enum UserStatus {
@@ -114,6 +118,7 @@ model User {
   hostingLifted         HostingRestriction[]        @relation("HostingLiftedBy")
   hostingMessages       HostingRestrictionMessage[]
   hostingReasons        HostingRestrictionReason[]
+  cameraEffects         CameraEffect[]
   identities            UserIdentity[]
   chatMessages          ChatMessage[]
   // Rows where this user is the one following someone.
@@ -1059,4 +1064,72 @@ model HostingRestrictionMessage {
 
   @@index([restrictionId, createdAt])
   @@map("hosting_restriction_messages")
+}
+
+// Camera effects (docs/features/camera-effects.md): what hosts put on their
+// camera through the AR engine (DeepAR) - uploaded and published by staff,
+// downloaded by the app when first used. Color filters and basic beauty are
+// the app's own and aren't here.
+
+enum CameraEffectKind {
+  // A face or scene effect, in a category ("Sports", "Funny"...).
+  EFFECT
+  // A makeup look.
+  MAKEUP
+  // A picture behind the host (green screen).
+  BACKGROUND
+  // The face-shape rig the Beautify sliders drive: at most one published.
+  BEAUTY
+}
+
+enum MakeupAudience {
+  ALL
+  FEMALE
+  MALE
+}
+
+// The tabs of the app's Effects panel, after "Trending" and "New".
+model CameraEffectCategory {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  name      String   @unique
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  effects CameraEffect[]
+
+  @@map("camera_effect_categories")
+}
+
+model CameraEffect {
+  id           String             @id @default(uuid(7)) @db.Uuid
+  kind         CameraEffectKind
+  name         String
+  // EFFECT only.
+  categoryId   String?            @db.Uuid
+  // MAKEUP: who it's for in the app's Female / Male tabs.
+  audience     MakeupAudience     @default(ALL)
+  // The AR engine's file (.deepar) - EFFECT, MAKEUP, BEAUTY.
+  fileUrl      String?
+  fileSize     Int?
+  // The picture in the app's grid.
+  thumbnailUrl String?
+  // BACKGROUND: the picture itself.
+  imageUrl     String?
+  // BEAUTY: what each slider changes in the rig (see the doc).
+  controls     Json?
+  // Shown under "Trending".
+  featured     Boolean            @default(false)
+  // Only published ones reach the app.
+  published    Boolean            @default(false)
+  sortOrder    Int                @default(0)
+  createdById  String?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  category  CameraEffectCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  createdBy User?                 @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([kind, published, sortOrder])
+  @@map("camera_effects")
 }

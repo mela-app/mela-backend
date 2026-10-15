@@ -48,7 +48,7 @@ describe('GetMelaController', () => {
     expect(page()).toContain(`href="${GROUP}"`);
     expect(page()).toContain('href="https://play.google.com/apps/testing/com.melalive.app"');
     expect(page()).toContain(
-      'href="https://play.google.com/store/apps/details?id=com.melalive.app"',
+      `href="https://play.google.com/store/apps/details?id=com.melalive.app&amp;referrer=${encodeURIComponent(`mela_open=live/${LIVE}`)}"`,
     );
     // Opens the live in Mela - or, not installed yet, comes back here.
     expect(page()).toContain(
