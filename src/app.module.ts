@@ -27,6 +27,7 @@ import { AuditModule } from './audit/audit.module';
 import { AdminModule } from './admin/admin.module';
 import { DirectMessagesModule } from './direct-messages/direct-messages.module';
 import { AppReleasesModule } from './app-releases/app-releases.module';
+import { CameraEffectsModule } from './camera-effects/camera-effects.module';
 import { HostingRestrictionsModule } from './hosting-restrictions/hosting-restrictions.module';
 import { LegalModule } from './legal/legal.module';
 import { LiveBoardModule } from './live-board/live-board.module';
@@ -74,6 +75,7 @@ import { HealthController } from './health.controller';
     ReportsModule,
     LegalModule,
     HostingRestrictionsModule,
+    CameraEffectsModule,
     LiveBoardModule,
   ],
   controllers: [HealthController],

@@ -105,6 +105,13 @@ export const AUDIT_ACTIONS = {
   'app.release_published': { category: 'SETTINGS', label: 'Published an app update' },
   'app.release_updated': { category: 'SETTINGS', label: 'Changed an app update' },
   'app.release_withdrawn': { category: 'SETTINGS', label: 'Withdrew an app update' },
+
+  'camera_effect.created': { category: 'SETTINGS', label: 'Added a camera effect' },
+  'camera_effect.updated': { category: 'SETTINGS', label: 'Changed a camera effect' },
+  'camera_effect.deleted': { category: 'SETTINGS', label: 'Deleted a camera effect' },
+  'camera_effect_category.created': { category: 'SETTINGS', label: 'Added an effects category' },
+  'camera_effect_category.updated': { category: 'SETTINGS', label: 'Changed an effects category' },
+  'camera_effect_category.deleted': { category: 'SETTINGS', label: 'Deleted an effects category' },
 } as const satisfies Record<string, { category: AuditCategory; label: string }>;
 
 export type AuditAction = keyof typeof AUDIT_ACTIONS;
@@ -135,7 +142,9 @@ export type AuditTargetType =
   // A case on the console's Reports page.
   | 'REPORT'
   // A saved reason for pausing someone's hosting.
-  | 'HOSTING_REASON';
+  | 'HOSTING_REASON'
+  // A camera effect, or a category of them.
+  | 'CAMERA_EFFECT';
 
 // What entries say instead of a deleted account's name.
 export const DELETED_ACCOUNT_LABEL = 'Deleted account';
