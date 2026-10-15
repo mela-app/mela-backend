@@ -89,7 +89,18 @@ export function androidGetAppUrl(
 ): string {
   return testerProgram(config)
     ? getMelaUrl(origin, target)
-    : installLinks(config).androidInstallUrl;
+    : withInstallReferrer(installLinks(config).androidInstallUrl, target);
+}
+
+/**
+ * A Google Play listing link that tells the app, once installed, what was
+ * shared: Play hands `referrer` to the app on its first launch (mobile:
+ * install_referrer.dart), which opens [target] after sign-up. Other links
+ * are left as they are.
+ */
+export function withInstallReferrer(url: string, target: AppTarget | null): string {
+  if (!target || !/^https:\/\/play\.google\.com\/store\/apps\/details\?/i.test(url)) return url;
+  return `${url}&referrer=${encodeURIComponent(`mela_open=${target}`)}`;
 }
 
 /** This server's address as the browser reached it (behind the proxy: `trust proxy`). */

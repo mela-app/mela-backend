@@ -12,6 +12,7 @@ import {
   inAppBrowser,
   installLinks,
   jsonForHtml,
+  withInstallReferrer,
   requestOrigin,
   TesterProgram,
   testerProgram,
@@ -163,15 +164,17 @@ ${step(
   3,
   'install',
   'Install Mela',
-  "Install it from Google Play. If Play says it isn't available yet, wait a few minutes after step 2 and try again.",
-  `<a class="button primary" data-step="install" href="${escapeHtml(program.storeUrl)}" target="_blank" rel="noopener">Install from Google Play</a>`,
+  target
+    ? `Install it from Google Play, then tap <strong>Open</strong> there - once you've signed up, you're on ${what}. If Play says it isn't available yet, wait a few minutes after step 2 and try again.`
+    : "Install it from Google Play. If Play says it isn't available yet, wait a few minutes after step 2 and try again.",
+  `<a class="button primary" data-step="install" href="${escapeHtml(withInstallReferrer(program.storeUrl, target))}" target="_blank" rel="noopener">Install from Google Play</a>`,
 )}
 ${step(
   4,
   'open',
   target ? `Open ${what}` : 'Open Mela',
   target
-    ? `Sign up in the app, then come back to this page and tap the button - you'll land on ${what}.`
+    ? `Not on ${what} after signing up? Come back to this page and tap the button.`
     : 'Sign up in the app and you are in.',
   `<a class="button primary" data-step="open" href="${escapeHtml(input.openApp)}">${
     target ? `Open ${what} in Mela` : 'Open Mela'
