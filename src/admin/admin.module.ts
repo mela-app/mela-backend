@@ -6,7 +6,6 @@ import { PresenceModule } from '../common/presence/presence.module';
 import { RateLimitModule } from '../common/rate-limit/rate-limit.module';
 import { StorageModule } from '../common/storage/storage.module';
 import { DirectMessagesModule } from '../direct-messages/direct-messages.module';
-import { CameraEffectsModule } from '../camera-effects/camera-effects.module';
 import { HostingRestrictionsModule } from '../hosting-restrictions/hosting-restrictions.module';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { StreamsModule } from '../streams/streams.module';
@@ -15,7 +14,6 @@ import { AdminGuard } from './admin.guard';
 import { AdminAuditController } from './audit/admin-audit.controller';
 import { AdminAccountController, AdminAuthController } from './auth/admin-auth.controller';
 import { AdminAuthService } from './auth/admin-auth.service';
-import { AdminCameraEffectsController } from './camera-effects/admin-camera-effects.controller';
 import { AdminChatController } from './chat/admin-chat.controller';
 import { AdminChatService } from './chat/admin-chat.service';
 import {
@@ -61,7 +59,6 @@ import { AdminUsersService } from './users/admin-users.service';
     DirectMessagesModule,
     UsersModule,
     HostingRestrictionsModule,
-    CameraEffectsModule,
   ],
   controllers: [
     AdminAuthController,
@@ -80,7 +77,6 @@ import { AdminUsersService } from './users/admin-users.service';
     AdminReportsController,
     AdminHostingReasonsController,
     AdminHostingRestrictionsController,
-    AdminCameraEffectsController,
   ],
   providers: [
     AdminGuard,

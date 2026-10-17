@@ -10,7 +10,6 @@ import {
   AdminSignInFailedPayload,
   AdminSignedInPayload,
   AppReleaseChangedPayload,
-  CameraEffectChangedPayload,
   BannedPhraseChangedPayload,
   ChatMessageDeletedPayload,
   ChatMessagePinnedPayload,
@@ -592,18 +591,6 @@ export class AuditEventsListener {
       target: { type: 'ALERT', id: payload.alertId, label: excerpt(payload.message) },
       streamId: payload.streamId,
       metadata: { scope: payload.scope, severity: payload.severity },
-    }));
-  }
-
-  @OnEvent(DomainEvents.CameraEffectChanged)
-  onCameraEffectChanged(payload: CameraEffectChangedPayload) {
-    return this.track(async () => ({
-      action:
-        payload.target === 'effect'
-          ? (`camera_effect.${payload.change}` as const)
-          : (`camera_effect_category.${payload.change}` as const),
-      actorId: payload.actorId,
-      target: { type: 'CAMERA_EFFECT', id: payload.id, label: payload.name },
     }));
   }
 
