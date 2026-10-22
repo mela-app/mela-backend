@@ -17,6 +17,17 @@ describe('AgoraVideoProvider', () => {
     expect(provider.getClientConfig()).toEqual({ provider: 'AGORA', appId: 'app-id' });
   });
 
+  it("counts as set up only with both keys as Agora's console shows them", () => {
+    expect(makeProvider().isConfigured).toBe(false);
+    expect(
+      makeProvider({ AGORA_APP_ID: 'app-id', AGORA_APP_CERTIFICATE: 'cert' }).isConfigured,
+    ).toBe(false);
+    expect(
+      makeProvider({ AGORA_APP_ID: 'a'.repeat(32), AGORA_APP_CERTIFICATE: 'B'.repeat(32) })
+        .isConfigured,
+    ).toBe(true);
+  });
+
   it('needs no server call to open or close a channel', async () => {
     const provider = makeProvider();
     await expect(provider.openChannel()).resolves.toBeUndefined();
