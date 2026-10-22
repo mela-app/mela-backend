@@ -36,4 +36,16 @@ describe('VideoProviderRegistry', () => {
   it('refuses to start on LiveKit without its credentials', () => {
     expect(() => makeRegistry('livekit', false)).toThrow(/LIVEKIT_URL/);
   });
+
+  it('switches where new lives go while running - only to a provider that is set up', () => {
+    const registry = makeRegistry('agora', false);
+
+    expect(() => registry.setActive('LIVEKIT')).toThrow(/isn't set up/);
+    expect(registry.activeProvider).toBe('AGORA');
+
+    const both = makeRegistry('agora');
+    both.setActive('LIVEKIT');
+    expect(both.active().kind).toBe('LIVEKIT');
+    expect(both.defaultKind).toBe('AGORA');
+  });
 });

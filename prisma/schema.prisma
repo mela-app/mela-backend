@@ -114,6 +114,7 @@ model User {
   hostingLifted         HostingRestriction[]        @relation("HostingLiftedBy")
   hostingMessages       HostingRestrictionMessage[]
   hostingReasons        HostingRestrictionReason[]
+  videoProviderSwitches VideoProviderSwitch[]
   identities            UserIdentity[]
   chatMessages          ChatMessage[]
   // Rows where this user is the one following someone.
@@ -1059,4 +1060,63 @@ model HostingRestrictionMessage {
 
   @@index([restrictionId, createdAt])
   @@map("hosting_restriction_messages")
+}
+
+// Video providers (docs/features/video-provider.md): where new lives go,
+// switched from the console, and Agora's free minutes - counted by Mela,
+// since Agora bills by the minute past its free monthly allowance.
+
+// One row (id 1). Missing: VIDEO_PROVIDER from the environment.
+model VideoSettings {
+  id                     Int               @id @default(1)
+  activeProvider         VideoProviderKind
+  // Agora's free minutes each calendar month (they restart on the 1st).
+  agoraFreeMinutes       Int               @default(10000)
+  // Move new lives to LiveKit when Agora's free minutes run low...
+  autoSwitch             Boolean           @default(false)
+  autoSwitchBelowMinutes Int               @default(500)
+  // ...and back to Agora when the next period starts.
+  switchBackOnReset      Boolean           @default(true)
+  // When the automatic switch happened, this period.
+  autoSwitchedAt         DateTime?
+  // The last fetch of Agora's own usage report (AGORA_CUSTOMER_ID/SECRET), and why it failed.
+  agoraReportedAt        DateTime?
+  agoraReportError       String?
+  updatedById            String?
+  updatedAt              DateTime          @updatedAt
+
+  @@map("video_settings")
+}
+
+// A provider's minutes on one UTC day: Mela's own count, and the provider's report.
+model VideoUsageDay {
+  id              String            @id @default(uuid(7)) @db.Uuid
+  provider        VideoProviderKind
+  // UTC midnight.
+  day             DateTime
+  // Counted by Mela each minute: everyone connected to a live on this provider.
+  countedMinutes  Int               @default(0)
+  // From the provider's usage report (Agora's Usage API); null: not reported yet.
+  reportedMinutes Int?
+  reportedAt      DateTime?
+  updatedAt       DateTime          @updatedAt
+
+  @@unique([provider, day])
+  @@map("video_usage_days")
+}
+
+// Every switch of where new lives go - by staff, or automatic.
+model VideoProviderSwitch {
+  id        String            @id @default(uuid(7)) @db.Uuid
+  from      VideoProviderKind
+  to        VideoProviderKind
+  // Null: automatic.
+  actorId   String?
+  reason    String
+  createdAt DateTime          @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@map("video_provider_switches")
 }

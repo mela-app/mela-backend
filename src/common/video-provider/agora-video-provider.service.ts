@@ -56,6 +56,11 @@ export class AgoraVideoProvider implements VideoProvider {
     }
   }
 
+  /** Both credentials are set: tokens work against real Agora. */
+  get isConfigured(): boolean {
+    return Boolean(this.appId && this.appCertificate);
+  }
+
   // The app ID is all the pre-live camera preview needs.
   getClientConfig(): VideoClientConfig {
     return { provider: VideoProviderKind.AGORA, appId: this.appId };

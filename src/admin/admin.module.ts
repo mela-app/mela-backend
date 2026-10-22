@@ -7,6 +7,7 @@ import { RateLimitModule } from '../common/rate-limit/rate-limit.module';
 import { StorageModule } from '../common/storage/storage.module';
 import { DirectMessagesModule } from '../direct-messages/direct-messages.module';
 import { HostingRestrictionsModule } from '../hosting-restrictions/hosting-restrictions.module';
+import { VideoControlModule } from '../video-control/video-control.module';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { StreamsModule } from '../streams/streams.module';
 import { UsersModule } from '../users/users.module';
@@ -39,6 +40,7 @@ import { AdminStreamsController } from './streams/admin-streams.controller';
 import { AdminStreamsService } from './streams/admin-streams.service';
 import { AdminStaffController, AdminUsersController } from './users/admin-users.controller';
 import { AdminUsersService } from './users/admin-users.service';
+import { AdminVideoController } from './video/admin-video.controller';
 
 /**
  * The admin console's API (plan §6.8) - every route under /v1/admin, behind
@@ -59,6 +61,7 @@ import { AdminUsersService } from './users/admin-users.service';
     DirectMessagesModule,
     UsersModule,
     HostingRestrictionsModule,
+    VideoControlModule,
   ],
   controllers: [
     AdminAuthController,
@@ -77,6 +80,7 @@ import { AdminUsersService } from './users/admin-users.service';
     AdminReportsController,
     AdminHostingReasonsController,
     AdminHostingRestrictionsController,
+    AdminVideoController,
   ],
   providers: [
     AdminGuard,

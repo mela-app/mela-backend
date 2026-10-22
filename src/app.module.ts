@@ -28,6 +28,7 @@ import { AdminModule } from './admin/admin.module';
 import { DirectMessagesModule } from './direct-messages/direct-messages.module';
 import { AppReleasesModule } from './app-releases/app-releases.module';
 import { HostingRestrictionsModule } from './hosting-restrictions/hosting-restrictions.module';
+import { VideoControlModule } from './video-control/video-control.module';
 import { LegalModule } from './legal/legal.module';
 import { LiveBoardModule } from './live-board/live-board.module';
 import { ReportsModule } from './reports/reports.module';
@@ -74,6 +75,7 @@ import { HealthController } from './health.controller';
     ReportsModule,
     LegalModule,
     HostingRestrictionsModule,
+    VideoControlModule,
     LiveBoardModule,
   ],
   controllers: [HealthController],
