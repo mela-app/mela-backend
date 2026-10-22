@@ -181,6 +181,14 @@ export class StreamsService {
     const id = randomUUID();
     const videoProvider = this.videoProviders.active();
     const channelName = videoProvider.createChannelName(id);
+    // The host's token before anything exists: a provider that can't make one
+    // (wrong keys) fails the request with no LIVE row left behind that nobody
+    // broadcasts - the app never learns that stream's id, so can't end it.
+    const rtcToken = await videoProvider.mintToken({
+      channelName,
+      userId: hostId,
+      role: 'publisher',
+    });
     await videoProvider.openChannel(channelName);
 
     const stream = await this.prisma.stream.create({
@@ -203,12 +211,6 @@ export class StreamsService {
     await this.presence
       .touchHost(id)
       .catch((error) => this.logger.warn(`Could not mark host ${hostId} alive: ${error}`));
-
-    const rtcToken = await videoProvider.mintToken({
-      channelName,
-      userId: hostId,
-      role: 'publisher',
-    });
 
     // Fan-out (follower notifications) happens entirely out of this request's
     // path - NotificationsService reacts to this on its own time (plan §6.11).

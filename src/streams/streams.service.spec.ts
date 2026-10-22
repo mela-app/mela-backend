@@ -206,6 +206,17 @@ describe('StreamsService', () => {
     });
   });
 
+  it("leaves no LIVE row behind when the provider can't make the host's token", async () => {
+    videoProvider.mintToken.mockRejectedValueOnce(new Error('Failed to mint an Agora RTC token'));
+    const service = makeService();
+
+    await expect(service.goLive('host-1', { title: 'Casino night' })).rejects.toThrow(
+      'Failed to mint',
+    );
+    expect(prisma.stream.create).not.toHaveBeenCalled();
+    expect(videoProvider.openChannel).not.toHaveBeenCalled();
+  });
+
   it('opens the media channel before the stream row exists', async () => {
     prisma.stream.create.mockImplementation(({ data }: Prisma.StreamCreateArgs) =>
       Promise.resolve({ ...data }),

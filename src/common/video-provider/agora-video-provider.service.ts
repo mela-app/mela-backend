@@ -12,6 +12,8 @@ import {
 
 const DEFAULT_TTL_SECONDS = 4 * 60 * 60; // 4 hours
 
+// What Agora's console shows for an App ID or App Certificate.
+const AGORA_KEY = /^[0-9a-f]{32}$/i;
 /**
  * A stable, deterministic Agora uid for a given user - the same user always
  * gets the same uid (in this channel or any other), so a client's
@@ -56,9 +58,13 @@ export class AgoraVideoProvider implements VideoProvider {
     }
   }
 
-  /** Both credentials are set: tokens work against real Agora. */
+  /**
+   * Both credentials are set, each the 32-character hex string Agora's
+   * console shows: tokens can work against real Agora. (A mistyped value
+   * would make every go-live fail - the console won't switch to it.)
+   */
   get isConfigured(): boolean {
-    return Boolean(this.appId && this.appCertificate);
+    return AGORA_KEY.test(this.appId) && AGORA_KEY.test(this.appCertificate);
   }
 
   // The app ID is all the pre-live camera preview needs.
