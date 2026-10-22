@@ -105,6 +105,9 @@ export const AUDIT_ACTIONS = {
   'app.release_published': { category: 'SETTINGS', label: 'Published an app update' },
   'app.release_updated': { category: 'SETTINGS', label: 'Changed an app update' },
   'app.release_withdrawn': { category: 'SETTINGS', label: 'Withdrew an app update' },
+
+  'video.provider_switched': { category: 'SETTINGS', label: 'Switched where new lives go' },
+  'video.settings_changed': { category: 'SETTINGS', label: 'Changed the video settings' },
 } as const satisfies Record<string, { category: AuditCategory; label: string }>;
 
 export type AuditAction = keyof typeof AUDIT_ACTIONS;

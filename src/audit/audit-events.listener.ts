@@ -10,6 +10,8 @@ import {
   AdminSignInFailedPayload,
   AdminSignedInPayload,
   AppReleaseChangedPayload,
+  VideoProviderSwitchedPayload,
+  VideoSettingsChangedPayload,
   BannedPhraseChangedPayload,
   ChatMessageDeletedPayload,
   ChatMessagePinnedPayload,
@@ -591,6 +593,28 @@ export class AuditEventsListener {
       target: { type: 'ALERT', id: payload.alertId, label: excerpt(payload.message) },
       streamId: payload.streamId,
       metadata: { scope: payload.scope, severity: payload.severity },
+    }));
+  }
+
+  // Where new lives go: by staff, or the automatic switch (the system).
+  @OnEvent(DomainEvents.VideoProviderSwitched)
+  onVideoProviderSwitched(payload: VideoProviderSwitchedPayload) {
+    return this.track(async () => ({
+      action: 'video.provider_switched',
+      ...(payload.actorId
+        ? { actorId: payload.actorId }
+        : { actorRole: AuditActorRole.SYSTEM, actorLabel: 'Automatic switch' }),
+      reason: payload.reason,
+      metadata: { from: payload.from, to: payload.to },
+    }));
+  }
+
+  @OnEvent(DomainEvents.VideoSettingsChanged)
+  onVideoSettingsChanged(payload: VideoSettingsChangedPayload) {
+    return this.track(async () => ({
+      action: 'video.settings_changed',
+      actorId: payload.actorId,
+      metadata: { fields: payload.fields },
     }));
   }
 

@@ -102,6 +102,9 @@ export const DomainEvents = {
   GuestSpotlightChanged: 'guest.spotlight_changed',
   // An app update was published, changed or withdrawn (docs/features/app-updates.md).
   AppReleaseChanged: 'app_release.changed',
+  // Where new lives go, and Agora's free minutes (docs/features/video-provider.md).
+  VideoProviderSwitched: 'video.provider_switched',
+  VideoSettingsChanged: 'video.settings_changed',
   // A super admin removed stored data, or everything but their own account (docs/features/admin.md).
   DataCleared: 'data.cleared',
   DataReset: 'data.reset',
@@ -573,6 +576,19 @@ export interface AdminAlertSentPayload {
 
 // RealtimeGateway tells every open app (`app:update`), and each asks
 // GET /v1/app/update again. The release as it is after the change.
+export interface VideoProviderSwitchedPayload {
+  from: VideoProviderKind;
+  to: VideoProviderKind;
+  // Null: the automatic switch.
+  actorId: string | null;
+  reason: string;
+}
+
+export interface VideoSettingsChangedPayload {
+  actorId: string;
+  fields: string[];
+}
+
 export interface AppReleaseChangedPayload {
   change: 'published' | 'updated' | 'withdrawn';
   releaseId: string;
