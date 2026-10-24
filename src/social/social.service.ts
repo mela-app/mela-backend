@@ -367,6 +367,27 @@ export class SocialService {
     );
   }
 
+  /**
+   * The people [userId] blocked, newest first - so they can unblock someone
+   * search no longer shows. Only their own blocks: who blocked them isn't
+   * theirs to know. Suspended accounts are listed too (still blocked).
+   */
+  async listBlocked(userId: string, cursor?: string, limit = 30) {
+    const rows = await this.prisma.block.findMany({
+      where: { blockerId: userId, ...(cursor ? { id: { lt: cursor } } : {}) },
+      orderBy: { id: 'desc' },
+      take: limit + 1,
+      select: { id: true, createdAt: true, blocked: { select: PROFILE_SUMMARY_SELECT } },
+    });
+    return this.toPage(
+      rows.map((row) => ({
+        cursorId: row.id,
+        value: { ...row.blocked, blockedAt: row.createdAt },
+      })),
+      limit,
+    );
+  }
+
   /** Prefix match on username/display name (plan §6.10) - excludes suspended accounts, anyone blocked either way, and, optionally, yourself. */
   async search(query: string, requesterId: string | undefined, cursor?: string, limit = 20) {
     const q = query.trim();

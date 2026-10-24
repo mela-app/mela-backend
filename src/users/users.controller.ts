@@ -53,6 +53,13 @@ export class UsersController {
     return this.socialService.listFriends(user.id, query.cursor, query.limit);
   }
 
+  // The people this user blocked, to unblock them (search hides them).
+  @Get('me/blocked')
+  @UseGuards(JwtAuthGuard)
+  listBlocked(@CurrentUser() user: AuthenticatedUser, @Query() query: CursorQueryDto) {
+    return this.socialService.listBlocked(user.id, query.cursor, query.limit);
+  }
+
   // Whose chat messages the app hides: muted in chat or blocked (plan §6.7).
   @Get('me/chat-filter')
   @UseGuards(JwtAuthGuard)

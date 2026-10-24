@@ -472,6 +472,27 @@ describe('SocialService', () => {
     });
   });
 
+  describe('listBlocked', () => {
+    it('lists only the people you blocked, newest first, with when', async () => {
+      const at = new Date('2026-10-20T10:00:00Z');
+      prisma.block.findMany.mockResolvedValueOnce([
+        { id: 'b2', createdAt: at, blocked: { id: 'u2', username: 'sam', displayName: 'Sam' } },
+        { id: 'b1', createdAt: at, blocked: { id: 'u1', username: 'abe', displayName: 'Abe' } },
+      ]);
+
+      const page = await service().listBlocked('me', undefined, 1);
+
+      expect(prisma.block.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { blockerId: 'me' }, orderBy: { id: 'desc' }, take: 2 }),
+      );
+      expect(page).toEqual({
+        items: [{ id: 'u2', username: 'sam', displayName: 'Sam', blockedAt: at }],
+        hasMore: true,
+        nextCursor: 'b2',
+      });
+    });
+  });
+
   describe('search', () => {
     it('returns an empty page for a blank query without touching the database', async () => {
       await expect(service().search('   ', 'me')).resolves.toEqual({
