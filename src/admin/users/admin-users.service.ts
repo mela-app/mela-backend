@@ -6,13 +6,21 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { AdminPermission, PlatformRole, Prisma, StreamStatus, UserStatus } from '@prisma/client';
+import {
+  AdminPermission,
+  PlatformRole,
+  Prisma,
+  ReportCaseStatus,
+  StreamStatus,
+  UserStatus,
+} from '@prisma/client';
 import * as argon2 from 'argon2';
 import { AuthService } from '../../auth/auth.service';
 import {
   DomainEvents,
   StaffAccountCreatedPayload,
   UserAdminPermissionsChangedPayload,
+  UserNoteChangedPayload,
   UserProfileModeratedPayload,
   UserReinstatedPayload,
   UserRoleChangedPayload,
@@ -28,7 +36,12 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { StreamsService } from '../../streams/streams.service';
 import { AdminPrincipal } from '../admin.guard';
 import { generateTemporaryPassword } from '../password-policy';
-import { AdminUsersQueryDto, CreateStaffDto, EditUserProfileDto } from './admin-users.dto';
+import {
+  AdminUsersQueryDto,
+  CreateStaffDto,
+  EditUserProfileDto,
+  UserBlocksQueryDto,
+} from './admin-users.dto';
 
 const USER_ROW_SELECT = {
   id: true,
@@ -45,6 +58,14 @@ const USER_ROW_SELECT = {
 } as const;
 
 const STAFF_ROLES = [PlatformRole.PLATFORM_MODERATOR, PlatformRole.SUPER_ADMIN];
+
+const PERSON_SELECT = {
+  id: true,
+  username: true,
+  displayName: true,
+  avatarUrl: true,
+  status: true,
+} as const;
 
 /**
  * Accounts from the admin console (plan §6.8): find, inspect, suspend and
@@ -119,10 +140,13 @@ export class AdminUsersService {
       },
     });
     if (!user) throw new NotFoundException('User not found');
-    const liveStream = await this.prisma.stream.findFirst({
-      where: { hostId: userId, status: StreamStatus.LIVE },
-      select: { id: true, title: true, startedAt: true },
-    });
+    const [liveStream, safety] = await Promise.all([
+      this.prisma.stream.findFirst({
+        where: { hostId: userId, status: StreamStatus.LIVE },
+        select: { id: true, title: true, startedAt: true },
+      }),
+      this.safety(userId),
+    ]);
     const { _count: counts, adminPermissions, ...profile } = user;
     return {
       ...profile,
@@ -136,7 +160,122 @@ export class AdminUsersService {
         blockedBy: counts.blockedBy,
       },
       liveStream,
+      safety,
     };
+  }
+
+  /**
+   * What the user page's tabs hold, in numbers: reports against them and by
+   * them, hosting restrictions, blocks both ways, and staff notes.
+   */
+  private async safety(userId: string) {
+    const now = new Date();
+    const [against, made, restrictions, inForce, blocked, blockedBy, notes] = await Promise.all([
+      this.prisma.reportCase.groupBy({
+        by: ['status'],
+        where: { reportedUserId: userId },
+        _count: { _all: true },
+      }),
+      this.prisma.report.count({ where: { reporterId: userId } }),
+      this.prisma.hostingRestriction.count({ where: { userId } }),
+      this.prisma.hostingRestriction.count({
+        where: { userId, liftedAt: null, OR: [{ endsAt: null }, { endsAt: { gt: now } }] },
+      }),
+      this.prisma.block.count({ where: { blockerId: userId } }),
+      this.prisma.block.count({ where: { blockedId: userId } }),
+      this.prisma.userNote.count({ where: { userId } }),
+    ]);
+    const cases = (status: ReportCaseStatus) =>
+      against.find((group) => group.status === status)?._count._all ?? 0;
+    return {
+      reportsAgainst: {
+        open: cases(ReportCaseStatus.OPEN),
+        actioned: cases(ReportCaseStatus.ACTIONED),
+        dismissed: cases(ReportCaseStatus.DISMISSED),
+      },
+      reportsMade: made,
+      restrictions: { total: restrictions, inForce },
+      blocked,
+      blockedBy,
+      notes,
+    };
+  }
+
+  /** Who this account blocked, or who blocked it - newest first. */
+  async blocks(userId: string, query: UserBlocksQueryDto) {
+    await this.assertExists(userId);
+    const where: Prisma.BlockWhereInput =
+      query.direction === 'blocked' ? { blockerId: userId } : { blockedId: userId };
+    const [rows, total] = await Promise.all([
+      this.prisma.block.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        ...pageArgs(query),
+        select: {
+          id: true,
+          createdAt: true,
+          blocker: { select: PERSON_SELECT },
+          blocked: { select: PERSON_SELECT },
+        },
+      }),
+      this.prisma.block.count({ where }),
+    ]);
+    return toPage(
+      rows.map((row) => ({
+        id: row.id,
+        createdAt: row.createdAt,
+        person: query.direction === 'blocked' ? row.blocked : row.blocker,
+      })),
+      total,
+      query,
+    );
+  }
+
+  /** Staff's notes on this account, newest first. */
+  async notes(userId: string) {
+    await this.assertExists(userId);
+    const items = await this.prisma.userNote.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+      select: { id: true, text: true, createdAt: true, author: { select: PERSON_SELECT } },
+    });
+    return { items };
+  }
+
+  async addNote(admin: AdminPrincipal, userId: string, text: string) {
+    await this.assertExists(userId);
+    const note = await this.prisma.userNote.create({
+      data: { userId, authorId: admin.id, text },
+      select: { id: true, text: true, createdAt: true, author: { select: PERSON_SELECT } },
+    });
+    this.events.emit(DomainEvents.UserNoteAdded, {
+      userId,
+      noteId: note.id,
+      actorId: admin.id,
+    } satisfies UserNoteChangedPayload);
+    return note;
+  }
+
+  /** The author removes their own note; a super admin any. */
+  async deleteNote(admin: AdminPrincipal, userId: string, noteId: string) {
+    const note = await this.prisma.userNote.findFirst({
+      where: { id: noteId, userId },
+      select: { id: true, authorId: true },
+    });
+    if (!note) throw new NotFoundException('Note not found');
+    if (note.authorId !== admin.id && admin.platformRole !== PlatformRole.SUPER_ADMIN) {
+      throw new ForbiddenException(
+        'Only the person who wrote it, or a super admin, can remove a note',
+      );
+    }
+    await this.prisma.userNote.delete({ where: { id: note.id } });
+    this.events.emit(DomainEvents.UserNoteDeleted, {
+      userId,
+      noteId: note.id,
+      actorId: admin.id,
+    } satisfies UserNoteChangedPayload);
+    return { ok: true as const };
   }
 
   async sessions(userId: string) {

@@ -72,6 +72,14 @@ export const DomainEvents = {
   UserRoleChanged: 'user.role_changed',
   UserAdminPermissionsChanged: 'user.admin_permissions_changed',
   UserSessionsRevoked: 'user.sessions_revoked',
+  // Staff's private notes on an account (the console's user page).
+  UserNoteAdded: 'user.note_added',
+  UserNoteDeleted: 'user.note_deleted',
+  // Reaching many people (docs/features/campaigns.md).
+  CampaignScheduled: 'campaign.scheduled',
+  CampaignCancelled: 'campaign.cancelled',
+  AnnouncementChanged: 'announcement.changed',
+  FeaturedHostChanged: 'featured_host.changed',
   AccountPasswordChanged: 'account.password_changed',
   // The first password of an account made with Google (docs/features/auth.md).
   AccountPasswordAdded: 'account.password_added',
@@ -504,6 +512,32 @@ export interface UserAdminPermissionsChangedPayload {
   actorId: string;
   from: AdminPermission[];
   to: AdminPermission[];
+}
+
+export interface CampaignChangedPayload {
+  campaignId: string;
+  actorId: string;
+  title: string;
+}
+
+export interface AnnouncementChangedPayload {
+  change: 'published' | 'updated' | 'ended' | 'deleted';
+  announcementId: string;
+  actorId: string;
+  title: string;
+}
+
+export interface FeaturedHostChangedPayload {
+  change: 'added' | 'removed' | 'reordered';
+  // Null: the whole list was reordered.
+  userId: string | null;
+  actorId: string;
+}
+
+export interface UserNoteChangedPayload {
+  userId: string;
+  noteId: string;
+  actorId: string;
 }
 
 // Every device of this user is signed out and disconnected.

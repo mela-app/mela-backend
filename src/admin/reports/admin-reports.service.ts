@@ -74,13 +74,17 @@ export class AdminReportsService {
 
   async list(query: AdminReportsQueryDto) {
     const where = {
-      status: query.status,
+      ...(query.status !== 'ALL' && { status: query.status }),
       ...(query.type && { targetType: query.type }),
+      ...(query.reportedUserId && { reportedUserId: query.reportedUserId }),
+      ...(query.reporterId && { reports: { some: { reporterId: query.reporterId } } }),
     } satisfies Prisma.ReportCaseWhereInput;
     const orderBy: Prisma.ReportCaseOrderByWithRelationInput[] =
       query.status === ReportCaseStatus.OPEN
         ? [{ urgent: 'desc' }, { lastReportedAt: 'desc' }]
-        : [{ resolvedAt: 'desc' }];
+        : query.status === 'ALL'
+          ? [{ lastReportedAt: 'desc' }]
+          : [{ resolvedAt: 'desc' }];
     const [rows, total] = await Promise.all([
       this.prisma.reportCase.findMany({ where, orderBy, ...pageArgs(query), select: CASE_SELECT }),
       this.prisma.reportCase.count({ where }),

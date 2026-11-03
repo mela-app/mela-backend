@@ -13,17 +13,25 @@ export interface PushJobData {
   collapseKey?: string;
 }
 
+const JOB_OPTIONS = {
+  attempts: 5,
+  backoff: { type: 'exponential', delay: 5000 },
+  removeOnComplete: true,
+  removeOnFail: 100,
+};
+
 /** Queues a push job; PushProcessor decides (at send time) whether it's still worth sending. */
 @Injectable()
 export class PushQueueService {
   constructor(@InjectQueue(PUSH_QUEUE) private readonly queue: Queue<PushJobData>) {}
 
   async enqueue(job: PushJobData): Promise<void> {
-    await this.queue.add('send', job, {
-      attempts: 5,
-      backoff: { type: 'exponential', delay: 5000 },
-      removeOnComplete: true,
-      removeOnFail: 100,
-    });
+    await this.queue.add('send', job, JOB_OPTIONS);
+  }
+
+  /** Many at once - a campaign's recipients, a batch at a time. */
+  async enqueueMany(jobs: PushJobData[]): Promise<void> {
+    if (jobs.length === 0) return;
+    await this.queue.addBulk(jobs.map((data) => ({ name: 'send', data, opts: JOB_OPTIONS })));
   }
 }

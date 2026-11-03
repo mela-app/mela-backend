@@ -34,6 +34,7 @@ import { HostingRestrictionsService } from '../hosting-restrictions/hosting-rest
 
 describe('StreamsService', () => {
   const prisma = {
+    featuredHost: { findMany: jest.fn().mockResolvedValue([]) },
     scheduledLive: { findFirst: jest.fn(), updateMany: jest.fn() },
     stream: {
       groupBy: jest.fn().mockResolvedValue([]),
@@ -818,6 +819,34 @@ describe('StreamsService', () => {
           orderBy: { startedAt: 'desc' },
         }),
       );
+    });
+
+    it('puts featured hosts first on For You, in the order chosen - not when paused, nor in search', async () => {
+      prisma.stream.findMany.mockResolvedValue([
+        live('busy', 5),
+        live('a', 2),
+        live('b', 3),
+        live('c', 4),
+      ]);
+      presence.viewerCounts.mockResolvedValue(new Map([['busy', 50]]));
+      presence.pausedLives.mockResolvedValueOnce(new Set(['c']));
+      prisma.featuredHost.findMany.mockResolvedValueOnce([
+        { userId: 'host-b', position: 0 },
+        { userId: 'host-a', position: 1 },
+        { userId: 'host-c', position: 2 },
+      ]);
+      const service = makeService();
+
+      const result = await service.listLive({ page: 1, limit: 20 });
+      expect(result.items.map((item) => [item.id, item.featured])).toEqual([
+        ['b', true],
+        ['a', true],
+        ['busy', false],
+        ['c', true],
+      ]);
+
+      const searched = await service.listLive({ q: 'x', page: 1, limit: 20 });
+      expect(searched.items[0].id).toBe('busy');
     });
 
     it('filters by category, ignoring case', async () => {

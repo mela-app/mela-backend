@@ -25,6 +25,17 @@ describe('AdminUsersService', () => {
       create: jest.fn(),
     },
     stream: { findFirst: jest.fn() },
+    reportCase: { groupBy: jest.fn() },
+    report: { count: jest.fn() },
+    hostingRestriction: { count: jest.fn() },
+    block: { count: jest.fn(), findMany: jest.fn() },
+    userNote: {
+      count: jest.fn(),
+      findMany: jest.fn(),
+      findFirst: jest.fn(),
+      create: jest.fn(),
+      delete: jest.fn(),
+    },
   };
   const auth = { revokeAllSessions: jest.fn() };
   const streams = { lockLiveStreamsOfHost: jest.fn() };
@@ -83,6 +94,7 @@ describe('AdminUsersService', () => {
     prisma.user.count.mockResolvedValue(1);
     prisma.stream.findFirst.mockResolvedValue(null);
     streams.lockLiveStreamsOfHost.mockResolvedValue(0);
+    prisma.reportCase.groupBy.mockResolvedValue([]);
   });
 
   describe('suspend', () => {
@@ -473,6 +485,75 @@ describe('AdminUsersService', () => {
       await expect(
         service().editProfile(moderator, 'u1', { displayName: 'X', reason: 'Because' }),
       ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe("the user page's record", () => {
+    it('counts reports against and by them, restrictions, blocks both ways and notes', async () => {
+      prisma.user.findUnique.mockResolvedValue(detailRow);
+      prisma.reportCase.groupBy.mockResolvedValue([
+        { status: 'OPEN', _count: { _all: 2 } },
+        { status: 'ACTIONED', _count: { _all: 1 } },
+      ]);
+      prisma.report.count.mockResolvedValue(4);
+      prisma.hostingRestriction.count.mockResolvedValueOnce(3).mockResolvedValueOnce(1);
+      prisma.block.count.mockResolvedValueOnce(5).mockResolvedValueOnce(6);
+      prisma.userNote.count.mockResolvedValue(2);
+
+      const detail = await service().detail('u1');
+
+      expect(detail.safety).toEqual({
+        reportsAgainst: { open: 2, actioned: 1, dismissed: 0 },
+        reportsMade: 4,
+        restrictions: { total: 3, inForce: 1 },
+        blocked: 5,
+        blockedBy: 6,
+        notes: 2,
+      });
+      expect(prisma.block.count).toHaveBeenCalledWith({ where: { blockerId: 'u1' } });
+      expect(prisma.block.count).toHaveBeenCalledWith({ where: { blockedId: 'u1' } });
+    });
+
+    it('lists who blocked them, showing the other person', async () => {
+      const blocker = { id: 'u9', username: 'sam' };
+      prisma.block.findMany.mockResolvedValue([
+        { id: 'b1', createdAt: new Date(0), blocker, blocked: { id: 'u1' } },
+      ]);
+      prisma.block.count.mockResolvedValue(1);
+
+      const page = await service().blocks('u1', { direction: 'blockedBy', page: 1, pageSize: 25 });
+
+      expect(prisma.block.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { blockedId: 'u1' } }),
+      );
+      expect(page.items).toEqual([{ id: 'b1', createdAt: new Date(0), person: blocker }]);
+    });
+
+    it('keeps a note with who wrote it, and records that one was added', async () => {
+      prisma.userNote.create.mockResolvedValue({ id: 'n1', text: 'Spoke to them on Telegram' });
+
+      await service().addNote(moderator, 'u1', 'Spoke to them on Telegram');
+
+      expect(prisma.userNote.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { userId: 'u1', authorId: 'admin-1', text: 'Spoke to them on Telegram' },
+        }),
+      );
+      expect(events.emit).toHaveBeenCalledWith('user.note_added', {
+        userId: 'u1',
+        noteId: 'n1',
+        actorId: 'admin-1',
+      });
+    });
+
+    it("removes only your own note - a super admin's any", async () => {
+      prisma.userNote.findFirst.mockResolvedValue({ id: 'n1', authorId: 'someone-else' });
+
+      await expect(service().deleteNote(moderator, 'u1', 'n1')).rejects.toThrow(ForbiddenException);
+      expect(prisma.userNote.delete).not.toHaveBeenCalled();
+
+      await service().deleteNote(principal(), 'u1', 'n1');
+      expect(prisma.userNote.delete).toHaveBeenCalledWith({ where: { id: 'n1' } });
     });
   });
 });

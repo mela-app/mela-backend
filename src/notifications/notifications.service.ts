@@ -85,6 +85,8 @@ export interface SettingsView {
   pushGuestInvite: boolean;
   pushDirectMessages: boolean;
   pushFollowingJoinedLive: boolean;
+  // News and announcements from the Mela team (push campaigns).
+  pushAnnouncements: boolean;
 }
 
 const DEFAULT_SETTINGS: SettingsView = {
@@ -95,6 +97,7 @@ const DEFAULT_SETTINGS: SettingsView = {
   pushGuestInvite: true,
   pushDirectMessages: true,
   pushFollowingJoinedLive: true,
+  pushAnnouncements: true,
 };
 
 // A direct message's push shows this much of its text.
@@ -131,6 +134,7 @@ function settingsView(row: SettingsView): SettingsView {
     pushGuestInvite: row.pushGuestInvite,
     pushDirectMessages: row.pushDirectMessages,
     pushFollowingJoinedLive: row.pushFollowingJoinedLive,
+    pushAnnouncements: row.pushAnnouncements,
   };
 }
 
@@ -702,6 +706,7 @@ export class NotificationsService {
             pushGuestInvite: true,
             pushDirectMessages: true,
             pushFollowingJoinedLive: true,
+            pushAnnouncements: true,
           },
         })
       : [];

@@ -31,6 +31,8 @@ import { HostingRestrictionsModule } from './hosting-restrictions/hosting-restri
 import { VideoControlModule } from './video-control/video-control.module';
 import { LegalModule } from './legal/legal.module';
 import { LiveBoardModule } from './live-board/live-board.module';
+import { ActivityModule } from './activity/activity.module';
+import { CampaignsModule } from './campaigns/campaigns.module';
 import { ReportsModule } from './reports/reports.module';
 import { HealthController } from './health.controller';
 
@@ -77,6 +79,8 @@ import { HealthController } from './health.controller';
     HostingRestrictionsModule,
     VideoControlModule,
     LiveBoardModule,
+    ActivityModule,
+    CampaignsModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
