@@ -645,6 +645,7 @@ describe('NotificationsService', () => {
         pushGuestInvite: true,
         pushDirectMessages: true,
         pushFollowingJoinedLive: true,
+        pushAnnouncements: true,
       });
     });
 

@@ -39,6 +39,12 @@ enum AdminPermission {
   // (docs/features/hosting-restrictions.md): MANAGE restricts, lifts and replies.
   VIEW_HOSTING_RESTRICTIONS
   MANAGE_HOSTING_RESTRICTIONS
+  // Growth numbers on the Analytics page (docs/features/analytics.md).
+  VIEW_ANALYTICS
+  // Push campaigns, in-app banners and featured hosts (docs/features/campaigns.md):
+  // MANAGE sends, publishes and features.
+  VIEW_CAMPAIGNS
+  MANAGE_CAMPAIGNS
 }
 
 enum UserStatus {
@@ -157,6 +163,15 @@ model User {
   reportsMade           Report[]                    @relation("ReportsMade")
   reportCasesAgainst    ReportCase[]                @relation("ReportCasesAgainst")
   reportCasesResolved   ReportCase[]                @relation("ReportCasesResolved")
+  // Staff's private notes about this account, and the ones this staff member wrote.
+  staffNotes            UserNote[]                  @relation("UserNotes")
+  staffNotesWritten     UserNote[]                  @relation("UserNotesWritten")
+  activeDays            UserActiveDay[]
+  campaignsCreated      PushCampaign[]
+  campaignOpens         PushCampaignOpen[]
+  announcementsCreated  Announcement[]
+  featuredAsHost        FeaturedHost?               @relation("FeaturedHost")
+  featuredHostsAdded    FeaturedHost[]              @relation("FeaturedHostAddedBy")
 
   @@map("users")
 }
@@ -210,6 +225,10 @@ model UserSession {
   // The app install this session lives in - random per install, so the
   // accounts on one phone can share its push token, and nobody else can.
   installationId           String?
+  // The app on this device as last seen (X-Mela-App-Version / -Build headers):
+  // who gets a campaign push, and crashes by version.
+  appVersion               String?
+  appBuild                 Int?
   rotatedAt                DateTime        @default(now())
   lastSeenAt               DateTime        @default(now())
   createdAt                DateTime        @default(now())
@@ -328,6 +347,10 @@ model Stream {
   peakViewerCount Int               @default(0)
   // Likes collected, saved when the live ends (counted in Redis while live).
   likeCount       Int               @default(0)
+  // Watching, counted each minute while live (LiveStatsJobs): one minute per
+  // viewer per minute, and how many different people watched.
+  viewerMinutes   Int               @default(0)
+  uniqueViewers   Int               @default(0)
   // A recent frame of the live for discovery cards and link previews, sent
   // by the host's app while live; removed (with the file) when it ends.
   thumbnailUrl    String?
@@ -561,6 +584,8 @@ model NotificationSettings {
   // Someone you follow joined a live. Unlike the others, off means no alert
   // at all - in-app included - since it's chatter rather than something for you.
   pushFollowingJoinedLive Boolean @default(true)
+  // News and announcements from the Mela team (push campaigns).
+  pushAnnouncements       Boolean @default(true)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -1119,4 +1144,155 @@ model VideoProviderSwitch {
 
   @@index([createdAt])
   @@map("video_provider_switches")
+}
+
+// What staff noted about an account (the console's user page) - never shown
+// to the person. Kept when the author's account goes.
+model UserNote {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  userId    String
+  authorId  String?
+  text      String
+  createdAt DateTime @default(now())
+
+  user   User  @relation("UserNotes", fields: [userId], references: [id], onDelete: Cascade)
+  author User? @relation("UserNotesWritten", fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@map("user_notes")
+}
+
+// A day (UTC) the account used Mela - one row a day at most, written on its
+// first request that day (ActivityInterceptor). Daily, weekly and monthly
+// active users and retention come from it (docs/features/analytics.md).
+model UserActiveDay {
+  userId   String
+  day      DateTime         @db.Date
+  platform SessionPlatform?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, day])
+  @@index([day])
+  @@map("user_active_days")
+}
+
+// Where an install of the app came from (Google Play's install referrer),
+// sent once by the app after it's installed - a shared live or profile, the
+// Play Store, a campaign link.
+model AppInstall {
+  id             String          @id @default(uuid(7)) @db.Uuid
+  // Random per install (the app's own), so a resend counts once.
+  installationId String          @unique
+  platform       SessionPlatform
+  // shared_live, shared_profile, play_store, campaign, other.
+  source         String
+  // The raw referrer, for anything the source doesn't tell.
+  referrer       String?
+  appVersion     String?
+  installedAt    DateTime
+  createdAt      DateTime        @default(now())
+
+  @@index([installedAt])
+  @@map("app_installs")
+}
+
+enum CampaignStatus {
+  SCHEDULED
+  SENDING
+  SENT
+  CANCELLED
+  FAILED
+}
+
+// A push the team sends to many people at once (docs/features/campaigns.md):
+// to everyone, or those the audience picks; now or at a set time.
+model PushCampaign {
+  id             String             @id @default(uuid(7)) @db.Uuid
+  title          String
+  body           String
+  // What a tap opens: /live/<id> or /profile/<id>; null - the app itself.
+  openPath       String?
+  // Who it's for (CampaignAudience in src/campaigns/campaign-audience.ts).
+  audience       Json
+  status         CampaignStatus     @default(SCHEDULED)
+  scheduledAt    DateTime
+  sentAt         DateTime?
+  // Accounts it was sent to.
+  recipientCount Int                @default(0)
+  failureReason  String?
+  createdById    String?
+  createdAt      DateTime           @default(now())
+
+  createdBy User?              @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  opens     PushCampaignOpen[]
+
+  @@index([status, scheduledAt])
+  @@index([createdAt])
+  @@map("push_campaigns")
+}
+
+// Someone opened the app from a campaign's push - once each.
+model PushCampaignOpen {
+  campaignId String   @db.Uuid
+  userId     String
+  openedAt   DateTime @default(now())
+
+  campaign PushCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([campaignId, userId])
+  @@map("push_campaign_opens")
+}
+
+enum AnnouncementTone {
+  INFO
+  SUCCESS
+  WARNING
+}
+
+// A banner at the top of the app's home screen, between two times - e.g.
+// "Maintenance tonight at 22:00".
+model Announcement {
+  id          String           @id @default(uuid(7)) @db.Uuid
+  title       String
+  message     String
+  tone        AnnouncementTone @default(INFO)
+  // A button on the banner: an https link, or /live/<id> or /profile/<id> in the app.
+  linkUrl     String?
+  linkLabel   String?
+  // Null: every platform.
+  platform    SessionPlatform?
+  startsAt    DateTime
+  // Null: until ended by hand.
+  endsAt      DateTime?
+  // People can close it (until it changes).
+  dismissible Boolean          @default(true)
+  createdById String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([startsAt])
+  @@map("announcements")
+}
+
+// A host shown first on For You while they're live, in [position] order.
+model FeaturedHost {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  userId      String    @unique
+  position    Int       @default(0)
+  // Staff only: why.
+  note        String?
+  // Null: until removed.
+  endsAt      DateTime?
+  createdById String?
+  createdAt   DateTime  @default(now())
+
+  user      User  @relation("FeaturedHost", fields: [userId], references: [id], onDelete: Cascade)
+  createdBy User? @relation("FeaturedHostAddedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([position])
+  @@map("featured_hosts")
 }

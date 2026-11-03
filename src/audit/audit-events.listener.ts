@@ -55,6 +55,10 @@ import {
   UserRoleChangedPayload,
   UserAdminPermissionsChangedPayload,
   UserSessionsRevokedPayload,
+  UserNoteChangedPayload,
+  CampaignChangedPayload,
+  AnnouncementChangedPayload,
+  FeaturedHostChangedPayload,
   UserSuspendedPayload,
   UserUnfollowedPayload,
 } from '../common/events/domain-events';
@@ -220,6 +224,66 @@ export class AuditEventsListener {
       action: 'user.sessions_revoked',
       actorId: payload.actorId,
       target: await this.userTarget(payload.userId),
+    }));
+  }
+
+  // The text itself stays on the note: the audit log is read more widely.
+  @OnEvent(DomainEvents.UserNoteAdded)
+  onUserNoteAdded(payload: UserNoteChangedPayload) {
+    return this.track(async () => ({
+      action: 'user.note_added',
+      actorId: payload.actorId,
+      target: await this.userTarget(payload.userId),
+      metadata: { noteId: payload.noteId },
+    }));
+  }
+
+  @OnEvent(DomainEvents.UserNoteDeleted)
+  onUserNoteDeleted(payload: UserNoteChangedPayload) {
+    return this.track(async () => ({
+      action: 'user.note_deleted',
+      actorId: payload.actorId,
+      target: await this.userTarget(payload.userId),
+      metadata: { noteId: payload.noteId },
+    }));
+  }
+
+  @OnEvent(DomainEvents.CampaignScheduled)
+  onCampaignScheduled(payload: CampaignChangedPayload) {
+    return this.trackCampaign('campaign.scheduled', payload);
+  }
+
+  @OnEvent(DomainEvents.CampaignCancelled)
+  onCampaignCancelled(payload: CampaignChangedPayload) {
+    return this.trackCampaign('campaign.cancelled', payload);
+  }
+
+  @OnEvent(DomainEvents.AnnouncementChanged)
+  onAnnouncementChanged(payload: AnnouncementChangedPayload) {
+    return this.track(async () => ({
+      action: `announcement.${payload.change}` as const,
+      actorId: payload.actorId,
+      target: { type: 'ANNOUNCEMENT', id: payload.announcementId, label: payload.title },
+    }));
+  }
+
+  @OnEvent(DomainEvents.FeaturedHostChanged)
+  onFeaturedHostChanged(payload: FeaturedHostChangedPayload) {
+    return this.track(async () => ({
+      action: `featured_host.${payload.change}` as const,
+      actorId: payload.actorId,
+      ...(payload.userId ? { target: await this.userTarget(payload.userId) } : {}),
+    }));
+  }
+
+  private trackCampaign(
+    action: 'campaign.scheduled' | 'campaign.cancelled',
+    payload: CampaignChangedPayload,
+  ) {
+    return this.track(async () => ({
+      action,
+      actorId: payload.actorId,
+      target: { type: 'CAMPAIGN', id: payload.campaignId, label: payload.title },
     }));
   }
 

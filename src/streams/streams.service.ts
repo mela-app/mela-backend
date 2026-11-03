@@ -133,6 +133,8 @@ function relationTo(
 @Injectable()
 export class StreamsService {
   private readonly logger = new Logger(StreamsService.name);
+  // Featured hosts (docs/features/campaigns.md), re-read at most every 30 s.
+  private featured: { at: number; positions: Map<string, number> } | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -288,7 +290,9 @@ export class StreamsService {
     );
 
     const ids = lives.map((live) => live.id);
-    const [counts, paused, likes, affinity] = await Promise.all([
+    // For You only: search and Following keep their own order.
+    const forYou = query.feed !== 'following' && !query.q;
+    const [counts, paused, likes, affinity, featured] = await Promise.all([
       this.presence.viewerCounts(ids).catch((error) => {
         this.logger.warn(`Viewer counts unavailable, ranking without them: ${error}`);
         return new Map<string, number>();
@@ -296,6 +300,7 @@ export class StreamsService {
       this.presence.pausedLives(ids).catch(() => new Set<string>()),
       this.presence.likeCounts(ids).catch(() => new Map<string, number>()),
       ties ? this.categoryAffinity(ties.following) : new Map<string, number>(),
+      forYou ? this.featuredPositions() : new Map<string, number>(),
     ]);
     const now = new Date();
     const ranked = lives
@@ -304,6 +309,7 @@ export class StreamsService {
           ...live,
           viewerCount: counts.get(live.id) ?? 0,
           paused: paused.has(live.id),
+          featured: featured.has(live.host.id),
         };
         const score = liveScore(
           {
@@ -317,9 +323,16 @@ export class StreamsService {
           },
           now,
         );
-        return { item, score };
+        // A featured host first, in the team's order - unless paused.
+        const pinned = item.featured && !item.paused ? featured.get(live.host.id)! : null;
+        return { item, score, pinned };
       })
-      .sort((a, b) => b.score - a.score || b.item.startedAt.getTime() - a.item.startedAt.getTime())
+      .sort(
+        (a, b) =>
+          (a.pinned ?? Infinity) - (b.pinned ?? Infinity) ||
+          b.score - a.score ||
+          b.item.startedAt.getTime() - a.item.startedAt.getTime(),
+      )
       .map(({ item }) => item);
 
     const start = (query.page - 1) * query.limit;
@@ -329,6 +342,25 @@ export class StreamsService {
       page: query.page,
       limit: query.limit,
     };
+  }
+
+  /** Featured hosts and their place, top first; an empty list when it can't be read. */
+  private async featuredPositions(now: Date = new Date()): Promise<Map<string, number>> {
+    if (this.featured && now.getTime() - this.featured.at < 30_000) return this.featured.positions;
+    try {
+      const rows = await this.prisma.featuredHost.findMany({
+        where: { OR: [{ endsAt: null }, { endsAt: { gt: now } }] },
+        select: { userId: true, position: true },
+      });
+      this.featured = {
+        at: now.getTime(),
+        positions: new Map(rows.map((row) => [row.userId, row.position])),
+      };
+    } catch (error) {
+      this.logger.warn(`Featured hosts unavailable: ${error}`);
+      return new Map();
+    }
+    return this.featured.positions;
   }
 
   // The host's own scheduled live, coming up within the window a live may start from it.

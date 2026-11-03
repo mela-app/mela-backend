@@ -41,6 +41,10 @@ import { AdminStreamsService } from './streams/admin-streams.service';
 import { AdminStaffController, AdminUsersController } from './users/admin-users.controller';
 import { AdminUsersService } from './users/admin-users.service';
 import { AdminVideoController } from './video/admin-video.controller';
+import { AdminAnalyticsController } from './analytics/admin-analytics.controller';
+import { AdminCampaignsController } from './campaigns/admin-campaigns.controller';
+import { CampaignsModule } from '../campaigns/campaigns.module';
+import { AdminAnalyticsService } from './analytics/admin-analytics.service';
 
 /**
  * The admin console's API (plan §6.8) - every route under /v1/admin, behind
@@ -62,6 +66,7 @@ import { AdminVideoController } from './video/admin-video.controller';
     UsersModule,
     HostingRestrictionsModule,
     VideoControlModule,
+    CampaignsModule,
   ],
   controllers: [
     AdminAuthController,
@@ -81,11 +86,14 @@ import { AdminVideoController } from './video/admin-video.controller';
     AdminHostingReasonsController,
     AdminHostingRestrictionsController,
     AdminVideoController,
+    AdminAnalyticsController,
+    AdminCampaignsController,
   ],
   providers: [
     AdminGuard,
     AdminAuthService,
     AdminOverviewService,
+    AdminAnalyticsService,
     AdminStreamsService,
     AdminUsersService,
     AdminContentService,

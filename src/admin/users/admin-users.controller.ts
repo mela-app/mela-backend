@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -22,6 +23,7 @@ import {
   SuperAdminOnly,
 } from '../admin.guard';
 import {
+  AddUserNoteDto,
   AdminUsersQueryDto,
   ChangePermissionsDto,
   ChangeRoleDto,
@@ -29,6 +31,7 @@ import {
   DeleteUserDto,
   EditUserProfileDto,
   SuspendUserDto,
+  UserBlocksQueryDto,
 } from './admin-users.dto';
 import { AccountDeletionService } from '../../users/account-deletion.service';
 import { AdminUsersService } from './admin-users.service';
@@ -51,6 +54,35 @@ export class AdminUsersController {
   @Get(':id')
   detail(@Param('id', ParseUUIDPipe) id: string) {
     return this.users.detail(id);
+  }
+
+  @Get(':id/blocks')
+  blocks(@Param('id', ParseUUIDPipe) id: string, @Query() query: UserBlocksQueryDto) {
+    return this.users.blocks(id, query);
+  }
+
+  // Staff's private notes - anyone who can see the account can read and add them.
+  @Get(':id/notes')
+  notes(@Param('id', ParseUUIDPipe) id: string) {
+    return this.users.notes(id);
+  }
+
+  @Post(':id/notes')
+  addNote(
+    @CurrentAdmin() admin: AdminPrincipal,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AddUserNoteDto,
+  ) {
+    return this.users.addNote(admin, id, dto.text);
+  }
+
+  @Delete(':id/notes/:noteId')
+  deleteNote(
+    @CurrentAdmin() admin: AdminPrincipal,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('noteId', ParseUUIDPipe) noteId: string,
+  ) {
+    return this.users.deleteNote(admin, id, noteId);
   }
 
   @Get(':id/sessions')

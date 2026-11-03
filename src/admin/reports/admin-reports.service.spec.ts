@@ -94,6 +94,24 @@ describe('AdminReportsService', () => {
     expect(page.total).toBe(1);
   });
 
+  it("lists one person's cases, every status: about them, or reported by them", async () => {
+    prisma.reportCase.findMany.mockResolvedValue([]);
+    prisma.reportCase.count.mockResolvedValue(0);
+
+    await service().list({ status: 'ALL', reportedUserId: 'u1', page: 1, pageSize: 25 });
+    expect(prisma.reportCase.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: { reportedUserId: 'u1' },
+        orderBy: [{ lastReportedAt: 'desc' }],
+      }),
+    );
+
+    await service().list({ status: 'ALL', reporterId: 'u1', page: 1, pageSize: 25 });
+    expect(prisma.reportCase.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({ where: { reports: { some: { reporterId: 'u1' } } } }),
+    );
+  });
+
   it('shows a case with every report, whether the message still exists, and the live', async () => {
     prisma.reportCase.findUnique.mockResolvedValue({
       ...caseRow(),

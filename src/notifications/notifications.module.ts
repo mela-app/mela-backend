@@ -20,6 +20,6 @@ import { PushProcessor } from './push.processor';
   ],
   controllers: [NotificationsController],
   providers: [NotificationsService, PushQueueService, PushProcessor],
-  exports: [NotificationsService],
+  exports: [NotificationsService, PushQueueService],
 })
 export class NotificationsModule {}

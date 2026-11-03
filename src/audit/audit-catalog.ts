@@ -25,6 +25,17 @@ export const AUDIT_ACTIONS = {
   'user.permissions_changed': { category: 'ADMIN', label: "Changed a moderator's access" },
   'user.profile_edited': { category: 'ADMIN', label: "Edited a user's profile" },
   'user.sessions_revoked': { category: 'ADMIN', label: 'Signed a user out everywhere' },
+  'user.note_added': { category: 'ADMIN', label: 'Added a note to an account' },
+  'user.note_deleted': { category: 'ADMIN', label: 'Removed a note from an account' },
+  'campaign.scheduled': { category: 'ADMIN', label: 'Sent or scheduled a push campaign' },
+  'campaign.cancelled': { category: 'ADMIN', label: 'Cancelled a push campaign' },
+  'announcement.published': { category: 'ADMIN', label: 'Published an in-app banner' },
+  'announcement.updated': { category: 'ADMIN', label: 'Changed an in-app banner' },
+  'announcement.ended': { category: 'ADMIN', label: 'Ended an in-app banner' },
+  'announcement.deleted': { category: 'ADMIN', label: 'Deleted an in-app banner' },
+  'featured_host.added': { category: 'ADMIN', label: 'Featured a host' },
+  'featured_host.removed': { category: 'ADMIN', label: 'Stopped featuring a host' },
+  'featured_host.reordered': { category: 'ADMIN', label: 'Reordered featured hosts' },
   'user.deleted': { category: 'ADMIN', label: 'Deleted an account' },
   'admin.staff_created': { category: 'ADMIN', label: 'Created a staff account' },
   'admin.seeded': { category: 'ADMIN', label: 'Created the default super admin' },
@@ -138,7 +149,10 @@ export type AuditTargetType =
   // A case on the console's Reports page.
   | 'REPORT'
   // A saved reason for pausing someone's hosting.
-  | 'HOSTING_REASON';
+  | 'HOSTING_REASON'
+  // A push campaign, or an in-app banner (docs/features/campaigns.md).
+  | 'CAMPAIGN'
+  | 'ANNOUNCEMENT';
 
 // What entries say instead of a deleted account's name.
 export const DELETED_ACCOUNT_LABEL = 'Deleted account';

@@ -17,6 +17,21 @@ import { PageQueryDto } from '../../common/pagination/page-query.dto';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 
+// Whose blocks: the people this account blocked, or the people who blocked it.
+export class UserBlocksQueryDto extends PageQueryDto {
+  @IsIn(['blocked', 'blockedBy'])
+  direction: 'blocked' | 'blockedBy' = 'blocked';
+}
+
+// Staff's own note about an account; the person never sees it.
+export class AddUserNoteDto {
+  @Transform(trim)
+  @IsString()
+  @MinLength(1)
+  @MaxLength(2000)
+  text!: string;
+}
+
 export class AdminUsersQueryDto extends PageQueryDto {
   @IsOptional()
   @IsString()

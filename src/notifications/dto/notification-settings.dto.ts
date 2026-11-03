@@ -30,4 +30,9 @@ export class UpdateNotificationSettingsDto {
   @IsOptional()
   @IsBoolean()
   pushFollowingJoinedLive?: boolean;
+
+  // News and announcements from the Mela team.
+  @IsOptional()
+  @IsBoolean()
+  pushAnnouncements?: boolean;
 }
