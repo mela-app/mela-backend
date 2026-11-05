@@ -833,8 +833,13 @@ model DirectMessage {
   // The sending app's own id for it, so a resend after a lost answer isn't stored twice.
   clientId       String?
   // When the recipient opened the conversation; null while unread.
-  readAt         DateTime?
-  createdAt      DateTime  @default(now())
+  readAt            DateTime?
+  // The sender changed the text (within 15 minutes of sending).
+  editedAt          DateTime?
+  // "Delete for me": gone from that person's own view only.
+  hiddenBySender    Boolean   @default(false)
+  hiddenByRecipient Boolean   @default(false)
+  createdAt         DateTime  @default(now())
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender       User         @relation("DirectMessagesSent", fields: [senderId], references: [id], onDelete: Cascade)

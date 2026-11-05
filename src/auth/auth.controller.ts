@@ -10,7 +10,13 @@ import {
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
-import { IdentitySignupDto, IdentityTokenDto, UsernameQueryDto } from './dto/identity.dto';
+import { AccountPasswordService } from './account-password.service';
+import {
+  IdentitySignupDto,
+  IdentityTokenDto,
+  PasswordResetDto,
+  UsernameQueryDto,
+} from './dto/identity.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
 import { IdentitySignInService } from './identity/identity-sign-in.service';
@@ -20,6 +26,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly identities: IdentitySignInService,
+    private readonly passwords: AccountPasswordService,
   ) {}
 
   // Older app versions only - their sign-up form never confirmed the email.
@@ -40,6 +47,14 @@ export class AuthController {
     return outcome.status === 'SIGNED_IN'
       ? { status: outcome.status, ...outcome.tokens }
       : { status: outcome.status, ...outcome.profile };
+  }
+
+  /** "Forgot password?": the email proven by its link sets a new password, and this device signs in. */
+  @Post('password-reset')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  resetPassword(@Body() dto: PasswordResetDto) {
+    return this.passwords.resetForgotten(dto.idToken, dto.newPassword, dto.platform);
   }
 
   @Post('identity/signup')

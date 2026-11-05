@@ -11,9 +11,13 @@ import { IdentityVerifier } from './identity/firebase-identity.verifier';
 import { VerifiedIdentity } from './identity/verified-identity';
 
 describe('AccountPasswordService', () => {
-  const prisma = { user: { findUnique: jest.fn(), update: jest.fn() } };
+  const prisma = { user: { findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn() } };
   const verifier = { verify: jest.fn<Promise<VerifiedIdentity>, [string]>() };
-  const auth = { revokeOtherSessions: jest.fn(), revokeAllSessions: jest.fn() };
+  const auth = {
+    revokeOtherSessions: jest.fn(),
+    revokeAllSessions: jest.fn(),
+    startSessionFor: jest.fn(),
+  };
   const events = { emit: jest.fn() };
 
   const me: AuthenticatedUser = {
@@ -255,5 +259,79 @@ describe('AccountPasswordService', () => {
       ),
     ).resolves.toMatchObject({ code: 'STAFF_ACCOUNT' });
     expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  describe('forgot password', () => {
+    const confirmedEmail: VerifiedIdentity = { method: 'email', email: 'abebe@gmail.com' };
+    const account = {
+      id: 'u1',
+      email: 'Abebe@gmail.com',
+      platformRole: PlatformRole.USER,
+      status: 'ACTIVE',
+    };
+
+    beforeEach(() => {
+      verifier.verify.mockResolvedValue(confirmedEmail);
+      prisma.user.findFirst.mockResolvedValue(account);
+      auth.startSessionFor.mockResolvedValue({ accessToken: 'a', refreshToken: 'r' });
+    });
+
+    it('sets the new password, signs every device out, then this one in', async () => {
+      const tokens = await service().resetForgotten('email-token', 'brand new pass', 'ANDROID');
+
+      expect(prisma.user.findFirst).toHaveBeenCalledWith({
+        where: { email: { equals: 'abebe@gmail.com', mode: 'insensitive' } },
+      });
+      expect(await argon2.verify(newHash(), 'brand new pass')).toBe(true);
+      expect(auth.revokeAllSessions).toHaveBeenCalledWith('u1');
+      expect(auth.startSessionFor).toHaveBeenCalledWith(account, 'ANDROID');
+      expect(auth.revokeAllSessions.mock.invocationCallOrder[0]).toBeLessThan(
+        auth.startSessionFor.mock.invocationCallOrder[0],
+      );
+      expect(tokens).toEqual({ accessToken: 'a', refreshToken: 'r' });
+      expect(events.emit).toHaveBeenCalledWith(DomainEvents.AccountPasswordChanged, {
+        userId: 'u1',
+        confirmedWith: 'email',
+      });
+    });
+
+    it('says when no account uses the email', async () => {
+      prisma.user.findFirst.mockResolvedValue(null);
+
+      await expect(
+        rejection(service().resetForgotten('t', 'brand new pass')),
+      ).resolves.toMatchObject({
+        code: 'NO_ACCOUNT',
+      });
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('leaves staff to the console, and a suspended account stays out', async () => {
+      prisma.user.findFirst.mockResolvedValue({
+        ...account,
+        platformRole: PlatformRole.SUPER_ADMIN,
+      });
+      await expect(
+        rejection(service().resetForgotten('t', 'brand new pass')),
+      ).resolves.toMatchObject({
+        code: 'STAFF_ACCOUNT',
+      });
+
+      prisma.user.findFirst.mockResolvedValue({ ...account, status: 'SUSPENDED' });
+      await expect(
+        rejection(service().resetForgotten('t', 'brand new pass')),
+      ).resolves.toMatchObject({
+        code: 'ACCOUNT_SUSPENDED',
+      });
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('needs a valid proof of the email', async () => {
+      verifier.verify.mockRejectedValue(new UnauthorizedException('expired'));
+
+      await expect(service().resetForgotten('old', 'brand new pass')).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
+    });
   });
 });
