@@ -588,6 +588,35 @@ export class StreamsService {
   }
 
   /**
+   * A silent look at a live on the app's home screen, before tapping in
+   * (docs/features/streams.md): the same checks as joining - blocked,
+   * private, banned - but nothing else. No "joined" notices, no viewer
+   * counted (that's the realtime room, which a preview never enters), no
+   * stage seat freed. The video goes to a separate identity, so tapping in
+   * afterwards isn't refused as the same person connecting twice.
+   */
+  async preview(streamId: string, viewerId: string) {
+    const stream = await this.getLiveOrThrow(streamId);
+    await this.assertNotBlocked(stream.hostId, viewerId);
+    await this.assertCanWatch(stream, viewerId);
+    if (await this.roomBans.isBanned(stream.hostId, viewerId, streamId)) {
+      throw new ForbiddenException('You are banned from this stream');
+    }
+    const rtcToken = await this.videoProviders.get(stream.videoProvider).mintToken({
+      channelName: stream.channelName,
+      userId: `preview-${viewerId}`,
+      role: 'audience',
+    });
+    return {
+      streamId,
+      hostId: stream.hostId,
+      channelName: stream.channelName,
+      rtcToken,
+      hostAgoraUid: agoraUidFor(stream.hostId),
+    };
+  }
+
+  /**
    * The share page's player (docs/features/share.md): anyone may watch, an
    * account or not. Video goes to a fresh anonymous identity - never the
    * account's own, which may be in the app too (Agora allows one connection

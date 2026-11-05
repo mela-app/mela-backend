@@ -339,6 +339,43 @@ describe('StreamsService', () => {
     expect(result.canRecord).toBe(false);
   });
 
+  it('previews a live silently: an audience token for a separate identity, and nothing announced', async () => {
+    prisma.stream.findUnique.mockResolvedValue({
+      id: 's1',
+      hostId: 'host-1',
+      status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
+      videoProvider: VideoProviderKind.LIVEKIT,
+      channelName: 'stream_s1',
+    });
+    const service = makeService();
+
+    const result = await service.preview('s1', 'viewer-1');
+
+    expect(videoProvider.mintToken).toHaveBeenCalledWith({
+      channelName: 'stream_s1',
+      userId: 'preview-viewer-1',
+      role: 'audience',
+    });
+    expect(result).toMatchObject({ streamId: 's1', hostId: 'host-1' });
+    expect(events.emit).not.toHaveBeenCalled();
+  });
+
+  it('refuses a preview of a live the viewer may not watch', async () => {
+    prisma.stream.findUnique.mockResolvedValue({
+      id: 's1',
+      hostId: 'host-1',
+      status: StreamStatus.LIVE,
+      visibility: StreamVisibility.FRIENDS,
+      videoProvider: VideoProviderKind.AGORA,
+      channelName: 'stream_s1',
+    });
+    const service = makeService();
+
+    await expect(service.preview('s1', 'stranger')).rejects.toThrow();
+    expect(videoProvider.mintToken).not.toHaveBeenCalled();
+  });
+
   it('tells a joining viewer the host lets them record', async () => {
     prisma.stream.findUnique.mockResolvedValue({
       id: 's1',
