@@ -13,8 +13,11 @@ import { BannedPhrasesService } from '../chat/banned-phrases.service';
 import { ChatTextError, cleanChatText } from '../chat/chat-text';
 import { hasDisallowedLink, parseLinkDomains } from '../chat/link-policy';
 import {
+  DirectMessageDeletedPayload,
+  DirectMessageEditedPayload,
   DirectMessageErasedPayload,
   DirectMessagePerson,
+  DirectMessagesHiddenPayload,
   DirectMessageSentPayload,
   DirectMessageSnapshot,
   DirectMessagesReadPayload,
@@ -28,6 +31,9 @@ import { ConversationHistoryQueryDto } from './dto/conversation-history-query.dt
 
 /** Longer than live chat's 200: a conversation, not a comment on a live. */
 export const DIRECT_MESSAGE_MAX_LENGTH = 1000;
+
+/** How long after sending a message its sender may still change its text. */
+export const DIRECT_MESSAGE_EDIT_WINDOW_MS = 15 * 60 * 1000;
 
 /** Five at once, then one a second - per sender, across all their conversations. */
 export const DIRECT_MESSAGE_RATE_LIMIT: RateLimit = { capacity: 5, refillMs: 1000 };
@@ -47,7 +53,18 @@ const MESSAGE_SELECT = {
   clientId: true,
   createdAt: true,
   readAt: true,
+  editedAt: true,
 } satisfies Prisma.DirectMessageSelect;
+
+/** The messages [userId] still sees: not the ones they deleted for themselves. */
+function visibleTo(userId: string): Prisma.DirectMessageWhereInput {
+  return {
+    OR: [
+      { senderId: userId, hiddenBySender: false },
+      { recipientId: userId, hiddenByRecipient: false },
+    ],
+  };
+}
 
 const TEXT_ERRORS: Record<ChatTextError, string> = {
   MESSAGE_EMPTY: 'Write something first',
@@ -129,32 +146,7 @@ export class DirectMessagesService {
       });
     }
 
-    const phraseMatches = await this.bannedPhrases.match(cleaned.text);
-    if (phraseMatches.some((match) => match.severity === 'REJECT')) {
-      throw new BadRequestException({
-        message: "This message can't be sent",
-        code: 'MESSAGE_BLOCKED',
-      });
-    }
-    const retryAfterMs = await this.rateLimit.take(
-      `ratelimit:dm:${senderId}`,
-      DIRECT_MESSAGE_RATE_LIMIT,
-    );
-    if (retryAfterMs > 0) {
-      throw new HttpException(
-        { message: 'Slow down a little', code: 'RATE_LIMITED', retryAfterMs },
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
-    }
-    if (hasDisallowedLink(cleaned.text, this.linkDomains)) {
-      throw new BadRequestException({
-        message: "Links to other sites can't be sent",
-        code: 'LINK_NOT_ALLOWED',
-      });
-    }
-
-    const text =
-      phraseMatches.length > 0 ? await this.bannedPhrases.mask(cleaned.text) : cleaned.text;
+    const text = await this.checkedText(senderId, cleaned.text);
     let message: DirectMessageSnapshot;
     try {
       message = await this.store(senderId, recipientId, text, clientId);
@@ -195,17 +187,29 @@ export class DirectMessagesService {
         id: true,
         userA: { select: PERSON_SELECT },
         userB: { select: PERSON_SELECT },
-        messages: { orderBy: { id: 'desc' }, take: 1, select: MESSAGE_SELECT },
+        // The newest one this user still sees - a conversation they cleared has none.
+        messages: {
+          where: visibleTo(userId),
+          orderBy: { id: 'desc' },
+          take: 1,
+          select: MESSAGE_SELECT,
+        },
       },
     });
     const hasMore = rows.length > limit;
-    const page = rows.slice(0, limit);
+    // Cleared ("Delete chat"): out of the inbox until a new message arrives.
+    const page = rows.slice(0, limit).filter((row) => row.messages.length > 0);
     const partnerIds = page.map((row) => (row.userA.id === userId ? row.userB.id : row.userA.id));
 
     const [unread, following, followers] = await Promise.all([
       this.prisma.directMessage.groupBy({
         by: ['senderId'],
-        where: { recipientId: userId, readAt: null, senderId: { in: partnerIds } },
+        where: {
+          recipientId: userId,
+          readAt: null,
+          hiddenByRecipient: false,
+          senderId: { in: partnerIds },
+        },
         _count: { _all: true },
       }),
       this.prisma.follow.findMany({
@@ -232,7 +236,7 @@ export class DirectMessagesService {
         };
       }),
       hasMore,
-      nextCursor: hasMore ? page[page.length - 1].id : null,
+      nextCursor: hasMore ? rows[limit - 1].id : null,
     };
   }
 
@@ -252,6 +256,23 @@ export class DirectMessagesService {
       select: { conversationId: true, senderId: true, recipientId: true },
     });
     if (!message) return false;
+    await this.remove(messageId);
+    this.events.emit(DomainEvents.DirectMessageErased, {
+      messageId,
+      senderId: message.senderId,
+      recipientId: message.recipientId,
+      actorId,
+      recipientUnreadCount: await this.unreadTotal(message.recipientId),
+    } satisfies DirectMessageErasedPayload);
+    return true;
+  }
+
+  // Gone for good; the conversation keeps its newest remaining time, or goes when it was the last.
+  private async remove(messageId: string): Promise<void> {
+    const message = await this.prisma.directMessage.findUniqueOrThrow({
+      where: { id: messageId },
+      select: { conversationId: true },
+    });
     await this.prisma.$transaction(async (tx) => {
       await tx.directMessage.delete({ where: { id: messageId } });
       const newest = await tx.directMessage.findFirst({
@@ -268,14 +289,151 @@ export class DirectMessagesService {
         await tx.conversation.delete({ where: { id: message.conversationId } });
       }
     });
-    this.events.emit(DomainEvents.DirectMessageErased, {
-      messageId,
+  }
+
+  /**
+   * The sender changes a message's text, within 15 minutes of sending it -
+   * through the same filters as sending. Both people see the new text,
+   * marked edited.
+   */
+  async edit(
+    userId: string,
+    otherId: string,
+    messageId: string,
+    rawText: string,
+    now: Date = new Date(),
+  ): Promise<DirectMessageSnapshot> {
+    const message = await this.ownMessage(userId, otherId, messageId);
+    if (now.getTime() - message.createdAt.getTime() > DIRECT_MESSAGE_EDIT_WINDOW_MS) {
+      throw new BadRequestException({
+        message: 'Messages can only be edited for 15 minutes after sending',
+        code: 'EDIT_WINDOW_PASSED',
+      });
+    }
+    const cleaned = cleanChatText(rawText, DIRECT_MESSAGE_MAX_LENGTH);
+    if ('error' in cleaned) {
+      throw new BadRequestException({ message: TEXT_ERRORS[cleaned.error], code: cleaned.error });
+    }
+    if (cleaned.text === message.text) return message;
+    const text = await this.checkedText(userId, cleaned.text);
+    const edited = await this.prisma.directMessage.update({
+      where: { id: message.id },
+      data: { text, editedAt: now },
+      select: MESSAGE_SELECT,
+    });
+    this.events.emit(DomainEvents.DirectMessageEdited, {
+      message: edited,
+    } satisfies DirectMessageEditedPayload);
+    return edited;
+  }
+
+  /** The sender takes a message back: gone for both people. */
+  async deleteForEveryone(userId: string, otherId: string, messageId: string) {
+    const message = await this.ownMessage(userId, otherId, messageId);
+    await this.remove(message.id);
+    this.events.emit(DomainEvents.DirectMessageDeleted, {
+      messageId: message.id,
       senderId: message.senderId,
       recipientId: message.recipientId,
-      actorId,
       recipientUnreadCount: await this.unreadTotal(message.recipientId),
-    } satisfies DirectMessageErasedPayload);
-    return true;
+    } satisfies DirectMessageDeletedPayload);
+    return { ok: true as const };
+  }
+
+  /** Gone from this person's own view only - sent or received; the other person keeps it. */
+  async deleteForMe(userId: string, otherId: string, messageId: string) {
+    assertNotSelf(userId, otherId);
+    const message = await this.prisma.directMessage.findFirst({
+      where: { id: messageId, conversation: pairOf(userId, otherId), ...visibleTo(userId) },
+      select: { id: true, senderId: true },
+    });
+    if (!message) throw new NotFoundException('Message not found');
+    await this.prisma.directMessage.update({
+      where: { id: message.id },
+      // Hidden unread counts as read: it would otherwise stay in the badge for good.
+      data:
+        message.senderId === userId
+          ? { hiddenBySender: true }
+          : { hiddenByRecipient: true, readAt: new Date() },
+    });
+    return this.hidden(userId, otherId, message.id);
+  }
+
+  /** "Delete chat": every message with [otherId] gone from this person's view, and the conversation from their inbox. */
+  async clearConversation(userId: string, otherId: string) {
+    assertNotSelf(userId, otherId);
+    const pair = pairOf(userId, otherId);
+    await this.prisma.$transaction([
+      this.prisma.directMessage.updateMany({
+        where: { conversation: pair, senderId: userId },
+        data: { hiddenBySender: true },
+      }),
+      this.prisma.directMessage.updateMany({
+        where: { conversation: pair, recipientId: userId, readAt: null },
+        data: { readAt: new Date() },
+      }),
+      this.prisma.directMessage.updateMany({
+        where: { conversation: pair, recipientId: userId },
+        data: { hiddenByRecipient: true },
+      }),
+    ]);
+    return this.hidden(userId, otherId, null);
+  }
+
+  private async hidden(userId: string, partnerId: string, messageId: string | null) {
+    const unreadCount = await this.unreadTotal(userId);
+    this.events.emit(DomainEvents.DirectMessagesHidden, {
+      userId,
+      partnerId,
+      messageId,
+      unreadCount,
+    } satisfies DirectMessagesHiddenPayload);
+    return { ok: true as const, unreadCount };
+  }
+
+  // A message of [userId]'s to [otherId] that they haven't deleted for themselves.
+  private async ownMessage(userId: string, otherId: string, messageId: string) {
+    assertNotSelf(userId, otherId);
+    const message = await this.prisma.directMessage.findFirst({
+      where: { id: messageId, conversation: pairOf(userId, otherId), hiddenBySender: false },
+      select: MESSAGE_SELECT,
+    });
+    if (!message) throw new NotFoundException('Message not found');
+    if (message.senderId !== userId) {
+      throw new ForbiddenException({
+        message: 'Only the person who sent a message can change it for everyone',
+        code: 'NOT_YOUR_MESSAGE',
+      });
+    }
+    return message;
+  }
+
+  /** Live chat's checks on a message's text (docs/features/chat.md): the phrase filter, the pace, the link policy. */
+  private async checkedText(senderId: string, text: string): Promise<string> {
+    const phraseMatches = await this.bannedPhrases.match(text);
+    if (phraseMatches.some((match) => match.severity === 'REJECT')) {
+      throw new BadRequestException({
+        message: "This message can't be sent",
+        code: 'MESSAGE_BLOCKED',
+      });
+    }
+    const retryAfterMs = await this.rateLimit.take(
+      `ratelimit:dm:${senderId}`,
+      DIRECT_MESSAGE_RATE_LIMIT,
+    );
+    if (retryAfterMs > 0) {
+      throw new HttpException(
+        { message: 'Slow down a little', code: 'RATE_LIMITED', retryAfterMs },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    if (hasDisallowedLink(text, this.linkDomains)) {
+      throw new BadRequestException({
+        message: "Links to other sites can't be sent",
+        code: 'LINK_NOT_ALLOWED',
+      });
+    }
+    return phraseMatches.length > 0 ? this.bannedPhrases.mask(text) : text;
   }
 
   /** One conversation, oldest first - see ConversationHistoryQueryDto. Gone for someone the other side blocked. */
@@ -296,7 +454,11 @@ export class DirectMessagesService {
 
     const [rows, canMessage] = await Promise.all([
       this.prisma.directMessage.findMany({
-        where: { conversation: pairOf(userId, otherId), id: { lt: query.before } },
+        where: {
+          conversation: pairOf(userId, otherId),
+          id: { lt: query.before },
+          ...visibleTo(userId),
+        },
         // Newest first to pick the window; handed out oldest first.
         orderBy: { id: 'desc' },
         take: query.limit + 1,
@@ -371,6 +533,7 @@ export class DirectMessagesService {
       // A blocked conversation is hidden, so it can't be opened to clear its count.
       where: {
         recipientId: userId,
+        hiddenByRecipient: false,
         readAt: null,
         sender: notBlockedEitherWayWith(userId),
       },

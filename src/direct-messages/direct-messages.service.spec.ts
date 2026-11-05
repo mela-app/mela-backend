@@ -1,4 +1,9 @@
-import { BadRequestException, HttpException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  HttpException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
@@ -32,6 +37,7 @@ const message = (id: string, senderId: string, recipientId: string, text = 'hell
   clientId: null,
   createdAt: new Date('2026-10-01T09:00:00Z'),
   readAt: null,
+  editedAt: null,
 });
 
 describe('DirectMessagesService', () => {
@@ -41,8 +47,10 @@ describe('DirectMessagesService', () => {
     directMessage: {
       create: jest.fn(),
       findUnique: jest.fn(),
+      findUniqueOrThrow: jest.fn(),
       findFirst: jest.fn(),
       findMany: jest.fn(),
+      update: jest.fn(),
       updateMany: jest.fn(),
       count: jest.fn(),
       groupBy: jest.fn(),
@@ -294,8 +302,8 @@ describe('DirectMessagesService', () => {
 
     it('pages by conversation', async () => {
       prisma.conversation.findMany.mockResolvedValue([
-        { id: 'conversation-3', userA: ana, userB: ben, messages: [] },
-        { id: 'conversation-2', userA: ana, userB: cal, messages: [] },
+        { id: 'conversation-3', userA: ana, userB: ben, messages: [message('m3', BEN, ANA)] },
+        { id: 'conversation-2', userA: ana, userB: cal, messages: [message('m2', CAL, ANA)] },
       ]);
       prisma.directMessage.groupBy.mockResolvedValue([]);
       prisma.follow.findMany.mockResolvedValue([]);
@@ -330,7 +338,15 @@ describe('DirectMessagesService', () => {
       });
       expect(prisma.directMessage.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { conversation: { userAId: ANA, userBId: BEN }, id: { lt: undefined } },
+          where: {
+            conversation: { userAId: ANA, userBId: BEN },
+            id: { lt: undefined },
+            // Not what Ana deleted for herself.
+            OR: [
+              { senderId: ANA, hiddenBySender: false },
+              { recipientId: ANA, hiddenByRecipient: false },
+            ],
+          },
           orderBy: { id: 'desc' },
           take: 3,
         }),
@@ -394,6 +410,7 @@ describe('DirectMessagesService', () => {
     expect(prisma.directMessage.count).toHaveBeenCalledWith({
       where: {
         recipientId: ANA,
+        hiddenByRecipient: false,
         readAt: null,
         sender: {
           blockedBy: { none: { blockerId: ANA } },
@@ -409,6 +426,9 @@ describe('DirectMessagesService', () => {
         conversationId: 'conversation-1',
         senderId: ANA,
         recipientId: BEN,
+      });
+      prisma.directMessage.findUniqueOrThrow.mockResolvedValue({
+        conversationId: 'conversation-1',
       });
     });
 
@@ -447,6 +467,136 @@ describe('DirectMessagesService', () => {
       await expect(service().erase('dm-1', 'admin-1')).resolves.toBe(false);
       expect(prisma.directMessage.delete).not.toHaveBeenCalled();
       expect(events.emit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('editing and deleting your own messages', () => {
+    const sentAt = new Date('2026-10-01T09:00:00Z');
+    const own = { ...message('dm-1', ANA, BEN, 'see you at 8'), createdAt: sentAt };
+
+    beforeEach(() => {
+      prisma.directMessage.findFirst.mockResolvedValue(own);
+      bannedPhrases.match.mockResolvedValue([]);
+      rateLimit.take.mockResolvedValue(0);
+      prisma.directMessage.update.mockImplementation(({ data }: { data: object }) =>
+        Promise.resolve({ ...own, ...data }),
+      );
+    });
+
+    it('changes the text within 15 minutes, marked edited, and tells both apps', async () => {
+      const now = new Date('2026-10-01T09:10:00Z');
+
+      const edited = await service().edit(ANA, BEN, 'dm-1', '  see you at 9 ', now);
+
+      expect(prisma.directMessage.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'dm-1' },
+          data: { text: 'see you at 9', editedAt: now },
+        }),
+      );
+      expect(edited).toMatchObject({ text: 'see you at 9', editedAt: now });
+      expect(events.emit).toHaveBeenCalledWith(DomainEvents.DirectMessageEdited, {
+        message: edited,
+      });
+    });
+
+    it('not after 15 minutes', async () => {
+      await expect(
+        service().edit(ANA, BEN, 'dm-1', 'too late', new Date('2026-10-01T09:16:00Z')),
+      ).rejects.toThrow('15 minutes');
+      expect(prisma.directMessage.update).not.toHaveBeenCalled();
+    });
+
+    it('through the same filters as sending', async () => {
+      bannedPhrases.match.mockResolvedValue([{ severity: 'REJECT' }]);
+
+      await expect(
+        service().edit(ANA, BEN, 'dm-1', 'something rude', new Date('2026-10-01T09:01:00Z')),
+      ).rejects.toThrow("can't be sent");
+    });
+
+    it('only the sender changes a message for everyone', async () => {
+      prisma.directMessage.findFirst.mockResolvedValue(message('dm-2', BEN, ANA));
+
+      await expect(service().edit(ANA, BEN, 'dm-2', 'mine now', sentAt)).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      await expect(service().deleteForEveryone(ANA, BEN, 'dm-2')).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+    });
+
+    it('deleted for everyone: gone for both, and the badge recounted', async () => {
+      prisma.directMessage.findUniqueOrThrow.mockResolvedValue({
+        conversationId: 'conversation-1',
+      });
+      prisma.directMessage.findFirst
+        .mockResolvedValueOnce(own)
+        .mockResolvedValueOnce({ createdAt: sentAt });
+      prisma.directMessage.count.mockResolvedValue(2);
+
+      await service().deleteForEveryone(ANA, BEN, 'dm-1');
+
+      expect(prisma.directMessage.delete).toHaveBeenCalledWith({ where: { id: 'dm-1' } });
+      expect(events.emit).toHaveBeenCalledWith(DomainEvents.DirectMessageDeleted, {
+        messageId: 'dm-1',
+        senderId: ANA,
+        recipientId: BEN,
+        recipientUnreadCount: 2,
+      });
+    });
+
+    it('deleted for me: only from my own view - a received one also stops counting as unread', async () => {
+      prisma.directMessage.findFirst.mockResolvedValue({ id: 'dm-2', senderId: BEN });
+      prisma.directMessage.count.mockResolvedValue(0);
+
+      await expect(service().deleteForMe(ANA, BEN, 'dm-2')).resolves.toEqual({
+        ok: true,
+        unreadCount: 0,
+      });
+
+      expect(prisma.directMessage.update).toHaveBeenCalledWith({
+        where: { id: 'dm-2' },
+        data: { hiddenByRecipient: true, readAt: expect.any(Date) },
+      });
+      expect(prisma.directMessage.delete).not.toHaveBeenCalled();
+      expect(events.emit).toHaveBeenCalledWith(DomainEvents.DirectMessagesHidden, {
+        userId: ANA,
+        partnerId: BEN,
+        messageId: 'dm-2',
+        unreadCount: 0,
+      });
+    });
+
+    it('delete chat: everything with them gone from my view, theirs untouched', async () => {
+      prisma.directMessage.count.mockResolvedValue(0);
+      prisma.$transaction.mockResolvedValue([]);
+
+      await service().clearConversation(ANA, BEN);
+
+      const pair = { userAId: ANA, userBId: BEN };
+      expect(prisma.directMessage.updateMany).toHaveBeenCalledWith({
+        where: { conversation: pair, senderId: ANA },
+        data: { hiddenBySender: true },
+      });
+      expect(prisma.directMessage.updateMany).toHaveBeenCalledWith({
+        where: { conversation: pair, recipientId: ANA },
+        data: { hiddenByRecipient: true },
+      });
+      expect(events.emit).toHaveBeenCalledWith(
+        DomainEvents.DirectMessagesHidden,
+        expect.objectContaining({ userId: ANA, partnerId: BEN, messageId: null }),
+      );
+    });
+
+    it('a conversation I cleared stays out of my inbox', async () => {
+      prisma.conversation.findMany.mockResolvedValue([
+        { id: 'conversation-1', userA: ana, userB: ben, messages: [] },
+      ]);
+      prisma.directMessage.groupBy.mockResolvedValue([]);
+      prisma.follow.findMany.mockResolvedValue([]);
+
+      expect((await service().listConversations(ANA)).items).toEqual([]);
     });
   });
 });

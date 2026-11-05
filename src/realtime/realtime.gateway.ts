@@ -34,6 +34,9 @@ import {
   DataClearedPayload,
   DataResetPayload,
   DirectMessageErasedPayload,
+  DirectMessageEditedPayload,
+  DirectMessageDeletedPayload,
+  DirectMessagesHiddenPayload,
   DirectMessageSentPayload,
   DirectMessagesReadPayload,
   DomainEvents,
@@ -823,6 +826,35 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     this.server
       .to(userRoom(readerId))
       .emit('message:unread_count', { count: payload.readerUnreadCount });
+  }
+
+  // The sender changed a message: both people's apps show the new text, marked edited.
+  @OnEvent(DomainEvents.DirectMessageEdited)
+  handleDirectMessageEdited(payload: DirectMessageEditedPayload) {
+    const { message } = payload;
+    this.server
+      .to([userRoom(message.senderId), userRoom(message.recipientId)])
+      .emit('message:edited', { message });
+  }
+
+  // Deleted for everyone by its sender: both apps drop it, as when staff erase one.
+  @OnEvent(DomainEvents.DirectMessageDeleted)
+  handleDirectMessageDeleted(payload: DirectMessageDeletedPayload) {
+    const { messageId, senderId, recipientId } = payload;
+    this.server
+      .to([userRoom(senderId), userRoom(recipientId)])
+      .emit('message:deleted', { messageId, senderId, recipientId });
+    this.server
+      .to(userRoom(recipientId))
+      .emit('message:unread_count', { count: payload.recipientUnreadCount });
+  }
+
+  // Cleared from one person's own view: only their own devices hear, the other person sees nothing change.
+  @OnEvent(DomainEvents.DirectMessagesHidden)
+  handleDirectMessagesHidden(payload: DirectMessagesHiddenPayload) {
+    const { userId, partnerId, messageId } = payload;
+    this.server.to(userRoom(userId)).emit('message:hidden', { partnerId, messageId });
+    this.server.to(userRoom(userId)).emit('message:unread_count', { count: payload.unreadCount });
   }
 
   // Staff erased a reported message: both apps drop it, and the recipient's badge is recounted.

@@ -679,6 +679,7 @@ describe('NotificationsService', () => {
         clientId: null,
         createdAt: new Date(),
         readAt: null,
+        editedAt: null,
       },
       sender: { id: 'friend-1', username: 'abebe', displayName: 'Abebe', avatarUrl: null },
       recipient: { id: 'me', username: 'me', displayName: 'Me', avatarUrl: null },

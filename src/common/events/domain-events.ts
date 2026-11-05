@@ -120,6 +120,10 @@ export const DomainEvents = {
   ReportCaseResolved: 'report_case.resolved',
   // Staff erased a reported private message.
   DirectMessageErased: 'direct_message.erased',
+  // The sender edited, or deleted for everyone, a message of theirs; or someone cleared it from their own view.
+  DirectMessageEdited: 'direct_message.edited',
+  DirectMessageDeleted: 'direct_message.deleted',
+  DirectMessagesHidden: 'direct_message.hidden',
   // An account and what it made are gone (docs/features/auth.md).
   AccountDeleted: 'account.deleted',
   // Viewers of a stopped API instance were removed (docs/features/realtime.md).
@@ -552,7 +556,8 @@ export interface AccountCredentialChangedPayload {
 
 export interface AccountPasswordSetPayload extends AccountCredentialChangedPayload {
   // How they proved it was them, in the app - the console always asks for the current password.
-  confirmedWith?: 'password' | 'google';
+  // 'email': a forgotten password, reset through a link to the account's email.
+  confirmedWith?: 'password' | 'google' | 'email';
 }
 
 export type SignUpMethod = 'google' | 'email';
@@ -669,6 +674,8 @@ export interface DirectMessageSnapshot {
   createdAt: Date;
   // When the recipient read it; null while unread.
   readAt: Date | null;
+  // When the sender last changed it; null if never.
+  editedAt: Date | null;
 }
 
 /** The brief profile shown beside a conversation. */
@@ -731,6 +738,26 @@ export interface ReportCaseResolvedPayload {
   // Everyone who reported it and still has an account - each is told.
   reporterIds: string[];
   note: string | null;
+}
+
+export interface DirectMessageEditedPayload {
+  message: DirectMessageSnapshot;
+}
+
+// Deleted for everyone by its sender.
+export interface DirectMessageDeletedPayload {
+  messageId: string;
+  senderId: string;
+  recipientId: string;
+  recipientUnreadCount: number;
+}
+
+// Gone from one person's own view: one message, or every message with [partnerId] (null messageId).
+export interface DirectMessagesHiddenPayload {
+  userId: string;
+  partnerId: string;
+  messageId: string | null;
+  unreadCount: number;
 }
 
 export interface DirectMessageErasedPayload {

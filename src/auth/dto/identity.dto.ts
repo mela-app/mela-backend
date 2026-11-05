@@ -17,6 +17,14 @@ export class IdentityTokenDto {
   platform?: SessionPlatform;
 }
 
+/** "Forgot password?": the email proven by its link, and the new password. */
+export class PasswordResetDto extends IdentityTokenDto {
+  @IsString()
+  @MinLength(8, { message: 'Use at least 8 characters for your password' })
+  @MaxLength(72) // argon2-safe upper bound
+  newPassword!: string;
+}
+
 export class IdentitySignupDto extends IdentityTokenDto {
   @IsString()
   @Matches(USERNAME_PATTERN, { message: USERNAME_RULE })

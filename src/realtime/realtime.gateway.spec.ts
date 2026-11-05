@@ -1062,6 +1062,7 @@ describe('RealtimeGateway', () => {
         clientId: 'c1',
         createdAt: new Date('2026-10-01T09:00:00Z'),
         readAt: null,
+        editedAt: null,
       };
 
       makeGateway().handleDirectMessageSent({
