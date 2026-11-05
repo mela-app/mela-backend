@@ -179,6 +179,30 @@ export class CampaignsService {
   }
 
   /**
+   * Off the list, with its opens. Not while it's going out; a push already
+   * delivered stays on people's phones - deleting can't take it back.
+   */
+  async deleteCampaign(staff: StaffActor, campaignId: string) {
+    const campaign = await this.prisma.pushCampaign.findUnique({
+      where: { id: campaignId },
+      select: { id: true, title: true, status: true },
+    });
+    if (!campaign) throw new NotFoundException('Campaign not found');
+    const { count } = await this.prisma.pushCampaign.deleteMany({
+      where: { id: campaignId, status: { not: CampaignStatus.SENDING } },
+    });
+    if (count === 0) {
+      throw new ConflictException('It is going out right now - delete it once it is sent');
+    }
+    this.events.emit(DomainEvents.CampaignDeleted, {
+      campaignId,
+      actorId: staff.id,
+      title: campaign.title,
+    } satisfies CampaignChangedPayload);
+    return { ok: true as const };
+  }
+
+  /**
    * Sends every campaign whose time has come (CampaignsJobs, every 30 s).
    * A campaign is claimed first (SCHEDULED to SENDING), so two instances
    * never send one twice.

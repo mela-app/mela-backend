@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CampaignStatus, SessionPlatform } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
@@ -60,6 +60,7 @@ describe('CampaignsService', () => {
       findMany: jest.fn(),
       findUnique: jest.fn(),
       findUniqueOrThrow: jest.fn(),
+      deleteMany: jest.fn(),
       updateMany: jest.fn(),
       update: jest.fn(),
     },
@@ -178,6 +179,22 @@ describe('CampaignsService', () => {
     prisma.pushCampaign.findUnique.mockResolvedValue({ id: 'c1' });
 
     await expect(service().cancelCampaign(staff, 'c1')).rejects.toThrow(ConflictException);
+  });
+
+  it('deletes a campaign - but not while it is going out', async () => {
+    prisma.pushCampaign.findUnique.mockResolvedValue({ id: 'c1', title: 'Hi', status: 'SENT' });
+    prisma.pushCampaign.deleteMany.mockResolvedValue({ count: 1 });
+
+    await expect(service().deleteCampaign(staff, 'c1')).resolves.toEqual({ ok: true });
+    expect(prisma.pushCampaign.deleteMany).toHaveBeenCalledWith({
+      where: { id: 'c1', status: { not: 'SENDING' } },
+    });
+
+    prisma.pushCampaign.deleteMany.mockResolvedValue({ count: 0 });
+    await expect(service().deleteCampaign(staff, 'c1')).rejects.toThrow(ConflictException);
+
+    prisma.pushCampaign.findUnique.mockResolvedValue(null);
+    await expect(service().deleteCampaign(staff, 'c1')).rejects.toThrow(NotFoundException);
   });
 
   it('counts an open once per person', async () => {

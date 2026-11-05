@@ -29,6 +29,7 @@ export const AUDIT_ACTIONS = {
   'user.note_deleted': { category: 'ADMIN', label: 'Removed a note from an account' },
   'campaign.scheduled': { category: 'ADMIN', label: 'Sent or scheduled a push campaign' },
   'campaign.cancelled': { category: 'ADMIN', label: 'Cancelled a push campaign' },
+  'campaign.deleted': { category: 'ADMIN', label: 'Deleted a push campaign' },
   'announcement.published': { category: 'ADMIN', label: 'Published an in-app banner' },
   'announcement.updated': { category: 'ADMIN', label: 'Changed an in-app banner' },
   'announcement.ended': { category: 'ADMIN', label: 'Ended an in-app banner' },
