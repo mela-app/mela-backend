@@ -276,8 +276,13 @@ export class AuditEventsListener {
     }));
   }
 
+  @OnEvent(DomainEvents.CampaignDeleted)
+  onCampaignDeleted(payload: CampaignChangedPayload) {
+    return this.trackCampaign('campaign.deleted', payload);
+  }
+
   private trackCampaign(
-    action: 'campaign.scheduled' | 'campaign.cancelled',
+    action: 'campaign.scheduled' | 'campaign.cancelled' | 'campaign.deleted',
     payload: CampaignChangedPayload,
   ) {
     return this.track(async () => ({

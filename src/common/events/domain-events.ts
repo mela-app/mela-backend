@@ -78,6 +78,7 @@ export const DomainEvents = {
   // Reaching many people (docs/features/campaigns.md).
   CampaignScheduled: 'campaign.scheduled',
   CampaignCancelled: 'campaign.cancelled',
+  CampaignDeleted: 'campaign.deleted',
   AnnouncementChanged: 'announcement.changed',
   FeaturedHostChanged: 'featured_host.changed',
   AccountPasswordChanged: 'account.password_changed',

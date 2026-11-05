@@ -192,6 +192,12 @@ export class AdminCampaignsController {
     return this.campaigns.cancelCampaign(admin, id);
   }
 
+  @Delete('campaigns/:id')
+  @RequirePermission(AdminPermission.MANAGE_CAMPAIGNS)
+  deleteCampaign(@CurrentAdmin() admin: AdminPrincipal, @Param('id', ParseUUIDPipe) id: string) {
+    return this.campaigns.deleteCampaign(admin, id);
+  }
+
   @Get('announcements')
   announcements(@Query() query: PageQueryDto) {
     return this.campaigns.listAnnouncements(query);
