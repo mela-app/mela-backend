@@ -72,6 +72,15 @@ export class StreamsController {
     return this.streamsService.join(id, user.id);
   }
 
+  // The home screen's silent preview of the live in view - many while scrolling.
+  @Post(':id/preview')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { ttl: 60_000, limit: 120 } })
+  preview(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.streamsService.preview(id, user.id);
+  }
+
   // The share page's player: anyone may watch; everything else takes an account.
   @Post(':id/watch')
   @HttpCode(HttpStatus.OK)
