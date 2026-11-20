@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { readFileSync } from 'fs';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -34,20 +35,7 @@ export class FcmPushProvider implements PushProvider {
     if (tokens.length === 0) return { invalidTokens: [] };
     const response = await admin
       .messaging(this.app)
-      .sendEachForMulticast({
-        tokens,
-        notification: { title: message.title, body: message.body },
-        data: message.data,
-        ...(message.collapseKey && {
-          // Android shows one notification per tag; iOS groups by thread and
-          // replaces by collapse id.
-          android: { collapseKey: message.collapseKey, notification: { tag: message.collapseKey } },
-          apns: {
-            headers: { 'apns-collapse-id': message.collapseKey },
-            payload: { aps: { threadId: message.collapseKey } },
-          },
-        }),
-      })
+      .sendEachForMulticast(fcmMulticast(tokens, message))
       .catch((error: unknown) => {
         this.logger.error(`FCM send failed: ${error}`);
         return null;
@@ -55,12 +43,58 @@ export class FcmPushProvider implements PushProvider {
     if (!response) return { invalidTokens: [] };
 
     const invalidTokens: string[] = [];
+    const otherErrors = new Map<string, number>();
     response.responses.forEach((result, index) => {
-      if (!result.success && isInvalidTokenError(result.error?.code))
+      if (result.success) return;
+      if (isInvalidTokenError(result.error?.code)) {
         invalidTokens.push(tokens[index]);
+        return;
+      }
+      // Anything else is a push that never reached the phone: say so, or
+      // it fails silently (as an over-long collapse key once did).
+      const reason = `${result.error?.code ?? 'unknown'}: ${result.error?.message ?? ''}`.trim();
+      otherErrors.set(reason, (otherErrors.get(reason) ?? 0) + 1);
     });
+    for (const [reason, count] of otherErrors) {
+      this.logger.warn(
+        `FCM refused ${count} of ${tokens.length} push(es) (type=${message.data?.type ?? '-'}): ${reason}`,
+      );
+    }
     return { invalidTokens };
   }
+}
+
+/**
+ * A collapse key FCM accepts on every platform: APNs refuses an
+ * `apns-collapse-id` over 64 bytes - and FCM then refuses the whole message,
+ * Android included. Ours (`<userId>:dm-<senderId>`, `<userId>:campaign:<id>`)
+ * run to ~80, so they're hashed to 32 hex characters: the same key always
+ * gives the same id, so pushes still replace each other as before.
+ */
+export function compactCollapseKey(key: string): string {
+  return createHash('sha256').update(key).digest('hex').slice(0, 32);
+}
+
+/** The multicast message for [tokens] (see compactCollapseKey). */
+export function fcmMulticast(
+  tokens: string[],
+  message: PushMessage,
+): admin.messaging.MulticastMessage {
+  const collapse = message.collapseKey ? compactCollapseKey(message.collapseKey) : undefined;
+  return {
+    tokens,
+    notification: { title: message.title, body: message.body },
+    data: message.data,
+    ...(collapse && {
+      // Android shows one notification per tag; iOS groups by thread and
+      // replaces by collapse id.
+      android: { collapseKey: collapse, notification: { tag: collapse } },
+      apns: {
+        headers: { 'apns-collapse-id': collapse },
+        payload: { aps: { threadId: collapse } },
+      },
+    }),
+  };
 }
 
 function isInvalidTokenError(code: string | undefined): boolean {
