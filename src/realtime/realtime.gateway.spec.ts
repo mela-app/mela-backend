@@ -1105,6 +1105,7 @@ describe('RealtimeGateway', () => {
         createdAt: new Date('2026-10-01T09:00:00Z'),
         readAt: null,
         editedAt: null,
+        imageUrl: null,
       };
 
       makeGateway().handleDirectMessageSent({

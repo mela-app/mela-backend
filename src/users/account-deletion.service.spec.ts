@@ -14,6 +14,7 @@ describe('AccountDeletionService', () => {
     user: { findUnique: jest.fn(), delete: jest.fn() },
     stream: { findMany: jest.fn(), deleteMany: jest.fn() },
     chatMessage: { findMany: jest.fn() },
+    directMessage: { findMany: jest.fn() },
     auditLog: { updateMany: jest.fn() },
     $transaction: jest.fn((steps: Promise<unknown>[]) => Promise.all(steps)),
   };
@@ -47,12 +48,16 @@ describe('AccountDeletionService', () => {
     );
     prisma.stream.findMany.mockResolvedValue([]);
     prisma.chatMessage.findMany.mockResolvedValue([]);
+    prisma.directMessage.findMany.mockResolvedValue([]);
   });
 
   it('deletes the account and all it made once the password proves it, keeping anonymous records', async () => {
     prisma.stream.findMany.mockResolvedValue([{ id: 'live-1' }]);
     prisma.chatMessage.findMany.mockResolvedValue([
       { imageUrl: 'https://media.example/chat-images/live-1/p.jpg' },
+    ]);
+    prisma.directMessage.findMany.mockResolvedValue([
+      { imageUrl: 'https://media.example/dm-images/u1/q.jpg' },
     ]);
     streams.end.mockResolvedValue({});
 
@@ -78,6 +83,7 @@ describe('AccountDeletionService', () => {
     expect(storage.deleteUrls).toHaveBeenCalledWith([
       'https://media.example/avatars/u1/a.jpg',
       'https://media.example/chat-images/live-1/p.jpg',
+      'https://media.example/dm-images/u1/q.jpg',
     ]);
     expect(events.emit).toHaveBeenCalledWith(DomainEvents.AccountDeleted, {
       userId: 'u1',

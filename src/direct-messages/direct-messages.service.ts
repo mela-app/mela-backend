@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   HttpException,
   HttpStatus,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -10,6 +11,7 @@ import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { BannedPhrasesService } from '../chat/banned-phrases.service';
+import { ChatImageType } from '../chat/chat-images';
 import { ChatTextError, cleanChatText } from '../chat/chat-text';
 import { hasDisallowedLink, parseLinkDomains } from '../chat/link-policy';
 import {
@@ -25,12 +27,15 @@ import {
 } from '../common/events/domain-events';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RateLimit, RateLimitService } from '../common/rate-limit/rate-limit.service';
+import { STORAGE_PROVIDER, StorageProvider } from '../common/storage/storage-provider.interface';
 import { Page, SocialService } from '../social/social.service';
 import { notBlockedEitherWayWith } from '../social/block-filters';
+import { directMessageImageKey, isDirectMessageImageKey } from './direct-message-images';
 import { ConversationHistoryQueryDto } from './dto/conversation-history-query.dto';
 
 /** Longer than live chat's 200: a conversation, not a comment on a live. */
 export const DIRECT_MESSAGE_MAX_LENGTH = 1000;
+export const DIRECT_MESSAGE_MAX_LINES = 20;
 
 /** How long after sending a message its sender may still change its text. */
 export const DIRECT_MESSAGE_EDIT_WINDOW_MS = 15 * 60 * 1000;
@@ -50,6 +55,7 @@ const MESSAGE_SELECT = {
   senderId: true,
   recipientId: true,
   text: true,
+  imageUrl: true,
   clientId: true,
   createdAt: true,
   readAt: true,
@@ -105,6 +111,7 @@ export class DirectMessagesService {
     private readonly rateLimit: RateLimitService,
     private readonly events: EventEmitter2,
     config: ConfigService,
+    @Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider,
   ) {
     this.linkDomains = parseLinkDomains(config.get<string>('CHAT_LINK_DOMAINS'));
   }
@@ -113,19 +120,25 @@ export class DirectMessagesService {
    * Live chat's pipeline (docs/features/chat.md) on a longer message: clean
    * the text, the phrase filter, the sender's pace, the link policy - but
    * first, only between friends. A resend with the same `clientId` gets the
-   * stored message back instead of a second one.
+   * stored message back instead of a second one. With [imageKey] (from
+   * createImageUploadUrl) it's a photo, and the text its caption - maybe empty.
    */
   async send(
     senderId: string,
     recipientId: string,
     rawText: string,
     clientId?: string,
+    imageKey?: string,
   ): Promise<DirectMessageSnapshot> {
     assertNotSelf(senderId, recipientId);
-    const cleaned = cleanChatText(rawText, DIRECT_MESSAGE_MAX_LENGTH);
-    if ('error' in cleaned) {
+    const cleaned = cleanChatText(rawText, DIRECT_MESSAGE_MAX_LENGTH, DIRECT_MESSAGE_MAX_LINES);
+    if ('error' in cleaned && !(imageKey && cleaned.error === 'MESSAGE_EMPTY')) {
       throw new BadRequestException({ message: TEXT_ERRORS[cleaned.error], code: cleaned.error });
     }
+    if (imageKey && !isDirectMessageImageKey(imageKey, senderId)) {
+      throw new BadRequestException({ message: "That photo can't be sent", code: 'IMAGE_INVALID' });
+    }
+    const imageUrl = imageKey ? this.storage.publicUrl(imageKey) : null;
 
     if (clientId) {
       const earlier = await this.findSent(senderId, clientId);
@@ -146,10 +159,10 @@ export class DirectMessagesService {
       });
     }
 
-    const text = await this.checkedText(senderId, cleaned.text);
+    const text = await this.checkedText(senderId, 'error' in cleaned ? '' : cleaned.text);
     let message: DirectMessageSnapshot;
     try {
-      message = await this.store(senderId, recipientId, text, clientId);
+      message = await this.store(senderId, recipientId, text, imageUrl, clientId);
     } catch (error) {
       // The same clientId sent twice at once: the other request stored it.
       const earlier =
@@ -165,6 +178,23 @@ export class DirectMessagesService {
       recipientUnreadCount: await this.unreadTotal(recipientId),
     } satisfies DirectMessageSentPayload);
     return message;
+  }
+
+  /**
+   * A presigned upload for a photo [senderId] is about to send [recipientId];
+   * the app then sends the returned `imageKey` with the message. Only between
+   * friends, like the message itself.
+   */
+  async createImageUploadUrl(senderId: string, recipientId: string, contentType: ChatImageType) {
+    assertNotSelf(senderId, recipientId);
+    if (!(await this.social.isFriend(senderId, recipientId))) {
+      throw new ForbiddenException({
+        message: 'You can message each other once you follow each other',
+        code: 'NOT_FRIENDS',
+      });
+    }
+    const imageKey = directMessageImageKey(senderId, contentType);
+    return { ...(await this.storage.createUploadUrl(imageKey, contentType)), imageKey };
   }
 
   /** The inbox: newest conversation first, without anyone blocked either way (plan §6.4). */
@@ -267,11 +297,11 @@ export class DirectMessagesService {
     return true;
   }
 
-  // Gone for good; the conversation keeps its newest remaining time, or goes when it was the last.
+  // Gone for good, its photo too; the conversation keeps its newest remaining time, or goes when it was the last.
   private async remove(messageId: string): Promise<void> {
     const message = await this.prisma.directMessage.findUniqueOrThrow({
       where: { id: messageId },
-      select: { conversationId: true },
+      select: { conversationId: true, imageUrl: true },
     });
     await this.prisma.$transaction(async (tx) => {
       await tx.directMessage.delete({ where: { id: messageId } });
@@ -289,6 +319,7 @@ export class DirectMessagesService {
         await tx.conversation.delete({ where: { id: message.conversationId } });
       }
     });
+    if (message.imageUrl) void this.storage.deleteUrls([message.imageUrl]);
   }
 
   /**
@@ -310,12 +341,14 @@ export class DirectMessagesService {
         code: 'EDIT_WINDOW_PASSED',
       });
     }
-    const cleaned = cleanChatText(rawText, DIRECT_MESSAGE_MAX_LENGTH);
-    if ('error' in cleaned) {
+    const cleaned = cleanChatText(rawText, DIRECT_MESSAGE_MAX_LENGTH, DIRECT_MESSAGE_MAX_LINES);
+    // A photo's caption may be emptied; a plain message can't be.
+    if ('error' in cleaned && !(message.imageUrl && cleaned.error === 'MESSAGE_EMPTY')) {
       throw new BadRequestException({ message: TEXT_ERRORS[cleaned.error], code: cleaned.error });
     }
-    if (cleaned.text === message.text) return message;
-    const text = await this.checkedText(userId, cleaned.text);
+    const cleanText = 'error' in cleaned ? '' : cleaned.text;
+    if (cleanText === message.text) return message;
+    const text = await this.checkedText(userId, cleanText);
     const edited = await this.prisma.directMessage.update({
       where: { id: message.id },
       data: { text, editedAt: now },
@@ -408,9 +441,12 @@ export class DirectMessagesService {
     return message;
   }
 
-  /** Live chat's checks on a message's text (docs/features/chat.md): the phrase filter, the pace, the link policy. */
+  /**
+   * Live chat's checks on a message's text (docs/features/chat.md): the
+   * phrase filter, the pace, the link policy. A photo's empty caption is only paced.
+   */
   private async checkedText(senderId: string, text: string): Promise<string> {
-    const phraseMatches = await this.bannedPhrases.match(text);
+    const phraseMatches = text ? await this.bannedPhrases.match(text) : [];
     if (phraseMatches.some((match) => match.severity === 'REJECT')) {
       throw new BadRequestException({
         message: "This message can't be sent",
@@ -494,7 +530,13 @@ export class DirectMessagesService {
   }
 
   // The pair's one conversation moves to the top of both inboxes.
-  private store(senderId: string, recipientId: string, text: string, clientId?: string) {
+  private store(
+    senderId: string,
+    recipientId: string,
+    text: string,
+    imageUrl: string | null,
+    clientId?: string,
+  ) {
     const pair = pairOf(senderId, recipientId);
     return this.prisma.$transaction(async (tx) => {
       const conversation = await tx.conversation.upsert({
@@ -504,7 +546,14 @@ export class DirectMessagesService {
         select: { id: true },
       });
       return tx.directMessage.create({
-        data: { conversationId: conversation.id, senderId, recipientId, text, clientId },
+        data: {
+          conversationId: conversation.id,
+          senderId,
+          recipientId,
+          text,
+          clientId,
+          ...(imageUrl && { imageUrl }),
+        },
         select: MESSAGE_SELECT,
       });
     });

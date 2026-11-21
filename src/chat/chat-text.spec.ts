@@ -1,12 +1,25 @@
-import { CHAT_MAX_LENGTH, cleanChatText } from './chat-text';
+import { CHAT_MAX_LENGTH, CHAT_MAX_LINES, cleanChatText } from './chat-text';
 
 describe('cleanChatText', () => {
   it('keeps an ordinary message as it is', () => {
     expect(cleanChatText('Nice hand! 🔥')).toEqual({ text: 'Nice hand! 🔥' });
   });
 
-  it('makes one tidy line: trims, and collapses newlines, tabs and runs of spaces', () => {
-    expect(cleanChatText('  all\n\nin \t now   ')).toEqual({ text: 'all in now' });
+  it('trims, and collapses tabs and runs of spaces', () => {
+    expect(cleanChatText('  all  in \t now   ')).toEqual({ text: 'all in now' });
+  });
+
+  it('keeps line breaks, tidied: no spaces around them, at most one empty line', () => {
+    expect(cleanChatText('\nhello  \r\n  world\n\n\n\nbye\n')).toEqual({
+      text: 'hello\nworld\n\nbye',
+    });
+  });
+
+  it('joins lines past the limit onto the last one', () => {
+    const lines = ['1', '2', '3', '4', '5', '6', '', '7'].join('\n');
+    expect(CHAT_MAX_LINES).toBe(5);
+    expect(cleanChatText(lines)).toEqual({ text: '1\n2\n3\n4\n5 6 7' });
+    expect(cleanChatText(lines, CHAT_MAX_LENGTH, 20)).toEqual({ text: '1\n2\n3\n4\n5\n6\n\n7' });
   });
 
   it('removes control characters and bidi overrides', () => {

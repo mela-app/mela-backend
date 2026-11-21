@@ -10,10 +10,12 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { IsIn, IsOptional } from 'class-validator';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { ChatImageUploadUrlDto } from '../chat/dto/chat-image-upload-url.dto';
 import { CursorQueryDto } from '../social/dto/cursor-query.dto';
 import { DirectMessagesService } from './direct-messages.service';
 import { ConversationHistoryQueryDto } from './dto/conversation-history-query.dto';
@@ -57,7 +59,18 @@ export class DirectMessagesController {
     @Param('userId', ParseUUIDPipe) userId: string,
     @Body() dto: SendDirectMessageDto,
   ) {
-    return this.messages.send(user.id, userId, dto.text, dto.clientId);
+    return this.messages.send(user.id, userId, dto.text, dto.clientId, dto.imageKey);
+  }
+
+  // A photo goes straight to storage; the message then names it by `imageKey`.
+  @Post(':userId/image-upload-url')
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  imageUploadUrl(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Body() dto: ChatImageUploadUrlDto,
+  ) {
+    return this.messages.createImageUploadUrl(user.id, userId, dto.contentType);
   }
 
   // The sender changes a message's text, within 15 minutes of sending it.

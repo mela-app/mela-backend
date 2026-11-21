@@ -90,10 +90,15 @@ export class AccountDeletionService {
     for (const live of running) {
       await this.streams.end(live.id, userId).catch(() => undefined);
     }
-    const [user, photos] = await Promise.all([
+    const [user, photos, privatePhotos] = await Promise.all([
       this.prisma.user.findUnique({ where: { id: userId }, select: { avatarUrl: true } }),
       this.prisma.chatMessage.findMany({
         where: { stream: { hostId: userId }, imageUrl: { not: null } },
+        select: { imageUrl: true },
+      }),
+      // Their private messages go with the account, sent and received alike.
+      this.prisma.directMessage.findMany({
+        where: { OR: [{ senderId: userId }, { recipientId: userId }], imageUrl: { not: null } },
         select: { imageUrl: true },
       }),
     ]);
@@ -110,7 +115,10 @@ export class AccountDeletionService {
       this.prisma.stream.deleteMany({ where: { hostId: userId } }),
       this.prisma.user.delete({ where: { id: userId } }),
     ]);
-    const files = [user?.avatarUrl ?? [], ...photos.map((photo) => photo.imageUrl ?? [])].flat();
+    const files = [
+      user?.avatarUrl ?? [],
+      ...[...photos, ...privatePhotos].map((photo) => photo.imageUrl ?? []),
+    ].flat();
     if (files.length > 0) void this.storage.deleteUrls(files);
   }
 }

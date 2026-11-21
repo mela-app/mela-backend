@@ -25,6 +25,7 @@ import { RedisService } from '../common/redis/redis.service';
 import { notBlockedEitherWayWith } from '../social/block-filters';
 import { titleSuffix } from '../streams/live-title';
 import { SocialService } from '../social/social.service';
+import { directMessagePreview } from '../direct-messages/direct-message-images';
 import { canWatchLive } from '../streams/live-audience';
 import { MarkNotificationsReadDto } from './dto/mark-notifications-read.dto';
 import { UpdateNotificationSettingsDto } from './dto/notification-settings.dto';
@@ -659,7 +660,7 @@ export class NotificationsService {
       select: { pushDirectMessages: true },
     });
     if (settings && !settings.pushDirectMessages) return;
-    const text = message.text.trim();
+    const text = directMessagePreview(message.text.trim(), message.imageUrl);
     await this.pushQueue
       .enqueue({
         recipientId: message.recipientId,

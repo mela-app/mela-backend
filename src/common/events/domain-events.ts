@@ -706,7 +706,10 @@ export interface DirectMessageSnapshot {
   id: string;
   senderId: string;
   recipientId: string;
+  // A photo's caption - maybe empty.
   text: string;
+  // A photo; null for plain text.
+  imageUrl: string | null;
   // The sending app's own id for it, so that app can match its pending bubble.
   clientId: string | null;
   createdAt: Date;

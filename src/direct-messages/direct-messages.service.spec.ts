@@ -11,6 +11,7 @@ import { BannedPhrasesService } from '../chat/banned-phrases.service';
 import { DomainEvents } from '../common/events/domain-events';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RateLimitService } from '../common/rate-limit/rate-limit.service';
+import { StorageProvider } from '../common/storage/storage-provider.interface';
 import { SocialService } from '../social/social.service';
 import { DIRECT_MESSAGE_RATE_LIMIT, DirectMessagesService } from './direct-messages.service';
 
@@ -34,6 +35,7 @@ const message = (id: string, senderId: string, recipientId: string, text = 'hell
   senderId,
   recipientId,
   text,
+  imageUrl: null as string | null,
   clientId: null,
   createdAt: new Date('2026-10-01T09:00:00Z'),
   readAt: null,
@@ -63,6 +65,11 @@ describe('DirectMessagesService', () => {
   const bannedPhrases = { match: jest.fn(), mask: jest.fn() };
   const rateLimit = { take: jest.fn() };
   const events = { emit: jest.fn() };
+  const storage = {
+    createUploadUrl: jest.fn(),
+    publicUrl: (key: string) => `https://files.example/${key}`,
+    deleteUrls: jest.fn(),
+  };
   const config = {
     get: (key: string) => (key === 'CHAT_LINK_DOMAINS' ? 'mela.example' : undefined),
   };
@@ -75,6 +82,7 @@ describe('DirectMessagesService', () => {
       rateLimit as unknown as RateLimitService,
       events as unknown as EventEmitter2,
       config as unknown as ConfigService,
+      storage as unknown as StorageProvider,
     );
 
   beforeEach(() => {
@@ -88,10 +96,17 @@ describe('DirectMessagesService', () => {
       ({
         data,
       }: {
-        data: { senderId: string; recipientId: string; text: string; clientId?: string };
+        data: {
+          senderId: string;
+          recipientId: string;
+          text: string;
+          clientId?: string;
+          imageUrl?: string;
+        };
       }) =>
         Promise.resolve({
           ...message('m1', data.senderId, data.recipientId, data.text),
+          imageUrl: data.imageUrl ?? null,
           clientId: data.clientId ?? null,
         }),
     );
@@ -260,6 +275,53 @@ describe('DirectMessagesService', () => {
 
       expect(await service().send(BEN, ANA, 'hello', 'client-1')).toBe(winner);
       expect(events.emit).not.toHaveBeenCalled();
+    });
+
+    describe('a photo', () => {
+      const key = 'dm-images/' + BEN + '/0f8c6d3e-1b2a-4c5d-8e9f-0a1b2c3d4e5f.jpg';
+
+      it('is sent with an empty caption, at its public address', async () => {
+        const sent = await service().send(BEN, ANA, '   ', 'client-1', key);
+
+        expect(sent).toMatchObject({ text: '', imageUrl: 'https://files.example/' + key });
+        expect(bannedPhrases.match).not.toHaveBeenCalled();
+        expect(rateLimit.take).toHaveBeenCalled();
+      });
+
+      it("refuses a key this sender wasn't given", async () => {
+        const othersKey = key.replace(BEN, ANA);
+
+        expect(await refusal(service().send(BEN, ANA, '', undefined, othersKey))).toEqual({
+          status: 400,
+          code: 'IMAGE_INVALID',
+        });
+        expect(
+          await refusal(service().send(BEN, ANA, 'hi', undefined, '../avatars/x.jpg')),
+        ).toEqual({
+          status: 400,
+          code: 'IMAGE_INVALID',
+        });
+      });
+
+      it('still needs some text without one', async () => {
+        expect(await refusal(service().send(BEN, ANA, '  '))).toEqual({
+          status: 400,
+          code: 'MESSAGE_EMPTY',
+        });
+      });
+
+      it('gets an upload address only between friends', async () => {
+        storage.createUploadUrl.mockResolvedValue({ uploadUrl: 'https://upload', publicUrl: 'x' });
+
+        const upload = await service().createImageUploadUrl(BEN, ANA, 'image/png');
+        expect(upload.imageKey).toMatch(new RegExp('^dm-images/' + BEN + '/[0-9a-f-]{36}[.]png$'));
+
+        social.isFriend.mockResolvedValue(false);
+        expect(await refusal(service().createImageUploadUrl(BEN, ANA, 'image/png'))).toEqual({
+          status: 403,
+          code: 'NOT_FRIENDS',
+        });
+      });
     });
   });
 
@@ -451,6 +513,18 @@ describe('DirectMessagesService', () => {
         actorId: 'admin-1',
         recipientUnreadCount: 3,
       });
+    });
+
+    it('deletes its photo from storage too', async () => {
+      prisma.directMessage.findUniqueOrThrow.mockResolvedValue({
+        conversationId: 'conversation-1',
+        imageUrl: 'https://files.example/dm-images/a.jpg',
+      });
+      prisma.directMessage.findFirst.mockResolvedValue(null);
+
+      await service().erase('dm-1', 'admin-1');
+
+      expect(storage.deleteUrls).toHaveBeenCalledWith(['https://files.example/dm-images/a.jpg']);
     });
 
     it('takes away a conversation left empty', async () => {

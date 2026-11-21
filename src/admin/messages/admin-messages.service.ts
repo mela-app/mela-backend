@@ -77,7 +77,14 @@ export class AdminMessagesService {
       },
       orderBy: { id: 'asc' },
       take: query.limit + 1,
-      select: { id: true, senderId: true, text: true, createdAt: true, readAt: true },
+      select: {
+        id: true,
+        senderId: true,
+        text: true,
+        imageUrl: true,
+        createdAt: true,
+        readAt: true,
+      },
     });
     const hasMore = rows.length > query.limit;
     const messages = rows.slice(0, query.limit);
