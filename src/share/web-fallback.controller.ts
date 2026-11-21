@@ -18,6 +18,7 @@ import {
   jsonForHtml,
   requestOrigin,
   testerProgram,
+  withInstallReferrer,
 } from './share-page';
 
 /** Firebase's public web settings: the player's Continue with Google (docs/features/auth.md). */
@@ -88,7 +89,23 @@ export class WebFallbackController {
     const getMela = testerProgram(this.config) ? getMelaUrl(origin, target) : null;
     if (!target) return { open: deepLink, getMela: null };
     if (inAppBrowser(agent) && getMela) return { open: getMela, getMela: null };
-    if (!/Android/i.test(agent)) return { open: deepLink, getMela };
+    // A computer or an iPhone can't open the Android app: the page offers the
+    // live in this browser, and Mela for an Android phone.
+    const device = deviceOf(agent);
+    if (agent && device !== 'android') {
+      const { androidInstallUrl, iosInstallUrl } = installLinks(this.config);
+      return {
+        open: device === 'iphone' && iosInstallUrl ? deepLink : null,
+        getMela: null,
+        device,
+        storeUrl:
+          device === 'iphone' && iosInstallUrl
+            ? iosInstallUrl
+            : withInstallReferrer(androidInstallUrl, target),
+      };
+    }
+    // No user agent at all (no browser sends none): the plain app link.
+    if (!agent) return { open: deepLink, getMela };
     const { androidPackage } = installLinks(this.config);
     const fallback = androidGetAppUrl(this.config, origin, target);
     return { open: androidIntent(scheme, androidPackage, target, fallback), getMela };
@@ -143,9 +160,21 @@ export class WebFallbackController {
 
 /** Where the page's buttons go on this phone. */
 interface OpenLinks {
-  open: string;
+  // Null where the app can't open (a computer; an iPhone without an App Store listing).
+  open: string | null;
   // "New to Mela?" - the early-access steps, while Mela is a closed test.
   getMela: string | null;
+  device?: Device;
+  // Computers and iPhones: where to get Mela (the Play listing, or the App Store once there's one).
+  storeUrl?: string;
+}
+
+type Device = 'android' | 'iphone' | 'computer';
+
+function deviceOf(userAgent: string): Device {
+  if (/Android/i.test(userAgent)) return 'android';
+  if (/iPhone|iPad|iPod/i.test(userAgent)) return 'iphone';
+  return 'computer';
 }
 
 interface StreamPreview {
@@ -155,6 +184,35 @@ interface StreamPreview {
   // A recent frame of a running live: the link's preview picture.
   thumbnailUrl?: string | null;
   host: { displayName: string };
+}
+
+// The buttons under the title: on Android, open the live in Mela; on a
+// computer or an iPhone - where this page shows only if the live couldn't
+// play here - try again, and get Mela for a phone.
+function actions(links: OpenLinks, isLive: boolean): string {
+  const getMela = links.getMela
+    ? `
+<a class="get" href="${escapeHtml(links.getMela)}">New to Mela? Get it here</a>`
+    : '';
+  if (!links.device || links.device === 'android') {
+    return `<a class="open" href="${escapeHtml(links.open ?? '')}">Open in Mela</a>${getMela}`;
+  }
+  const retry = isLive
+    ? `
+<p class="note">The live couldn't load in this browser. Try again, or open this link on your phone.</p>
+<a class="open" href="">Try again</a>`
+    : '';
+  const open = links.open
+    ? `
+<a class="get" href="${escapeHtml(links.open)}">Open in Mela</a>`
+    : '';
+  const store = links.storeUrl
+    ? `
+<a class="get" href="${escapeHtml(links.storeUrl)}">${
+        links.device === 'iphone' && links.open ? 'Get Mela' : 'Get Mela for Android'
+      }</a>`
+    : '';
+  return `${retry}${open}${store}`;
 }
 
 function renderPage(
@@ -218,6 +276,7 @@ html, body { margin: 0; background: #0e0e14; color: #f5f5f7; font: 16px/1.5 syst
 .fallback h1 { margin: 16px 0 8px; font-size: 24px; line-height: 1.3; overflow-wrap: anywhere; }
 .fallback p { margin: 0; color: #9c9cac; }
 .fallback .get { display: block; margin-top: 16px; color: #7cc4e8; }
+.fallback .note { margin-top: 24px; font-size: 14px; }
 .fallback .open { display: block; margin-top: 32px; padding: 14px 20px; border-radius: 999px; background: ${MELA_COLORS.teal}; color: #fff; font-weight: 700; text-decoration: none; }
 </style>${playerTags}
 </head>
@@ -229,12 +288,7 @@ html, body { margin: 0; background: #0e0e14; color: #f5f5f7; font: 16px/1.5 syst
 ${isLive || restricted ? '<div class="live">LIVE</div>' : ''}
 <h1>${title}</h1>
 <p>${description}</p>
-<a class="open" href="${escapeHtml(links.open)}">Open in Mela</a>${
-    links.getMela
-      ? `
-<a class="get" href="${escapeHtml(links.getMela)}">New to Mela? Get it here</a>`
-      : ''
-  }
+${actions(links, isLive)}
 </main>
 </div>
 </div>
