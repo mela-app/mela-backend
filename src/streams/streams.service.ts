@@ -36,7 +36,9 @@ import {
   StreamUnlockedPayload,
   UserBlockedPayload,
   ViewerJoinedLivePayload,
+  ActivityRecordedPayload,
 } from '../common/events/domain-events';
+import { canWatchHidden, STAFF_WATCH_REFUSAL } from './staff-watch';
 import {
   HOST_HEARTBEAT_TTL_SECONDS,
   LivePresenceService,
@@ -249,10 +251,13 @@ export class StreamsService {
     if (query.feed === 'following' && !requesterId) {
       throw new UnauthorizedException('Sign in to see who you follow');
     }
-    const [ties, blockedHostIds] = await Promise.all([
+    const [ties, blocked, staff] = await Promise.all([
       requesterId ? this.viewerTies(requesterId) : null,
       requesterId ? this.social.blockedEitherWayUserIds(requesterId) : [],
+      this.isStaffWatcher(requesterId),
     ]);
+    // Staff watching unseen find every live (staff-watch.ts).
+    const blockedHostIds = staff ? [] : blocked;
     // Both conditions key on `hostId` - they must merge into one filter object,
     // or spreading two separate `{ hostId: ... }` objects would let the second
     // silently overwrite the first.
@@ -285,9 +290,11 @@ export class StreamsService {
       orderBy: { startedAt: 'desc' },
       take: MAX_RANKED_LIVES,
     });
-    const lives = found.filter((live) =>
-      canWatchLive(live.visibility, relationTo(live.host.id, requesterId, ties)),
-    );
+    const lives = staff
+      ? found
+      : found.filter((live) =>
+          canWatchLive(live.visibility, relationTo(live.host.id, requesterId, ties)),
+        );
 
     const ids = lives.map((live) => live.id);
     // For You only: search and Following keep their own order.
@@ -409,7 +416,27 @@ export class StreamsService {
       this.guests.isActiveGuest(stream.id, userId),
       this.moderators.findActiveGrant(stream.id, userId),
     ]);
-    return onStage || grant !== null;
+    if (onStage || grant !== null) return true;
+    return this.isStaffWatcher(userId);
+  }
+
+  /** Whether [userId] watches lives unseen, as Mela's safety team (staff-watch.ts). */
+  async isStaffWatcher(userId: string | null | undefined): Promise<boolean> {
+    if (!userId) return false;
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { platformRole: true, adminPermissions: true, status: true },
+    });
+    return canWatchHidden(user);
+  }
+
+  private recordStaffWatch(streamId: string, staffId: string) {
+    this.events.emit(DomainEvents.ActivityRecorded, {
+      action: 'stream.watched_as_staff',
+      actorId: staffId,
+      target: { type: 'STREAM', id: streamId },
+      streamId,
+    } satisfies ActivityRecordedPayload);
   }
 
   private async assertCanWatch(
@@ -521,15 +548,21 @@ export class StreamsService {
 
   async join(streamId: string, viewerId: string) {
     const stream = await this.getLiveOrThrow(streamId);
-    await this.assertNotBlocked(stream.hostId, viewerId);
-    await this.assertCanWatch(stream, viewerId);
-    if (await this.roomBans.isBanned(stream.hostId, viewerId, streamId)) {
-      throw new ForbiddenException('You are banned from this stream');
+    // Staff watch unseen: no checks, no notices, recorded for the team only.
+    const staffWatch = viewerId !== stream.hostId && (await this.isStaffWatcher(viewerId));
+    if (!staffWatch) {
+      await this.assertNotBlocked(stream.hostId, viewerId);
+      await this.assertCanWatch(stream, viewerId);
+      if (await this.roomBans.isBanned(stream.hostId, viewerId, streamId)) {
+        throw new ForbiddenException('You are banned from this stream');
+      }
     }
     // Joining as audience means this user isn't publishing: a seat still held
     // (app killed while on stage) would otherwise be a frozen tile for everyone.
     await this.vacateGuestSeat(stream, viewerId, false, viewerId);
-    if (viewerId !== stream.hostId) {
+    if (staffWatch) {
+      this.recordStaffWatch(streamId, viewerId);
+    } else if (viewerId !== stream.hostId) {
       this.events.emit(DomainEvents.ViewerJoinedLive, {
         streamId,
         hostId: stream.hostId,
@@ -584,6 +617,8 @@ export class StreamsService {
       // Agora viewer tell the host's video tile apart from a guest's.
       hostAgoraUid: agoraUidFor(stream.hostId),
       serverTime: new Date(),
+      // Watching unseen as Mela staff: the app shows it, and offers no chat, likes or stage.
+      staffWatch,
     };
   }
 
@@ -597,10 +632,12 @@ export class StreamsService {
    */
   async preview(streamId: string, viewerId: string) {
     const stream = await this.getLiveOrThrow(streamId);
-    await this.assertNotBlocked(stream.hostId, viewerId);
-    await this.assertCanWatch(stream, viewerId);
-    if (await this.roomBans.isBanned(stream.hostId, viewerId, streamId)) {
-      throw new ForbiddenException('You are banned from this stream');
+    if (!(await this.isStaffWatcher(viewerId))) {
+      await this.assertNotBlocked(stream.hostId, viewerId);
+      await this.assertCanWatch(stream, viewerId);
+      if (await this.roomBans.isBanned(stream.hostId, viewerId, streamId)) {
+        throw new ForbiddenException('You are banned from this stream');
+      }
     }
     const rtcToken = await this.videoProviders.get(stream.videoProvider).mintToken({
       channelName: stream.channelName,
@@ -805,6 +842,8 @@ export class StreamsService {
     this.events.emit(DomainEvents.StreamLayoutChanged, {
       streamId,
       layout,
+      actorId: requesterId,
+      changes: { before: { layout: stream.layout }, after: { layout } },
     } satisfies StreamLayoutChangedPayload);
 
     return updated;
@@ -1123,6 +1162,8 @@ export class StreamsService {
   /** Viewer raises their hand to join on stage (plan §6.5) - live streams only, not banned, not already a guest. */
   async requestToJoinAsGuest(streamId: string, viewerId: string) {
     const stream = await this.getLiveOrThrow(streamId);
+    // Asking for the stage would show them.
+    if (await this.isStaffWatcher(viewerId)) throw new ForbiddenException(STAFF_WATCH_REFUSAL);
     await this.assertNotBlocked(stream.hostId, viewerId);
     // Being on stage is streaming too: a paused host may watch, not join it.
     await this.hosting.assertCanHost(viewerId);
@@ -1203,7 +1244,7 @@ export class StreamsService {
       userId: request.userId,
       role: 'publisher',
     });
-    await this.guests.accept(streamId, requestId, credentials);
+    await this.guests.accept(streamId, requestId, credentials, requesterId);
     return { ok: true };
   }
 
@@ -1211,7 +1252,7 @@ export class StreamsService {
     const stream = await this.getOrThrow(streamId);
     const request = await this.guests.findPendingOrThrow(streamId, requestId);
     await this.assertCanResolve(request, streamId, stream.hostId, requesterId);
-    return this.guests.reject(streamId, requestId);
+    return this.guests.reject(streamId, requestId, requesterId);
   }
 
   /** Host- or moderator-initiated (needs `REMOVE_GUESTS`) - sets the re-request cooldown (plan §6.6). */

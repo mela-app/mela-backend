@@ -7,7 +7,9 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
+  AdminPermission,
   ModeratorCapability,
+  PlatformRole,
   Prisma,
   RoomBanScope,
   StreamEndReason,
@@ -17,6 +19,7 @@ import {
   UserStatus,
   VideoProviderKind,
 } from '@prisma/client';
+import { DomainEvents } from '../common/events/domain-events';
 import { PermissionsService } from '../common/permissions/permissions.service';
 import { LivePresenceService } from '../common/presence/live-presence.service';
 import { PrismaService } from '../common/prisma/prisma.service';
@@ -472,6 +475,38 @@ describe('StreamsService', () => {
     await expect(service.join('s1', 'viewer-1')).rejects.toThrow(NotFoundException);
   });
 
+  it('lets staff watch any live unseen: no checks, nobody told, recorded for the team', async () => {
+    prisma.stream.findUnique.mockResolvedValue({
+      id: 's1',
+      hostId: 'host-1',
+      status: StreamStatus.LIVE,
+      visibility: StreamVisibility.FRIENDS,
+      videoProvider: VideoProviderKind.LIVEKIT,
+      channelName: 'stream_s1',
+    });
+    prisma.user.findUnique.mockResolvedValueOnce({
+      platformRole: PlatformRole.PLATFORM_MODERATOR,
+      adminPermissions: [AdminPermission.VIEW_LIVES],
+      status: UserStatus.ACTIVE,
+    });
+    const service = makeService();
+
+    const result = await service.join('s1', 'staff-1');
+
+    expect(result.staffWatch).toBe(true);
+    expect(roomBans.isBanned).not.toHaveBeenCalled();
+    expect(events.emit).not.toHaveBeenCalledWith(DomainEvents.ViewerJoinedLive, expect.anything());
+    expect(events.emit).toHaveBeenCalledWith(
+      DomainEvents.ActivityRecorded,
+      expect.objectContaining({
+        action: 'stream.watched_as_staff',
+        actorId: 'staff-1',
+        streamId: 's1',
+      }),
+    );
+    roomBans.isBanned.mockResolvedValue(false);
+  });
+
   it('rejects joining a stream the viewer is room-banned from', async () => {
     prisma.stream.findUnique.mockResolvedValue({
       id: 's1',
@@ -770,6 +805,8 @@ describe('StreamsService', () => {
     expect(events.emit).toHaveBeenCalledWith('stream.layout_changed', {
       streamId: 's1',
       layout: StreamLayout.FLOATING,
+      actorId: 'host-1',
+      changes: { before: { layout: StreamLayout.FULL }, after: { layout: StreamLayout.FLOATING } },
     });
     expect(result.layout).toBe(StreamLayout.FLOATING);
   });
@@ -2479,6 +2516,7 @@ describe('StreamsService', () => {
         's1',
         'req-1',
         expect.objectContaining({ provider: VideoProviderKind.LIVEKIT }),
+        'host-1',
       );
     });
 
@@ -2528,7 +2566,7 @@ describe('StreamsService', () => {
         ForbiddenException,
       );
       await service.rejectGuestRequest('s1', 'req-1', 'host-1');
-      expect(guests.reject).toHaveBeenCalledWith('s1', 'req-1');
+      expect(guests.reject).toHaveBeenCalledWith('s1', 'req-1', 'host-1');
     });
 
     it('removing a guest needs REMOVE_GUESTS and revokes their media before freeing the seat', async () => {

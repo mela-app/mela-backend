@@ -5,6 +5,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ActivityRecordedPayload, DomainEvents } from '../common/events/domain-events';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma, ReportCaseStatus, ReportReason, ReportTargetType } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RateLimit, RateLimitService } from '../common/rate-limit/rate-limit.service';
@@ -35,12 +37,21 @@ interface ReportedThing {
  * thing, if there is one, so staff decide on it once; what it showed is
  * kept with the case, in case it's deleted meanwhile.
  */
+// What the audit log calls each kind of reported thing.
+const REPORTED_AS: Record<ReportTargetType, string> = {
+  LIVE: 'STREAM',
+  CHAT_MESSAGE: 'MESSAGE',
+  USER: 'USER',
+  DIRECT_MESSAGE: 'MESSAGE',
+};
+
 @Injectable()
 export class ReportsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly rateLimit: RateLimitService,
     private readonly social: SocialService,
+    private readonly events: EventEmitter2,
   ) {}
 
   async submit(reporterId: string, dto: CreateReportDto): Promise<{ ok: true }> {
@@ -113,6 +124,17 @@ export class ReportsService {
     if (dto.block) {
       await this.social.block(reporterId, thing.reportedUserId);
     }
+    this.events.emit(DomainEvents.ActivityRecorded, {
+      action: 'report.submitted',
+      actorId: reporterId,
+      target: { type: REPORTED_AS[dto.targetType], id: dto.targetId },
+      streamId: thing.streamId,
+      reason: details,
+      metadata: {
+        reason: dto.reason,
+        ...(thing.reportedUserId && { reportedUserId: thing.reportedUserId }),
+      },
+    } satisfies ActivityRecordedPayload);
     return { ok: true };
   }
 

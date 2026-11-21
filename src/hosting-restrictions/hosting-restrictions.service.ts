@@ -6,6 +6,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { changesBetween, created } from '../common/events/audit-changes';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { HostingAppealState, Prisma } from '@prisma/client';
 import {
@@ -279,6 +280,7 @@ export class HostingRestrictionsService {
         actorId: staff.id,
         title: saved.title,
         change: 'created',
+        changes: created({ title: input.title, message: input.message }),
       } satisfies HostingReasonSavedPayload);
     }
 
@@ -387,13 +389,14 @@ export class HostingRestrictionsService {
     if (input.note !== undefined) data.note = input.note?.trim() || null;
     const fields = Object.keys(data);
     if (fields.length === 0) return this.detail(id, now);
-    await this.prisma.hostingRestriction.update({ where: { id }, data });
+    const updated = await this.prisma.hostingRestriction.update({ where: { id }, data });
     this.events.emit(DomainEvents.HostingRestrictionChanged, {
       restrictionId: id,
       userId: row.userId,
       streamId: row.streamId,
       actorId: staff.id,
       fields,
+      changes: changesBetween(row, updated, fields),
     } satisfies HostingRestrictionChangedPayload);
     return this.detail(id, now);
   }

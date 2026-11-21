@@ -38,6 +38,7 @@ import {
   DirectMessageDeletedPayload,
   DirectMessagesHiddenPayload,
   DirectMessageSentPayload,
+  UserProfileUpdatedPayload,
   DirectMessagesReadPayload,
   DomainEvents,
   GuestJoinedPayload,
@@ -75,7 +76,9 @@ import { RoomBansService } from '../room-bans/room-bans.service';
 import { RoomChatMutesService } from '../room-chat-mutes/room-chat-mutes.service';
 import { SocialService } from '../social/social.service';
 import { StreamsService } from '../streams/streams.service';
+import { ActivityStatusService } from '../direct-messages/activity-status.service';
 import { GuestMovingDto } from './dto/guest-moving.dto';
+import { DirectTypingDto, PresenceStateDto, PresenceWatchDto } from './dto/presence.dto';
 import { HostAwayDto, HostJoinDto, HostPauseDto, StreamRoomDto } from './dto/stream-room.dto';
 
 const VIEWER_COUNT_THROTTLE_MS = 2000;
@@ -85,6 +88,8 @@ const LIKES_THROTTLE_MS = 1000;
 const ARRIVALS_THROTTLE_MS = 1500;
 // A dragged tile's position, about ten times a second - enough to look like it's following a finger.
 const GUEST_MOVE_THROTTLE_MS = 100;
+// "Typing..." is passed on at most this often per pair; the app clears it after a few quiet seconds.
+const TYPING_THROTTLE_MS = 2000;
 // How long a socket's right to arrange a stage is trusted before it's checked again.
 const ARRANGE_CHECK_TTL_MS = 10_000;
 // What the share page's player shows of the chat so far.
@@ -100,6 +105,12 @@ interface SocketData {
   watchOnly?: { streamId: string };
   // A drag sends many moves: the right to arrange a stage is checked once, then trusted a while.
   arranging?: { streamId: string; until: number };
+  // The app is in the background: connected, but not "online" (presence:state).
+  away?: boolean;
+  // Mela staff (streams/staff-watch.ts), worked out on the first stream:join.
+  staffWatcher?: boolean;
+  // The live this socket watches unseen, as staff: not counted, not announced, can't take part.
+  hiddenIn?: string;
 }
 
 type AuthedSocket = Socket & { data: SocketData };
@@ -136,6 +147,9 @@ export interface SelfRoomState {
 type Failure = { ok: false; error: RealtimeError; retryAfterMs?: number };
 export type Ack = { ok: true } | Failure;
 export type RoomAck = ({ ok: true } & RoomState) | Failure;
+// Someone's online / last seen, or hidden (either person turned activity status off, or a block).
+export type PresenceWatchAck =
+  { ok: true; hidden: boolean; online: boolean; lastSeenAt: string | null } | Failure;
 export type ViewerRoomAck = ({ ok: true } & RoomState & SelfRoomState) | Failure;
 export type WatchRoomAck = ({ ok: true } & RoomState & { messages: ChatMessageView[] }) | Failure;
 export type ChatAck = { ok: true; message: ChatMessageView } | Failure;
@@ -161,6 +175,9 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   );
   // Per live: the latest arrival not yet announced, and how many more came with them.
   private readonly pendingArrivals = new Map<string, { userId: string; others: number }>();
+  // Who this node last said was online - so an unchanged state isn't announced again.
+  private readonly onlineNow = new Set<string>();
+  private readonly typingSentAt = new Map<string, number>();
   private readonly guestMoves = new KeyedThrottle(GUEST_MOVE_THROTTLE_MS, (key) =>
     this.flushGuestMove(key),
   );
@@ -187,6 +204,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     private readonly watchTickets: WatchTicketService,
     private readonly recordingPermissions: RecordingPermissionsService,
     private readonly social: SocialService,
+    private readonly activityStatus: ActivityStatusService,
   ) {}
 
   // Middleware runs before a connection is accepted, so no event can arrive
@@ -211,6 +229,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     }
     // Private channel: forced sign-out now, notifications and moderator grants later.
     void socket.join(userRoom(socket.data.userId));
+    void this.refreshPresence(socket.data.userId);
   }
 
   // A host's heartbeat just stops; the sweeper gives them the grace window to come back.
@@ -220,6 +239,83 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     } catch (error) {
       this.logger.warn(`Could not remove ${socket.id} from its live: ${error}`);
     }
+    if (!socket.data.watchOnly) await this.refreshPresence(socket.data.userId);
+  }
+
+  // Online is "the app is open in front" (docs/features/messages.md): a
+  // backgrounded app keeps its connection, so it says when it goes and comes back.
+  @SubscribeMessage('presence:state')
+  async onPresenceState(
+    @ConnectedSocket() socket: AuthedSocket,
+    @MessageBody() body: unknown,
+  ): Promise<Ack> {
+    const request = await parse(PresenceStateDto, body);
+    if (!request) return fail('INVALID_PAYLOAD');
+    socket.data.away = request.away;
+    await this.refreshPresence(socket.data.userId);
+    return { ok: true };
+  }
+
+  // The conversation open on this device: its partner's online / last seen,
+  // and changes as they happen - when both people show their activity.
+  @SubscribeMessage('presence:watch')
+  async onPresenceWatch(
+    @ConnectedSocket() socket: AuthedSocket,
+    @MessageBody() body: unknown,
+  ): Promise<PresenceWatchAck> {
+    const request = await parse(PresenceWatchDto, body);
+    if (!request) return fail('INVALID_PAYLOAD');
+    // One at a time: the open conversation.
+    for (const room of [...socket.rooms]) {
+      if (room.startsWith(PRESENCE_ROOM_PREFIX)) await socket.leave(room);
+    }
+    const visible = await this.activityStatus.visibleTo(socket.data.userId, request.userId);
+    if (!visible) return { ok: true, hidden: true, online: false, lastSeenAt: null };
+    await socket.join(presenceRoom(request.userId));
+    return {
+      ok: true,
+      hidden: false,
+      online: await this.isOnline(request.userId),
+      lastSeenAt: visible.lastSeenAt?.toISOString() ?? null,
+    };
+  }
+
+  @SubscribeMessage('presence:unwatch')
+  async onPresenceUnwatch(
+    @ConnectedSocket() socket: AuthedSocket,
+    @MessageBody() body: unknown,
+  ): Promise<Ack> {
+    const request = await parse(PresenceWatchDto, body);
+    if (!request) return fail('INVALID_PAYLOAD');
+    await socket.leave(presenceRoom(request.userId));
+    return { ok: true };
+  }
+
+  // "Typing..." in a private conversation, passed to the other person's
+  // devices - never stored. Their app clears it after a few quiet seconds.
+  @SubscribeMessage('dm:typing')
+  async onDirectTyping(
+    @ConnectedSocket() socket: AuthedSocket,
+    @MessageBody() body: unknown,
+  ): Promise<Ack> {
+    const request = await parse(DirectTypingDto, body);
+    if (!request) return fail('INVALID_PAYLOAD');
+    const senderId = socket.data.userId;
+    const key = `${senderId}:${request.userId}`;
+    const now = Date.now();
+    if (request.typing) {
+      const last = this.typingSentAt.get(key);
+      if (last !== undefined && now - last < TYPING_THROTTLE_MS) return { ok: true };
+      if (this.typingSentAt.size > 10_000) this.typingSentAt.clear();
+      this.typingSentAt.set(key, now);
+    } else {
+      this.typingSentAt.delete(key);
+    }
+    if (!(await this.activityStatus.canSignalTyping(senderId, request.userId))) return { ok: true };
+    this.server
+      .to(userRoom(request.userId))
+      .emit('dm:typing', { userId: senderId, typing: request.typing });
+    return { ok: true };
   }
 
   @SubscribeMessage('stream:join')
@@ -231,16 +327,20 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     if (!request) return fail('INVALID_PAYLOAD');
     const live = await this.streams.findLive(request.streamId);
     if (!live) return fail('STREAM_NOT_LIVE');
-    if (await this.roomBans.isBanned(live.hostId, socket.data.userId, live.id)) {
-      return fail('NOT_ALLOWED');
-    }
-    // Blocked either way with the host (plan §6.4).
-    if (await this.social.isBlockedEitherWay(live.hostId, socket.data.userId)) {
-      return fail('NOT_ALLOWED');
-    }
-    // A followers' or friends' live (docs/features/streams.md).
-    if (!(await this.streams.canWatch(live, socket.data.userId))) {
-      return fail('NOT_ALLOWED');
+    // Staff watch unseen (streams/staff-watch.ts): whatever bans, blocks or visibility.
+    const hidden = live.hostId !== socket.data.userId && (await this.isStaffWatcher(socket));
+    if (!hidden) {
+      if (await this.roomBans.isBanned(live.hostId, socket.data.userId, live.id)) {
+        return fail('NOT_ALLOWED');
+      }
+      // Blocked either way with the host (plan §6.4).
+      if (await this.social.isBlockedEitherWay(live.hostId, socket.data.userId)) {
+        return fail('NOT_ALLOWED');
+      }
+      // A followers' or friends' live (docs/features/streams.md).
+      if (!(await this.streams.canWatch(live, socket.data.userId))) {
+        return fail('NOT_ALLOWED');
+      }
     }
 
     // One live per socket: switching lives leaves the previous one.
@@ -249,8 +349,10 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       socket.data.viewingStreamId = live.id;
       await socket.join(streamRoom(live.id));
     }
-    // The host watching from another device isn't one of their own viewers.
-    if (live.hostId !== socket.data.userId) {
+    socket.data.hiddenIn = hidden ? live.id : undefined;
+    // The host watching from another device isn't one of their own viewers;
+    // nor is staff watching unseen - not counted, listed or announced.
+    if (live.hostId !== socket.data.userId && !hidden) {
       const { arrived } = await this.presence.addViewer(live.id, socket.data.userId, socket.id);
       this.viewerCounts.schedule(live.id);
       if (arrived) void this.announceArrival(live.id, socket.data.userId);
@@ -385,6 +487,8 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     const room = streamRoom(request.streamId);
     // Rooms are emptied when a live ends, so this also refuses an ended live.
     if (!socket.rooms.has(room)) return fail('NOT_IN_ROOM');
+    // A message would show staff who are watching unseen.
+    if (socket.data.hiddenIn === request.streamId) return fail('NOT_ALLOWED');
     try {
       // Looked up first: a message that can't be kept from them isn't sent at all.
       const hidden = await this.blockedRoomsOf(socket.data.userId);
@@ -417,8 +521,10 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     const request = await parse(LikeSendDto, body);
     if (!request) return fail('INVALID_PAYLOAD');
     if (!socket.rooms.has(streamRoom(request.streamId))) return fail('NOT_IN_ROOM');
-    // Likes count what viewers think; a host liking their own live doesn't.
+    // Likes count what viewers think; a host liking their own live doesn't,
+    // and staff watching unseen would show.
     if (socket.data.hostingStreamId === request.streamId) return fail('NOT_ALLOWED');
+    if (socket.data.hiddenIn === request.streamId) return fail('NOT_ALLOWED');
     try {
       const result = await this.likes.add(request.streamId, socket.data.userId, request.count);
       if (!result.ok) return fail(result.error, result.retryAfterMs);
@@ -803,6 +909,22 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       .emit('recording:permission', { streamId: payload.streamId, allowed: payload.allowed });
   }
 
+  // Turned activity status on or off: whoever follows theirs hears it's
+  // hidden now, and their own app asks again for whoever it follows.
+  @OnEvent(DomainEvents.UserProfileUpdated)
+  handleActivityStatusChanged(payload: UserProfileUpdatedPayload) {
+    if (!payload.fields.includes('showActivityStatus')) return;
+    const room = presenceRoom(payload.userId);
+    this.server.to(room).emit('presence:changed', {
+      userId: payload.userId,
+      hidden: true,
+      online: false,
+      lastSeenAt: null,
+    });
+    this.server.in(room).socketsLeave(room);
+    this.server.to(userRoom(payload.userId)).emit('presence:refresh', {});
+  }
+
   // Private to the two people (docs/features/messages.md): the recipient's
   // inbox and badge, and the sender's other devices.
   @OnEvent(DomainEvents.DirectMessageSent)
@@ -912,14 +1034,50 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     return false;
   }
 
+  // Online: one of their devices has the app open in front.
+  private async isOnline(userId: string): Promise<boolean> {
+    const sockets = await this.server.in(userRoom(userId)).fetchSockets();
+    return sockets.some((socket) => !(socket.data as SocketData).away);
+  }
+
+  // Tells whoever has their conversation open when someone comes or goes;
+  // going keeps the time as when they were last seen. Never throws.
+  private async refreshPresence(userId: string): Promise<void> {
+    try {
+      const online = await this.isOnline(userId);
+      if (online === this.onlineNow.has(userId)) return;
+      if (online) this.onlineNow.add(userId);
+      else this.onlineNow.delete(userId);
+      const lastSeenAt = await this.activityStatus.markSeen(userId);
+      this.server.to(presenceRoom(userId)).emit('presence:changed', {
+        userId,
+        hidden: false,
+        online,
+        lastSeenAt: lastSeenAt.toISOString(),
+      });
+    } catch (error) {
+      this.logger.warn(`Could not update ${userId}'s online status: ${error}`);
+    }
+  }
+
   private async leaveViewing(socket: AuthedSocket): Promise<void> {
     const streamId = socket.data.viewingStreamId;
     if (!streamId) return;
     socket.data.viewingStreamId = undefined;
     // A host socket that also joined its own live as a viewer stays in the room.
     if (socket.data.hostingStreamId !== streamId) await socket.leave(streamRoom(streamId));
+    // Staff watching unseen were never counted.
+    if (socket.data.hiddenIn === streamId) {
+      socket.data.hiddenIn = undefined;
+      return;
+    }
     await this.presence.removeViewer(streamId, socket.id);
     this.viewerCounts.schedule(streamId);
+  }
+
+  private async isStaffWatcher(socket: AuthedSocket): Promise<boolean> {
+    socket.data.staffWatcher ??= await this.streams.isStaffWatcher(socket.data.userId);
+    return socket.data.staffWatcher;
   }
 
   private async roomState(live: {
@@ -1036,6 +1194,9 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
 
 const streamRoom = (streamId: string) => `stream:${streamId}`;
 const userRoom = (userId: string) => `user:${userId}`;
+const PRESENCE_ROOM_PREFIX = 'presence:';
+// Everyone whose open conversation is with [userId] - told when they come and go.
+const presenceRoom = (userId: string) => `${PRESENCE_ROOM_PREFIX}${userId}`;
 const moveKey = (streamId: string, userId: string) => `${streamId}:${userId}`;
 const fail = (error: RealtimeError, retryAfterMs?: number): Failure =>
   retryAfterMs ? { ok: false, error, retryAfterMs } : { ok: false, error };

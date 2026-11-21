@@ -1,3 +1,4 @@
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BadRequestException, HttpException, NotFoundException } from '@nestjs/common';
 import { ReportCaseStatus, ReportReason, ReportTargetType } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
@@ -25,11 +26,13 @@ describe('ReportsService', () => {
   };
   const rateLimit = { take: jest.fn() };
   const social = { block: jest.fn() };
+  const events = { emit: jest.fn() };
   const service = () =>
     new ReportsService(
       prisma as unknown as PrismaService,
       rateLimit as unknown as RateLimitService,
       social as unknown as SocialService,
+      events as unknown as EventEmitter2,
     );
   const report = (overrides: Record<string, unknown> = {}) => ({
     targetType: ReportTargetType.CHAT_MESSAGE,

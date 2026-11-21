@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { changesBetween } from '../common/events/audit-changes';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ModeratorCapability, ModeratorStatus } from '@prisma/client';
 import {
@@ -117,6 +118,10 @@ export class ModeratorsService {
 
   /** Changes an existing active moderator's capabilities for this stream - 404s if they aren't currently one. */
   async updateCapabilities(streamId: string, userId: string, capabilities: ModeratorCapability[]) {
+    const before = await this.prisma.moderator.findFirst({
+      where: { streamId, userId, status: ModeratorStatus.ACTIVE },
+      select: { capabilities: true },
+    });
     const result = await this.prisma.moderator.updateMany({
       where: { streamId, userId, status: ModeratorStatus.ACTIVE },
       data: { capabilities },
@@ -126,6 +131,7 @@ export class ModeratorsService {
       streamId,
       userId,
       capabilities,
+      changes: changesBetween(before, { capabilities }, ['capabilities']),
     } satisfies ModeratorUpdatedPayload);
     return { ok: true };
   }

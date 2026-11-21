@@ -6,6 +6,7 @@ import {
   AccountDeletedPayload,
   AccountIdentityLinkedPayload,
   AccountPasswordSetPayload,
+  ActivityRecordedPayload,
   AdminAlertSentPayload,
   AdminSignInFailedPayload,
   AdminSignedInPayload,
@@ -18,7 +19,19 @@ import {
   ChatMessageUnpinnedPayload,
   DataClearedPayload,
   DataResetPayload,
+  DirectMessageDeletedPayload,
+  DirectMessageEditedPayload,
   DirectMessageErasedPayload,
+  DirectMessageSentPayload,
+  DirectMessagesHiddenPayload,
+  GuestPlacementChangedPayload,
+  GuestRequestAcceptedPayload,
+  GuestRequestCancelledPayload,
+  GuestRequestRejectedPayload,
+  GuestSpotlightChangedPayload,
+  LiveBoardChangedPayload,
+  RecordingPermissionChangedPayload,
+  ViewerJoinedLivePayload,
   DomainEvents,
   GuestJoinedPayload,
   GuestMicForceMuteChangedPayload,
@@ -64,8 +77,8 @@ import {
 } from '../common/events/domain-events';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RequestContext } from '../common/request-context/request-context';
-import { DELETED_ACCOUNT_LABEL } from './audit-catalog';
-import { AuditEntry, AuditService } from './audit.service';
+import { AuditTargetType, DELETED_ACCOUNT_LABEL, isAuditAction } from './audit-catalog';
+import { AuditEntry, AuditService, changesEntry } from './audit.service';
 
 const EXCERPT = 80;
 
@@ -154,7 +167,11 @@ export class AuditEventsListener {
 
   @OnEvent(DomainEvents.AccountEmailChanged)
   onEmailChanged(payload: AccountCredentialChangedPayload) {
-    return this.track(async () => ({ action: 'account.email_changed', actorId: payload.userId }));
+    return this.track(async () => ({
+      action: 'account.email_changed',
+      actorId: payload.userId,
+      ...changesEntry(payload.changes),
+    }));
   }
 
   @OnEvent(DomainEvents.AccountIdentityLinked)
@@ -172,6 +189,7 @@ export class AuditEventsListener {
       action: 'account.profile_updated',
       actorId: payload.userId,
       metadata: { fields: payload.fields },
+      ...changesEntry(payload.changes),
     }));
   }
 
@@ -182,6 +200,8 @@ export class AuditEventsListener {
       actorId: payload.suspendedBy,
       target: await this.userTarget(payload.userId),
       reason: payload.reason,
+      before: { status: 'ACTIVE' },
+      after: { status: 'SUSPENDED', suspensionReason: payload.reason ?? null },
     }));
   }
 
@@ -191,6 +211,8 @@ export class AuditEventsListener {
       action: 'user.reinstated',
       actorId: payload.reinstatedBy,
       target: await this.userTarget(payload.userId),
+      before: { status: 'SUSPENDED' },
+      after: { status: 'ACTIVE' },
     }));
   }
 
@@ -205,6 +227,11 @@ export class AuditEventsListener {
         to: payload.to,
         ...(payload.permissions ? { permissions: payload.permissions } : {}),
       },
+      before: { platformRole: payload.from },
+      after: {
+        platformRole: payload.to,
+        ...(payload.permissions ? { adminPermissions: payload.permissions } : {}),
+      },
     }));
   }
 
@@ -215,6 +242,8 @@ export class AuditEventsListener {
       actorId: payload.actorId,
       target: await this.userTarget(payload.userId),
       metadata: { from: payload.from, to: payload.to },
+      before: { adminPermissions: payload.from },
+      after: { adminPermissions: payload.to },
     }));
   }
 
@@ -264,6 +293,7 @@ export class AuditEventsListener {
       action: `announcement.${payload.change}` as const,
       actorId: payload.actorId,
       target: { type: 'ANNOUNCEMENT', id: payload.announcementId, label: payload.title },
+      ...changesEntry(payload.changes),
     }));
   }
 
@@ -273,6 +303,7 @@ export class AuditEventsListener {
       action: `featured_host.${payload.change}` as const,
       actorId: payload.actorId,
       ...(payload.userId ? { target: await this.userTarget(payload.userId) } : {}),
+      ...changesEntry(payload.changes),
     }));
   }
 
@@ -289,6 +320,7 @@ export class AuditEventsListener {
       action,
       actorId: payload.actorId,
       target: { type: 'CAMPAIGN', id: payload.campaignId, label: payload.title },
+      ...changesEntry(payload.changes),
     }));
   }
 
@@ -313,6 +345,12 @@ export class AuditEventsListener {
       target: await this.userTarget(payload.userId),
       reason: payload.reason,
       metadata: { changes: payload.changes },
+      before: Object.fromEntries(
+        Object.entries(payload.changes).map(([field, change]) => [field, change.from]),
+      ),
+      after: Object.fromEntries(
+        Object.entries(payload.changes).map(([field, change]) => [field, change.to]),
+      ),
     }));
   }
 
@@ -388,11 +426,12 @@ export class AuditEventsListener {
   onLayoutChanged(payload: StreamLayoutChangedPayload) {
     return this.track(async () => ({
       action: 'stream.layout_changed',
-      actorId: await this.hostOf(payload.streamId),
+      actorId: payload.actorId ?? (await this.hostOf(payload.streamId)),
       actorRole: AuditActorRole.HOST,
       target: await this.streamTarget(payload.streamId),
       streamId: payload.streamId,
       metadata: { layout: payload.layout },
+      ...changesEntry(payload.changes),
     }));
   }
 
@@ -537,6 +576,7 @@ export class AuditEventsListener {
       target: await this.userTarget(payload.userId),
       streamId: payload.streamId,
       metadata: { capabilities: payload.capabilities },
+      ...changesEntry(payload.changes),
     }));
   }
 
@@ -675,6 +715,8 @@ export class AuditEventsListener {
         : { actorRole: AuditActorRole.SYSTEM, actorLabel: 'Automatic switch' }),
       reason: payload.reason,
       metadata: { from: payload.from, to: payload.to },
+      before: { activeProvider: payload.from },
+      after: { activeProvider: payload.to },
     }));
   }
 
@@ -684,6 +726,7 @@ export class AuditEventsListener {
       action: 'video.settings_changed',
       actorId: payload.actorId,
       metadata: { fields: payload.fields },
+      ...changesEntry(payload.changes),
     }));
   }
 
@@ -705,6 +748,7 @@ export class AuditEventsListener {
         required: payload.required,
         ...(payload.fields ? { fields: payload.fields } : {}),
       },
+      ...changesEntry(payload.changes),
     }));
   }
 
@@ -777,6 +821,7 @@ export class AuditEventsListener {
       target: await this.userTarget(payload.userId),
       streamId: payload.streamId,
       metadata: { restrictionId: payload.restrictionId, fields: payload.fields },
+      ...changesEntry(payload.changes),
     }));
   }
 
@@ -808,6 +853,7 @@ export class AuditEventsListener {
       action: `hosting_reason.${payload.change}` as const,
       actorId: payload.actorId,
       target: { type: 'HOSTING_REASON', id: payload.reasonId, label: payload.title },
+      ...changesEntry(payload.changes),
     }));
   }
 
@@ -876,7 +922,183 @@ export class AuditEventsListener {
       actorId: payload.actorId,
       target: { type: 'PHRASE', id: payload.phraseId, label: payload.phrase },
       metadata: { severity: payload.severity },
+      ...changesEntry(payload.changes),
     }));
+  }
+
+  // Anything a feature records for the log alone (ActivityRecordedPayload).
+  @OnEvent(DomainEvents.ActivityRecorded)
+  onActivityRecorded(payload: ActivityRecordedPayload) {
+    const { action } = payload;
+    if (!isAuditAction(action)) {
+      this.logger.warn(`Not an audit action: ${action}`);
+      return Promise.resolve();
+    }
+    return this.track(async () => ({
+      action,
+      actorId: payload.actorId,
+      ...(payload.hostId && { hostId: payload.hostId }),
+      target: await this.targetFor(payload.target),
+      streamId: payload.streamId ?? null,
+      reason: payload.reason ?? null,
+      ...(payload.metadata && { metadata: payload.metadata }),
+      ...changesEntry(payload.changes),
+    }));
+  }
+
+  @OnEvent(DomainEvents.ViewerJoinedLive)
+  onViewerJoinedLive(payload: ViewerJoinedLivePayload) {
+    return this.track(async () => ({
+      action: 'stream.joined',
+      actorId: payload.viewerId,
+      target: await this.streamTarget(payload.streamId),
+      streamId: payload.streamId,
+    }));
+  }
+
+  @OnEvent(DomainEvents.LiveBoardChanged)
+  onLiveBoardChanged(payload: LiveBoardChangedPayload) {
+    return this.track(async () => ({
+      action: 'stream.board_changed',
+      actorId: payload.actorId,
+      hostId: await this.hostOf(payload.streamId),
+      target: await this.streamTarget(payload.streamId),
+      streamId: payload.streamId,
+      ...changesEntry(payload.changes),
+    }));
+  }
+
+  // The new guest's credentials stay out of the log.
+  @OnEvent(DomainEvents.GuestRequestAccepted)
+  onGuestRequestAccepted(payload: GuestRequestAcceptedPayload) {
+    return this.track(async () => ({
+      action: 'guest.request_accepted',
+      actorId: payload.actorId ?? null,
+      hostId: await this.hostOf(payload.streamId),
+      target: await this.userTarget(payload.userId),
+      streamId: payload.streamId,
+      metadata: { requestId: payload.requestId },
+    }));
+  }
+
+  @OnEvent(DomainEvents.GuestRequestRejected)
+  onGuestRequestRejected(payload: GuestRequestRejectedPayload) {
+    return this.track(async () => ({
+      action: 'guest.request_rejected',
+      actorId: payload.actorId ?? null,
+      hostId: await this.hostOf(payload.streamId),
+      target: await this.userTarget(payload.userId),
+      streamId: payload.streamId,
+      metadata: { requestId: payload.requestId },
+    }));
+  }
+
+  @OnEvent(DomainEvents.GuestRequestCancelled)
+  onGuestRequestCancelled(payload: GuestRequestCancelledPayload) {
+    return this.track(async () => {
+      const request = await this.prisma.guestRequest.findUnique({
+        where: { id: payload.requestId },
+        select: { userId: true },
+      });
+      const hostId = await this.hostOf(payload.streamId);
+      return {
+        action: 'guest.request_cancelled',
+        // A viewer withdraws their own request; a host their own invite.
+        actorId: payload.initiatedBy === 'VIEWER' ? (request?.userId ?? null) : (hostId ?? null),
+        hostId,
+        target: request ? await this.userTarget(request.userId) : null,
+        streamId: payload.streamId,
+        metadata: { requestId: payload.requestId, initiatedBy: payload.initiatedBy },
+      };
+    });
+  }
+
+  @OnEvent(DomainEvents.GuestPlacementChanged)
+  onGuestPlacementChanged(payload: GuestPlacementChangedPayload) {
+    return this.track(async () => ({
+      action: 'guest.moved',
+      actorId: payload.actorId,
+      hostId: await this.hostOf(payload.streamId),
+      target: await this.userTarget(payload.userId),
+      streamId: payload.streamId,
+      after: { placement: payload.placement ? { ...payload.placement } : null },
+    }));
+  }
+
+  @OnEvent(DomainEvents.GuestSpotlightChanged)
+  onGuestSpotlightChanged(payload: GuestSpotlightChangedPayload) {
+    return this.track(async () => ({
+      action: 'guest.spotlighted',
+      actorId: payload.actorId,
+      hostId: await this.hostOf(payload.streamId),
+      target: payload.userId ? await this.userTarget(payload.userId) : null,
+      streamId: payload.streamId,
+      after: { spotlight: payload.userId ?? 'host' },
+    }));
+  }
+
+  @OnEvent(DomainEvents.RecordingPermissionChanged)
+  onRecordingPermissionChanged(payload: RecordingPermissionChangedPayload) {
+    return this.track(async () => ({
+      action: payload.allowed ? 'moderation.recording_allowed' : 'moderation.recording_revoked',
+      actorId: payload.actorId,
+      hostId: await this.hostOf(payload.streamId),
+      target: await this.userTarget(payload.userId),
+      streamId: payload.streamId,
+    }));
+  }
+
+  // Private messages: who, to whom and when - never what they say (the
+  // console reads a conversation only through its own audited view).
+  @OnEvent(DomainEvents.DirectMessageSent)
+  onDirectMessageSent(payload: DirectMessageSentPayload) {
+    const { message, recipient } = payload;
+    return this.track(async () => ({
+      action: 'message.sent',
+      actorId: message.senderId,
+      target: { type: 'USER', id: recipient.id, label: `@${recipient.username}` },
+      metadata: { messageId: message.id, length: message.text.length },
+    }));
+  }
+
+  @OnEvent(DomainEvents.DirectMessageEdited)
+  onDirectMessageEdited(payload: DirectMessageEditedPayload) {
+    const { message } = payload;
+    return this.track(async () => ({
+      action: 'message.edited',
+      actorId: message.senderId,
+      target: await this.userTarget(message.recipientId),
+      metadata: { messageId: message.id, length: message.text.length },
+    }));
+  }
+
+  @OnEvent(DomainEvents.DirectMessageDeleted)
+  onDirectMessageDeleted(payload: DirectMessageDeletedPayload) {
+    return this.track(async () => ({
+      action: 'message.deleted',
+      actorId: payload.senderId,
+      target: await this.userTarget(payload.recipientId),
+      metadata: { messageId: payload.messageId },
+    }));
+  }
+
+  @OnEvent(DomainEvents.DirectMessagesHidden)
+  onDirectMessagesHidden(payload: DirectMessagesHiddenPayload) {
+    return this.track(async () => ({
+      action: 'message.hidden',
+      actorId: payload.userId,
+      target: await this.userTarget(payload.partnerId),
+      metadata: payload.messageId ? { messageId: payload.messageId } : { wholeChat: true },
+    }));
+  }
+
+  private async targetFor(
+    target: ActivityRecordedPayload['target'],
+  ): Promise<AuditEntry['target']> {
+    if (!target) return null;
+    if (target.label === undefined && target.type === 'USER') return this.userTarget(target.id);
+    if (target.label === undefined && target.type === 'STREAM') return this.streamTarget(target.id);
+    return { type: target.type as AuditTargetType, id: target.id, label: target.label ?? null };
   }
 
   // The context is read now, while still inside the request that emitted the event.

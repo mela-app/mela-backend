@@ -4,6 +4,7 @@ import { ChatModule } from '../chat/chat.module';
 import { RateLimitModule } from '../common/rate-limit/rate-limit.module';
 import { SocialModule } from '../social/social.module';
 import { DirectMessagesController } from './direct-messages.controller';
+import { ActivityStatusService } from './activity-status.service';
 import { DirectMessagesService } from './direct-messages.service';
 
 @Module({
@@ -11,8 +12,9 @@ import { DirectMessagesService } from './direct-messages.service';
   // live chat's phrase filter. RateLimitModule: each sender's pace.
   imports: [AuthModule, SocialModule, ChatModule, RateLimitModule],
   controllers: [DirectMessagesController],
-  providers: [DirectMessagesService],
-  // The admin console erases reported messages.
-  exports: [DirectMessagesService],
+  providers: [DirectMessagesService, ActivityStatusService],
+  // The admin console erases reported messages; the realtime gateway shows
+  // who's online and typing.
+  exports: [DirectMessagesService, ActivityStatusService],
 })
 export class DirectMessagesModule {}

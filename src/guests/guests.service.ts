@@ -155,7 +155,12 @@ export class GuestsService {
   }
 
   /** Called by StreamsService once it's minted `credentials` and confirmed the guest cap. */
-  async accept(streamId: string, requestId: string, credentials: VideoCredentials): Promise<void> {
+  async accept(
+    streamId: string,
+    requestId: string,
+    credentials: VideoCredentials,
+    actorId?: string,
+  ): Promise<void> {
     const request = await this.findPendingOrThrow(streamId, requestId);
     const now = new Date();
     await this.prisma.guestRequest.update({
@@ -188,6 +193,7 @@ export class GuestsService {
       streamId,
       requestId,
       userId: request.userId,
+      actorId,
       credentials,
     } satisfies GuestRequestAcceptedPayload);
     this.events.emit(DomainEvents.GuestJoined, {
@@ -197,7 +203,7 @@ export class GuestsService {
     } satisfies GuestJoinedPayload);
   }
 
-  async reject(streamId: string, requestId: string): Promise<void> {
+  async reject(streamId: string, requestId: string, actorId?: string): Promise<void> {
     const request = await this.findPendingOrThrow(streamId, requestId);
     await this.prisma.guestRequest.update({
       where: { id: requestId },
@@ -207,6 +213,7 @@ export class GuestsService {
       streamId,
       requestId,
       userId: request.userId,
+      actorId,
     } satisfies GuestRequestRejectedPayload);
   }
 

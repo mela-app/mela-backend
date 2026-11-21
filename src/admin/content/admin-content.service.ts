@@ -18,11 +18,15 @@ import {
   BannedPhraseChangedPayload,
   DomainEvents,
 } from '../../common/events/domain-events';
+import { AuditChanges, changesBetween, created, removed } from '../../common/events/audit-changes';
 import { PageQueryDto, pageArgs, toPage } from '../../common/pagination/page-query.dto';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import { AdminPrincipal } from '../admin.guard';
 import { BannedPhraseDto, SendAlertDto, UpdateBannedPhraseDto } from './admin-content.dto';
+
+// What the audit log keeps of a banned phrase.
+const PHRASE_FIELDS = ['phrase', 'severity'] as const;
 
 const PERSON_SELECT = { select: { id: true, username: true, displayName: true } } as const;
 
@@ -134,7 +138,12 @@ export class AdminContentService {
       const phrase = await this.prisma.bannedPhrase.create({
         data: { phrase: dto.phrase, severity: dto.severity, createdBy: admin.id },
       });
-      this.announcePhrase(DomainEvents.BannedPhraseCreated, admin, phrase);
+      this.announcePhrase(
+        DomainEvents.BannedPhraseCreated,
+        admin,
+        phrase,
+        created(phrase, PHRASE_FIELDS),
+      );
       return phrase;
     } catch (error) {
       throw duplicateOr(error);
@@ -142,7 +151,7 @@ export class AdminContentService {
   }
 
   async updatePhrase(admin: AdminPrincipal, phraseId: string, dto: UpdateBannedPhraseDto) {
-    await this.getPhrase(phraseId);
+    const before = await this.getPhrase(phraseId);
     try {
       const phrase = await this.prisma.bannedPhrase.update({
         where: { id: phraseId },
@@ -151,7 +160,12 @@ export class AdminContentService {
           ...(dto.severity ? { severity: dto.severity } : {}),
         },
       });
-      this.announcePhrase(DomainEvents.BannedPhraseUpdated, admin, phrase);
+      this.announcePhrase(
+        DomainEvents.BannedPhraseUpdated,
+        admin,
+        phrase,
+        changesBetween(before, phrase, PHRASE_FIELDS),
+      );
       return phrase;
     } catch (error) {
       throw duplicateOr(error);
@@ -161,7 +175,12 @@ export class AdminContentService {
   async removePhrase(admin: AdminPrincipal, phraseId: string) {
     const phrase = await this.getPhrase(phraseId);
     await this.prisma.bannedPhrase.delete({ where: { id: phraseId } });
-    this.announcePhrase(DomainEvents.BannedPhraseDeleted, admin, phrase);
+    this.announcePhrase(
+      DomainEvents.BannedPhraseDeleted,
+      admin,
+      phrase,
+      removed(phrase, PHRASE_FIELDS),
+    );
     return { ok: true };
   }
 
@@ -190,12 +209,14 @@ export class AdminContentService {
       | typeof DomainEvents.BannedPhraseDeleted,
     admin: AdminPrincipal,
     phrase: { id: string; phrase: string; severity: BannedPhraseSeverity },
+    changes?: AuditChanges,
   ): void {
     this.events.emit(event, {
       phraseId: phrase.id,
       actorId: admin.id,
       phrase: phrase.phrase,
       severity: phrase.severity,
+      changes,
     } satisfies BannedPhraseChangedPayload);
   }
 }

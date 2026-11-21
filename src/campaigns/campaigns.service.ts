@@ -20,6 +20,7 @@ import {
   DomainEvents,
   FeaturedHostChangedPayload,
 } from '../common/events/domain-events';
+import { AuditChanges, changesBetween, created, removed } from '../common/events/audit-changes';
 import { pageArgs, PageQueryDto, toPage } from '../common/pagination/page-query.dto';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { PushQueueService } from '../notifications/push-queue.service';
@@ -33,6 +34,21 @@ const SEND_BATCH = 500;
 
 // What a tap or a banner button may open in the app.
 const APP_PATH = /^\/(live|profile)\/[0-9a-fA-F-]{36}$/;
+
+// What the audit log keeps of each (docs/features/admin.md, "Before and after").
+const CAMPAIGN_FIELDS = ['title', 'body', 'openPath', 'audience', 'scheduledAt'] as const;
+const ANNOUNCEMENT_FIELDS = [
+  'title',
+  'message',
+  'tone',
+  'platform',
+  'dismissible',
+  'linkUrl',
+  'linkLabel',
+  'startsAt',
+  'endsAt',
+] as const;
+const FEATURED_FIELDS = ['note', 'endsAt', 'position'] as const;
 
 const PERSON = {
   select: { id: true, username: true, displayName: true, avatarUrl: true },
@@ -145,6 +161,7 @@ export class CampaignsService {
       campaignId: campaign.id,
       actorId: staff.id,
       title: campaign.title,
+      changes: created(campaign, CAMPAIGN_FIELDS),
     } satisfies CampaignChangedPayload);
     // Now: out within seconds, not at the next tick.
     if (scheduledAt <= now) void this.sendDue(now);
@@ -174,6 +191,7 @@ export class CampaignsService {
       campaignId,
       actorId: staff.id,
       title: campaign.title,
+      changes: { before: { status: 'SCHEDULED' }, after: { status: campaign.status } },
     } satisfies CampaignChangedPayload);
     return campaign;
   }
@@ -198,6 +216,7 @@ export class CampaignsService {
       campaignId,
       actorId: staff.id,
       title: campaign.title,
+      changes: removed(campaign, [...CAMPAIGN_FIELDS, 'status', 'recipientCount']),
     } satisfies CampaignChangedPayload);
     return { ok: true as const };
   }
@@ -354,7 +373,12 @@ export class CampaignsService {
         createdById: staff.id,
       },
     });
-    this.announcementChanged('published', staff, announcement);
+    this.announcementChanged(
+      'published',
+      staff,
+      announcement,
+      created(announcement, ANNOUNCEMENT_FIELDS),
+    );
     return announcement;
   }
 
@@ -380,7 +404,12 @@ export class CampaignsService {
         endsAt,
       },
     });
-    this.announcementChanged('updated', staff, announcement);
+    this.announcementChanged(
+      'updated',
+      staff,
+      announcement,
+      changesBetween(current, announcement, ANNOUNCEMENT_FIELDS),
+    );
     return announcement;
   }
 
@@ -392,7 +421,12 @@ export class CampaignsService {
       where: { id },
       data: { endsAt: now, ...(current.startsAt > now ? { startsAt: now } : {}) },
     });
-    this.announcementChanged('ended', staff, announcement);
+    this.announcementChanged(
+      'ended',
+      staff,
+      announcement,
+      changesBetween(current, announcement, ['startsAt', 'endsAt']),
+    );
     return announcement;
   }
 
@@ -400,7 +434,7 @@ export class CampaignsService {
     const current = await this.prisma.announcement.findUnique({ where: { id } });
     if (!current) throw new NotFoundException('Banner not found');
     await this.prisma.announcement.delete({ where: { id } });
-    this.announcementChanged('deleted', staff, current);
+    this.announcementChanged('deleted', staff, current, removed(current, ANNOUNCEMENT_FIELDS));
     return { ok: true as const };
   }
 
@@ -408,12 +442,14 @@ export class CampaignsService {
     change: AnnouncementChangedPayload['change'],
     staff: StaffActor,
     announcement: { id: string; title: string },
+    changes?: AuditChanges,
   ) {
     this.events.emit(DomainEvents.AnnouncementChanged, {
       change,
       announcementId: announcement.id,
       actorId: staff.id,
       title: announcement.title,
+      changes,
     } satisfies AnnouncementChangedPayload);
   }
 
@@ -454,6 +490,7 @@ export class CampaignsService {
     if (host.platformRole !== PlatformRole.USER)
       throw new BadRequestException('Staff accounts are not featured');
     const last = await this.prisma.featuredHost.aggregate({ _max: { position: true } });
+    const before = await this.prisma.featuredHost.findUnique({ where: { userId: host.id } });
     const featured = await this.prisma.featuredHost.upsert({
       where: { userId: host.id },
       create: {
@@ -473,23 +510,32 @@ export class CampaignsService {
       change: 'added',
       userId: host.id,
       actorId: staff.id,
+      changes: before
+        ? changesBetween(before, featured, FEATURED_FIELDS)
+        : created(featured, FEATURED_FIELDS),
     } satisfies FeaturedHostChangedPayload);
     return featured;
   }
 
   async unfeature(staff: StaffActor, userId: string) {
+    const before = await this.prisma.featuredHost.findUnique({ where: { userId } });
     const { count } = await this.prisma.featuredHost.deleteMany({ where: { userId } });
     if (count === 0) throw new NotFoundException('Not featured');
     this.events.emit(DomainEvents.FeaturedHostChanged, {
       change: 'removed',
       userId,
       actorId: staff.id,
+      changes: removed(before, FEATURED_FIELDS),
     } satisfies FeaturedHostChangedPayload);
     return { ok: true as const };
   }
 
   /** The order of the featured list, top first. */
   async reorderFeatured(staff: StaffActor, userIds: string[]) {
+    const before = await this.prisma.featuredHost.findMany({
+      orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+      select: { userId: true },
+    });
     await this.prisma.$transaction(
       userIds.map((userId, position) =>
         this.prisma.featuredHost.updateMany({ where: { userId }, data: { position } }),
@@ -499,6 +545,7 @@ export class CampaignsService {
       change: 'reordered',
       userId: null,
       actorId: staff.id,
+      changes: changesBetween({ order: before.map((row) => row.userId) }, { order: userIds }),
     } satisfies FeaturedHostChangedPayload);
     return this.listFeatured();
   }

@@ -17,11 +17,13 @@ import { AuthService, TokenPair } from '../../auth/auth.service';
 import { RefreshTokenClaims } from '../../auth/auth.types';
 import {
   AccountCredentialChangedPayload,
+  ActivityRecordedPayload,
   AdminSignedInPayload,
   AdminSignInFailedPayload,
   DomainEvents,
   UserProfileUpdatedPayload,
 } from '../../common/events/domain-events';
+import { changesBetween } from '../../common/events/audit-changes';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { effectiveAdminPermissions } from '../../common/permissions/admin-permissions';
 import { RateLimit, RateLimitService } from '../../common/rate-limit/rate-limit.service';
@@ -216,11 +218,16 @@ export class AdminAuthService implements OnModuleInit {
     });
     this.events.emit(DomainEvents.AccountEmailChanged, {
       userId: admin.id,
+      changes: { before: { email: user.email }, after: { email: updated.email } },
     } satisfies AccountCredentialChangedPayload);
     return toAdminView(updated);
   }
 
   async updateProfile(admin: AdminPrincipal, dto: UpdateAdminProfileDto): Promise<AdminView> {
+    const current = await this.prisma.user.findUniqueOrThrow({
+      where: { id: admin.id },
+      select: { displayName: true },
+    });
     const updated = await this.prisma.user.update({
       where: { id: admin.id },
       data: { displayName: dto.displayName },
@@ -228,6 +235,7 @@ export class AdminAuthService implements OnModuleInit {
     this.events.emit(DomainEvents.UserProfileUpdated, {
       userId: admin.id,
       fields: ['displayName'],
+      changes: changesBetween(current, updated, ['displayName']),
     } satisfies UserProfileUpdatedPayload);
     return toAdminView(updated);
   }
@@ -251,6 +259,11 @@ export class AdminAuthService implements OnModuleInit {
       where: { id: sessionId, userId: admin.id },
     });
     if (count === 0) throw new NotFoundException('Session not found');
+    this.events.emit(DomainEvents.ActivityRecorded, {
+      action: 'admin.session_revoked',
+      actorId: admin.id,
+      metadata: { sessionId },
+    } satisfies ActivityRecordedPayload);
     return { ok: true };
   }
 }

@@ -51,6 +51,36 @@ describe('AuditService', () => {
       );
     });
 
+    it('keeps what changed, before and after - never a secret, never endless text', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        username: 'ana',
+        platformRole: PlatformRole.USER,
+      });
+
+      await service().record({
+        action: 'account.profile_updated',
+        actorId: 'u1',
+        before: { displayName: 'Ana', passwordHash: 'x', bio: 'a'.repeat(5000) },
+        after: { displayName: 'Ana B.', passwordHash: 'y', bio: 'b' },
+      });
+
+      const data = written();
+      expect(data.before.displayName).toBe('Ana');
+      expect(data.after.displayName).toBe('Ana B.');
+      expect(data.before.passwordHash).toBe('[hidden]');
+      expect(data.after.passwordHash).toBe('[hidden]');
+      expect(data.before.bio.length).toBe(2000);
+    });
+
+    it('leaves before and after out when nothing changed', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+
+      await service().record({ action: 'auth.signed_out', actorId: 'u1', before: {} });
+
+      expect(written().before).toBeUndefined();
+      expect(written().after).toBeUndefined();
+    });
+
     it('tells the host of a live apart from their moderators', async () => {
       prisma.user.findUnique.mockResolvedValue({
         username: 'ana',

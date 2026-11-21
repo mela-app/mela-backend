@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { AuditChanges, changesBetween, removed } from '../common/events/audit-changes';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BannedPhraseSeverity, ModeratorCapability, StreamStatus } from '@prisma/client';
@@ -87,7 +88,12 @@ export class LiveBoardService {
       where: { id: streamId },
       data: { boardText: board.text, boardX: board.x, boardY: board.y },
     });
-    this.announce(streamId, requesterId, board);
+    this.announce(
+      streamId,
+      requesterId,
+      board,
+      changesBetween({ text: stream.boardText, x: stream.boardX, y: stream.boardY }, board),
+    );
     return board;
   }
 
@@ -96,7 +102,7 @@ export class LiveBoardService {
     const stream = await this.liveFor(streamId, requesterId);
     if (stream.boardText) {
       await this.prisma.stream.update({ where: { id: streamId }, data: { boardText: null } });
-      this.announce(streamId, requesterId, null);
+      this.announce(streamId, requesterId, null, removed({ text: stream.boardText }));
     }
     return { ok: true };
   }
@@ -151,11 +157,17 @@ export class LiveBoardService {
     return matches.length > 0 ? this.bannedPhrases.mask(cleaned.text) : cleaned.text;
   }
 
-  private announce(streamId: string, actorId: string, board: LiveBoard | null) {
+  private announce(
+    streamId: string,
+    actorId: string,
+    board: LiveBoard | null,
+    changes?: AuditChanges,
+  ) {
     this.events.emit(DomainEvents.LiveBoardChanged, {
       streamId,
       actorId,
       board,
+      changes,
     } satisfies LiveBoardChangedPayload);
   }
 }

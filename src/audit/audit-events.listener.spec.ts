@@ -19,6 +19,7 @@ describe('AuditEventsListener', () => {
     user: { findUnique: jest.fn(), findFirst: jest.fn() },
     stream: { findUnique: jest.fn() },
     chatMessage: { findUnique: jest.fn() },
+    guestRequest: { findUnique: jest.fn() },
   };
   const listener = () =>
     new AuditEventsListener(audit as unknown as AuditService, prisma as unknown as PrismaService);
@@ -297,5 +298,104 @@ describe('AuditEventsListener', () => {
       listener().onFollowed({ followerId: 'u1', followeeId: 'u2' }),
     ).resolves.toBeUndefined();
     expect(audit.record).not.toHaveBeenCalled();
+  });
+  describe('before and after, and what the app records for the log alone', () => {
+    it('records an activity a feature reports, with what it changed', async () => {
+      await listener().onActivityRecorded({
+        action: 'account.notification_settings_changed',
+        actorId: 'u1',
+        changes: { before: { pushDirectMessages: true }, after: { pushDirectMessages: false } },
+      });
+
+      expect(entry()).toEqual(
+        expect.objectContaining({
+          action: 'account.notification_settings_changed',
+          actorId: 'u1',
+          before: { pushDirectMessages: true },
+          after: { pushDirectMessages: false },
+        }),
+      );
+    });
+
+    it('looks up a person it names, and drops an action the log does not know', async () => {
+      await listener().onActivityRecorded({
+        action: 'social.chat_muted',
+        actorId: 'u1',
+        target: { type: 'USER', id: 'u2' },
+      });
+      expect(entry().target).toEqual({ type: 'USER', id: 'u2', label: '@troll' });
+
+      audit.record.mockClear();
+      await listener().onActivityRecorded({ action: 'made.up', actorId: 'u1' });
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('turns a role change into before and after', async () => {
+      await listener().onRoleChanged({
+        userId: 'u1',
+        actorId: 'admin-1',
+        from: PlatformRole.USER,
+        to: PlatformRole.PLATFORM_MODERATOR,
+        permissions: [AdminPermission.MANAGE_REPORTS],
+      });
+
+      expect(entry().before).toEqual({ platformRole: PlatformRole.USER });
+      expect(entry().after).toEqual({
+        platformRole: PlatformRole.PLATFORM_MODERATOR,
+        adminPermissions: [AdminPermission.MANAGE_REPORTS],
+      });
+    });
+
+    it('keeps who sent a private message to whom - never what it said', async () => {
+      await listener().onDirectMessageSent({
+        message: {
+          id: MESSAGE,
+          senderId: 'u1',
+          recipientId: 'u2',
+          text: 'a private thing',
+          clientId: null,
+          createdAt: new Date(),
+          readAt: null,
+          editedAt: null,
+        },
+        sender: { id: 'u1', username: 'ana', displayName: 'Ana', avatarUrl: null },
+        recipient: { id: 'u2', username: 'bo', displayName: 'Bo', avatarUrl: null },
+        recipientUnreadCount: 1,
+      });
+
+      expect(entry()).toEqual(
+        expect.objectContaining({
+          action: 'message.sent',
+          actorId: 'u1',
+          target: { type: 'USER', id: 'u2', label: '@bo' },
+          metadata: { messageId: MESSAGE, length: 15 },
+        }),
+      );
+      expect(JSON.stringify(entry())).not.toContain('a private thing');
+    });
+
+    it('records who let a guest on stage, without their credentials', async () => {
+      await listener().onGuestRequestAccepted({
+        streamId: 's1',
+        requestId: 'r1',
+        userId: 'u2',
+        actorId: 'host-1',
+        credentials: {
+          provider: 'LIVEKIT',
+          url: 'wss://x',
+          token: 'secret',
+          expiresAt: new Date(),
+        },
+      });
+
+      expect(entry()).toEqual(
+        expect.objectContaining({
+          action: 'guest.request_accepted',
+          actorId: 'host-1',
+          hostId: 'host-1',
+        }),
+      );
+      expect(JSON.stringify(entry())).not.toContain('secret');
+    });
   });
 });

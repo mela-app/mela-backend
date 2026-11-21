@@ -82,6 +82,7 @@ describe('AdminReleasesService', () => {
         version: '1.3.0',
         build: null,
         required: true,
+        changes: expect.objectContaining({ after: expect.objectContaining({ version: '1.3.0' }) }),
       });
     });
 
