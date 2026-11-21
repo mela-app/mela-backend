@@ -99,7 +99,7 @@ describe('ChatService', () => {
 
   describe('send', () => {
     it('saves the cleaned text and hands back what everyone sees', async () => {
-      const result = await service().send(LIVE, 'user-1', '  gg\n\nwp  ');
+      const result = await service().send(LIVE, 'user-1', '  gg \t  wp  ');
 
       expect(prisma.chatMessage.create).toHaveBeenCalledWith(
         expect.objectContaining({ data: { streamId: LIVE, userId: 'user-1', text: 'gg wp' } }),

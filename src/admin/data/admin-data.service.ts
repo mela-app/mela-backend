@@ -160,7 +160,7 @@ export class AdminDataService {
       });
     }
     const others = { id: { not: admin.id } } satisfies Prisma.UserWhereInput;
-    const files = await this.filesOf({}, others);
+    const files = await this.filesOf({}, others, {});
     const spared = new Set<string>([
       ...SPARED_BY_RESET,
       ...keep.map((each) => KEEPABLE_ON_RESET[each]),
@@ -200,12 +200,13 @@ export class AdminDataService {
     }
   }
 
-  // What rows about to go point at in storage: chat photos, and profile pictures.
+  // What rows about to go point at in storage: chat photos, profile pictures and private photos.
   private async filesOf(
     chat: Prisma.ChatMessageWhereInput | null,
     users: Prisma.UserWhereInput | null,
+    direct: Prisma.DirectMessageWhereInput | null = null,
   ): Promise<string[]> {
-    const [photos, pictures] = await Promise.all([
+    const [photos, pictures, privatePhotos] = await Promise.all([
       chat
         ? this.prisma.chatMessage.findMany({
             where: { AND: [chat, { imageUrl: { not: null } }] },
@@ -218,10 +219,17 @@ export class AdminDataService {
             select: { avatarUrl: true },
           })
         : [],
+      direct
+        ? this.prisma.directMessage.findMany({
+            where: { AND: [direct, { imageUrl: { not: null } }] },
+            select: { imageUrl: true },
+          })
+        : [],
     ]);
     return [
       ...photos.flatMap((row) => row.imageUrl ?? []),
       ...pictures.flatMap((row) => row.avatarUrl ?? []),
+      ...privatePhotos.flatMap((row) => row.imageUrl ?? []),
     ];
   }
 
@@ -243,7 +251,10 @@ export class AdminDataService {
             platformRole: PlatformRole.USER,
             streams: { none: { status: StreamStatus.LIVE } },
           } satisfies Prisma.UserWhereInput;
-          const files = await this.filesOf({ stream: { host: leaving } }, leaving);
+          // Their private messages go with them, sent and received alike.
+          const files = await this.filesOf({ stream: { host: leaving } }, leaving, {
+            OR: [{ sender: leaving }, { recipient: leaving }],
+          });
           // Their lives first: a live can't outlast its host.
           const [, users] = await prisma.$transaction([
             prisma.stream.deleteMany({ where: { host: leaving } }),
@@ -426,9 +437,10 @@ export class AdminDataService {
         ageFilter: 'created',
         count: () => prisma.directMessage.count(),
         clear: async (before) => {
+          const files = await this.filesOf(null, null, olderThan(before));
           const messages = await prisma.directMessage.deleteMany({ where: olderThan(before) });
           await prisma.conversation.deleteMany({ where: { messages: { none: {} } } });
-          return removed(messages);
+          return { ...removed(messages), files };
         },
       },
       {

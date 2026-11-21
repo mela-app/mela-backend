@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { ChatModule } from '../chat/chat.module';
 import { RateLimitModule } from '../common/rate-limit/rate-limit.module';
+import { StorageModule } from '../common/storage/storage.module';
 import { SocialModule } from '../social/social.module';
 import { DirectMessagesController } from './direct-messages.controller';
 import { ActivityStatusService } from './activity-status.service';
@@ -10,7 +11,8 @@ import { DirectMessagesService } from './direct-messages.service';
 @Module({
   // AuthModule: the JWT guard. SocialModule: who follows whom. ChatModule:
   // live chat's phrase filter. RateLimitModule: each sender's pace.
-  imports: [AuthModule, SocialModule, ChatModule, RateLimitModule],
+  // StorageModule: photos.
+  imports: [AuthModule, SocialModule, ChatModule, RateLimitModule, StorageModule],
   controllers: [DirectMessagesController],
   providers: [DirectMessagesService, ActivityStatusService],
   // The admin console erases reported messages; the realtime gateway shows

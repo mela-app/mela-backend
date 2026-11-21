@@ -839,7 +839,10 @@ model DirectMessage {
   conversationId String    @db.Uuid
   senderId       String
   recipientId    String
+  // A photo's caption - maybe empty.
   text           String
+  // A photo (docs/features/messages.md); null for plain text.
+  imageUrl       String?
   // The sending app's own id for it, so a resend after a lost answer isn't stored twice.
   clientId       String?
   // When the recipient opened the conversation; null while unread.
