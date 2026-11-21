@@ -316,4 +316,55 @@ describe('WebFallbackController', () => {
       expect(page()).toContain(`href="${getMela}">Open in Mela`);
     });
   });
+
+  describe('computers and iPhones, which cannot open the Android app', () => {
+    const request = (agent: string) =>
+      ({
+        protocol: 'https',
+        get: (name: string) => ({ host: 'melalive.app', 'user-agent': agent })[name.toLowerCase()],
+      }) as unknown as Request;
+    const windows =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0 Safari/537.36';
+    const iphone =
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148';
+    const live = {
+      title: 'Big night',
+      status: StreamStatus.LIVE,
+      visibility: StreamVisibility.PUBLIC,
+      host: { displayName: 'Ana' },
+    };
+
+    it('a computer gets the player, and - if it cannot load - try again and Mela for Android, no app link', async () => {
+      findUnique.mockResolvedValue(live);
+
+      await controller.show(LIVE, res, request(windows));
+
+      expect(page()).toContain('/web/player.js');
+      expect(page()).not.toContain('gamblinglive://');
+      expect(page()).not.toContain('intent://');
+      expect(page()).toContain('>Try again</a>');
+      expect(page()).toContain(
+        `play.google.com/store/apps/details?id=com.gamblinglive.app&amp;referrer=mela_open%3Dlive%2F${LIVE}`,
+      );
+      expect(page()).toContain('Get Mela for Android');
+    });
+
+    it('an ended live on a computer just offers Mela for Android', async () => {
+      findUnique.mockResolvedValue({ ...live, status: StreamStatus.ENDED });
+
+      await controller.show(LIVE, res, request(windows));
+
+      expect(page()).not.toContain('Try again');
+      expect(page()).toContain('Get Mela for Android');
+    });
+
+    it('an iPhone without an App Store listing gets no app link', async () => {
+      findUnique.mockResolvedValue(live);
+
+      await controller.show(LIVE, res, request(iphone));
+
+      expect(page()).not.toContain('gamblinglive://');
+      expect(page()).toContain('Get Mela for Android');
+    });
+  });
 });
