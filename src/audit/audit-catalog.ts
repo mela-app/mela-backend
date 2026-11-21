@@ -11,6 +11,7 @@ export const AUDIT_ACTIONS = {
   'admin.signed_in': { category: 'AUTH', label: 'Signed in to the admin console' },
   'admin.sign_in_failed': { category: 'AUTH', label: 'Failed admin console sign-in' },
   'admin.signed_out': { category: 'AUTH', label: 'Signed out of the admin console' },
+  'admin.session_revoked': { category: 'AUTH', label: 'Signed out one of their console devices' },
 
   'account.profile_updated': { category: 'ACCOUNT', label: 'Updated their profile' },
   'account.password_changed': { category: 'ACCOUNT', label: 'Changed their password' },
@@ -18,6 +19,11 @@ export const AUDIT_ACTIONS = {
   'account.email_changed': { category: 'ACCOUNT', label: 'Changed their email' },
   'account.identity_linked': { category: 'ACCOUNT', label: 'Linked a sign-in method' },
   'account.deleted': { category: 'ACCOUNT', label: 'Deleted their account' },
+  'account.notification_settings_changed': {
+    category: 'ACCOUNT',
+    label: 'Changed their notification settings',
+  },
+  'account.terms_accepted': { category: 'ACCOUNT', label: 'Accepted the Terms and Privacy Policy' },
 
   'user.suspended': { category: 'ADMIN', label: 'Suspended an account' },
   'user.reinstated': { category: 'ADMIN', label: 'Reinstated an account' },
@@ -51,10 +57,21 @@ export const AUDIT_ACTIONS = {
   'stream.shared': { category: 'STREAM', label: 'Invited friends to a live' },
   'stream.locked': { category: 'STREAM', label: 'Locked a live' },
   'stream.unlocked': { category: 'STREAM', label: 'Unlocked a live' },
+  'stream.joined': { category: 'STREAM', label: 'Joined a live' },
+  'stream.watched_as_staff': { category: 'STREAM', label: 'Watched a live unseen, as staff' },
+  'stream.board_changed': { category: 'STREAM', label: 'Changed the text on a live' },
+  'stream.scheduled': { category: 'STREAM', label: 'Scheduled a live' },
+  'stream.schedule_cancelled': { category: 'STREAM', label: 'Cancelled a scheduled live' },
+  'stream.reminder_set': { category: 'STREAM', label: 'Asked to be reminded of a live' },
+  'stream.reminder_removed': { category: 'STREAM', label: 'Stopped a live reminder' },
 
   'chat.message_deleted': { category: 'CHAT', label: 'Deleted a chat message' },
   'chat.message_pinned': { category: 'CHAT', label: 'Pinned a chat message' },
   'chat.message_unpinned': { category: 'CHAT', label: 'Unpinned a chat message' },
+  'message.sent': { category: 'CHAT', label: 'Sent a private message' },
+  'message.edited': { category: 'CHAT', label: 'Edited a private message' },
+  'message.deleted': { category: 'CHAT', label: 'Deleted a private message for everyone' },
+  'message.hidden': { category: 'CHAT', label: 'Deleted private messages for themselves' },
 
   'moderation.user_banned': { category: 'MODERATION', label: 'Banned someone from a live' },
   'moderation.ban_lifted': { category: 'MODERATION', label: 'Lifted a live ban' },
@@ -68,6 +85,15 @@ export const AUDIT_ACTIONS = {
   'moderation.moderator_removed': { category: 'MODERATION', label: 'Removed a moderator' },
   'moderation.guest_mic_locked': { category: 'MODERATION', label: "Turned off a guest's mic" },
   'moderation.guest_mic_unlocked': { category: 'MODERATION', label: "Allowed a guest's mic again" },
+  'moderation.recording_allowed': {
+    category: 'MODERATION',
+    label: 'Allowed someone to record a live',
+  },
+  'moderation.recording_revoked': {
+    category: 'MODERATION',
+    label: 'Stopped someone recording a live',
+  },
+  'report.submitted': { category: 'MODERATION', label: 'Reported something' },
   'report.actioned': { category: 'MODERATION', label: 'Acted on a report' },
   'report.dismissed': { category: 'MODERATION', label: 'Dismissed a report' },
   'report.private_message_removed': {
@@ -102,11 +128,19 @@ export const AUDIT_ACTIONS = {
   'guest.joined': { category: 'GUEST', label: 'Joined the stage' },
   'guest.left': { category: 'GUEST', label: 'Left the stage' },
   'guest.removed': { category: 'GUEST', label: 'Removed a guest from the stage' },
+  'guest.request_accepted': { category: 'GUEST', label: 'Said yes to someone joining the stage' },
+  'guest.request_rejected': { category: 'GUEST', label: 'Said no to someone joining the stage' },
+  'guest.request_cancelled': { category: 'GUEST', label: 'Withdrew a stage request or invite' },
+  'guest.moved': { category: 'GUEST', label: 'Moved a guest on the stage' },
+  'guest.spotlighted': { category: 'GUEST', label: 'Changed who fills the stage' },
 
   'social.followed': { category: 'SOCIAL', label: 'Followed someone' },
   'social.unfollowed': { category: 'SOCIAL', label: 'Unfollowed someone' },
   'social.blocked': { category: 'SOCIAL', label: 'Blocked someone' },
   'social.unblocked': { category: 'SOCIAL', label: 'Unblocked someone' },
+  'social.chat_muted': { category: 'SOCIAL', label: "Hid someone's chat messages" },
+  'social.chat_unmuted': { category: 'SOCIAL', label: "Showed someone's chat messages again" },
+  'social.live_alerts_changed': { category: 'SOCIAL', label: 'Changed live alerts for someone' },
 
   'alert.sent': { category: 'ALERT', label: 'Sent an in-app alert' },
 
@@ -153,7 +187,9 @@ export type AuditTargetType =
   | 'HOSTING_REASON'
   // A push campaign, or an in-app banner (docs/features/campaigns.md).
   | 'CAMPAIGN'
-  | 'ANNOUNCEMENT';
+  | 'ANNOUNCEMENT'
+  // A live a host announced ahead of time.
+  | 'SCHEDULED_LIVE';
 
 // What entries say instead of a deleted account's name.
 export const DELETED_ACCOUNT_LABEL = 'Deleted account';

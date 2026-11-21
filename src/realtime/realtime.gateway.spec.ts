@@ -11,6 +11,7 @@ import { Server } from 'socket.io';
 import { AuthService } from '../auth/auth.service';
 import { WatchTicketService } from '../auth/watch-ticket.service';
 import { ChatService } from '../chat/chat.service';
+import { ActivityStatusService } from '../direct-messages/activity-status.service';
 import { LikesService } from '../chat/likes.service';
 import { LivePresenceService } from '../common/presence/live-presence.service';
 import { ModeratorsService } from '../moderators/moderators.service';
@@ -36,6 +37,8 @@ interface FakeSocket {
     hostingStreamId?: string;
     watchOnly?: { streamId: string };
     arranging?: { streamId: string; until: number };
+    away?: boolean;
+    hiddenIn?: string;
   };
   handshake: { auth: { token?: string; watchTicket?: string }; headers: Record<string, string> };
   rooms: Set<string>;
@@ -89,6 +92,7 @@ describe('RealtimeGateway', () => {
     canWatch: jest.fn().mockResolvedValue(true),
     participantSummaries: jest.fn(),
     canArrangeStage: jest.fn(),
+    isStaffWatcher: jest.fn().mockResolvedValue(false),
   };
   const presence = {
     addViewer: jest.fn(),
@@ -110,12 +114,22 @@ describe('RealtimeGateway', () => {
   const watchTickets = { verify: jest.fn() };
   const recordingPermissions = { isAllowed: jest.fn() };
   const social = { isBlockedEitherWay: jest.fn(), blockedEitherWayUserIds: jest.fn() };
+  const activityStatus = {
+    visibleTo: jest.fn(),
+    canSignalTyping: jest.fn().mockResolvedValue(true),
+    markSeen: jest.fn(async () => new Date('2026-11-20T10:00:00Z')),
+  };
   const roomEmit = jest.fn();
   // Volatile broadcasts land in roomEmit too.
   const roomExcept = jest.fn(() => ({ emit: roomEmit, volatile: { emit: roomEmit } }));
   const server = {
     to: jest.fn(() => ({ emit: roomEmit, except: roomExcept })),
-    in: jest.fn(() => ({ socketsLeave: jest.fn(), disconnectSockets: jest.fn() })),
+    // Loosely typed: some tests stub only what they look at.
+    in: jest.fn((): Record<string, jest.Mock> => ({
+      socketsLeave: jest.fn(),
+      disconnectSockets: jest.fn(),
+      fetchSockets: jest.fn().mockResolvedValue([]),
+    })),
     use: jest.fn(),
   };
 
@@ -134,6 +148,7 @@ describe('RealtimeGateway', () => {
       watchTickets as unknown as WatchTicketService,
       recordingPermissions as unknown as RecordingPermissionsService,
       social as unknown as SocialService,
+      activityStatus as unknown as ActivityStatusService,
     );
     gateway.server = server as unknown as Server;
     return gateway;
@@ -341,6 +356,33 @@ describe('RealtimeGateway', () => {
       });
       expect(socket.join).toHaveBeenCalledWith(`stream:${LIVE}`);
       expect(presence.addViewer).toHaveBeenCalledWith(LIVE, 'viewer-1', 'socket-1');
+    });
+
+    it('lets staff watch unseen: not counted, not announced, whatever bans - and silent', async () => {
+      streams.isStaffWatcher.mockResolvedValueOnce(true);
+      const socket = fakeSocket('staff-1');
+      const gateway = makeGateway();
+
+      const ack = await gateway.onStreamJoin(socket as never, { streamId: LIVE });
+      await settle();
+
+      expect(ack).toMatchObject({ ok: true });
+      expect(socket.join).toHaveBeenCalledWith(`stream:${LIVE}`);
+      expect(roomBans.isBanned).not.toHaveBeenCalled();
+      expect(presence.addViewer).not.toHaveBeenCalled();
+      expect(presence.claimArrivalNotice).not.toHaveBeenCalled();
+      expect(socket.data.hiddenIn).toBe(LIVE);
+      socket.rooms.add(`stream:${LIVE}`);
+      await expect(
+        gateway.onChatSend(socket as never, { streamId: LIVE, text: 'hi', clientId: 'c1' }),
+      ).resolves.toEqual({ ok: false, error: 'NOT_ALLOWED' });
+      await expect(
+        gateway.onLikeSend(socket as never, { streamId: LIVE, count: 1 }),
+      ).resolves.toEqual({ ok: false, error: 'NOT_ALLOWED' });
+      expect(chat.send).not.toHaveBeenCalled();
+
+      await gateway.handleDisconnect(socket as never);
+      expect(presence.removeViewer).not.toHaveBeenCalled();
     });
 
     it('tells a joiner the host lets them record, so a reconnect catches up on it', async () => {
@@ -1633,6 +1675,100 @@ describe('RealtimeGateway', () => {
       } finally {
         jest.useRealTimers();
       }
+    });
+  });
+  describe('online, last seen and typing in private messages', () => {
+    const PARTNER = '11111111-1111-4111-8111-111111111111';
+    // Who's connected to the partner's private room, and whether each app is in front.
+    function partnerSockets(...away: boolean[]) {
+      server.in.mockImplementation(() => ({
+        socketsLeave: jest.fn(),
+        disconnectSockets: jest.fn(),
+        fetchSockets: jest.fn().mockResolvedValue(away.map((value) => ({ data: { away: value } }))),
+      }));
+    }
+    afterEach(() =>
+      server.in.mockImplementation(() => ({
+        socketsLeave: jest.fn(),
+        disconnectSockets: jest.fn(),
+        fetchSockets: jest.fn().mockResolvedValue([]),
+      })),
+    );
+
+    it("follows the open conversation's partner when both show their activity", async () => {
+      const socket = fakeSocket();
+      socket.rooms.add('presence:someone-else');
+      activityStatus.visibleTo.mockResolvedValueOnce({
+        lastSeenAt: new Date('2026-11-20T09:00:00Z'),
+      });
+      partnerSockets(true, false);
+
+      const ack = await makeGateway().onPresenceWatch(socket as never, { userId: PARTNER });
+
+      expect(ack).toEqual({
+        ok: true,
+        hidden: false,
+        online: true,
+        lastSeenAt: '2026-11-20T09:00:00.000Z',
+      });
+      expect(socket.leave).toHaveBeenCalledWith('presence:someone-else');
+      expect(socket.join).toHaveBeenCalledWith(`presence:${PARTNER}`);
+    });
+
+    it('tells nothing when either of them hides it, or there is a block', async () => {
+      const socket = fakeSocket();
+      activityStatus.visibleTo.mockResolvedValueOnce(null);
+
+      const ack = await makeGateway().onPresenceWatch(socket as never, { userId: PARTNER });
+
+      expect(ack).toEqual({ ok: true, hidden: true, online: false, lastSeenAt: null });
+      expect(socket.join).not.toHaveBeenCalled();
+    });
+
+    it('a backgrounded app is not online - its partner hears it, with the time', async () => {
+      const gateway = makeGateway();
+      const socket = fakeSocket('viewer-1');
+      partnerSockets(false);
+      gateway.handleConnection(socket as never);
+      await settle();
+      roomEmit.mockClear();
+
+      partnerSockets(true);
+      await gateway.onPresenceState(socket as never, { away: true });
+
+      expect(socket.data.away).toBe(true);
+      expect(activityStatus.markSeen).toHaveBeenCalledWith('viewer-1');
+      expect(server.to).toHaveBeenCalledWith('presence:viewer-1');
+      expect(roomEmit).toHaveBeenCalledWith('presence:changed', {
+        userId: 'viewer-1',
+        hidden: false,
+        online: false,
+        lastSeenAt: '2026-11-20T10:00:00.000Z',
+      });
+    });
+
+    it('passes typing to the other person, at most every 2 s', async () => {
+      const gateway = makeGateway();
+      const socket = fakeSocket('viewer-1');
+
+      await gateway.onDirectTyping(socket as never, { userId: PARTNER, typing: true });
+      await gateway.onDirectTyping(socket as never, { userId: PARTNER, typing: true });
+      await gateway.onDirectTyping(socket as never, { userId: PARTNER, typing: false });
+
+      expect(server.to).toHaveBeenCalledWith(`user:${PARTNER}`);
+      const typing = roomEmit.mock.calls.filter(([event]) => event === 'dm:typing');
+      expect(typing).toEqual([
+        ['dm:typing', { userId: 'viewer-1', typing: true }],
+        ['dm:typing', { userId: 'viewer-1', typing: false }],
+      ]);
+    });
+
+    it('keeps typing quiet across a block', async () => {
+      activityStatus.canSignalTyping.mockResolvedValueOnce(false);
+
+      await makeGateway().onDirectTyping(fakeSocket() as never, { userId: PARTNER, typing: true });
+
+      expect(roomEmit).not.toHaveBeenCalledWith('dm:typing', expect.anything());
     });
   });
 });

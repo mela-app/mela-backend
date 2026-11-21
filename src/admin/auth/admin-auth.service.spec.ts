@@ -331,7 +331,10 @@ describe('AdminAuthService', () => {
         where: { id: 'admin-1' },
         data: { email: 'new@example.com' },
       });
-      expect(events.emit).toHaveBeenCalledWith('account.email_changed', { userId: 'admin-1' });
+      expect(events.emit).toHaveBeenCalledWith('account.email_changed', {
+        userId: 'admin-1',
+        changes: { before: { email: 'admin@example.com' }, after: { email: 'new@example.com' } },
+      });
       expect(view.email).toBe('new@example.com');
     });
   });

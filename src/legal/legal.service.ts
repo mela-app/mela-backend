@@ -1,7 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SessionPlatform, UserStatus } from '@prisma/client';
-import { DomainEvents, UserSuspendedPayload } from '../common/events/domain-events';
+import {
+  DomainEvents,
+  UserSuspendedPayload,
+  ActivityRecordedPayload,
+} from '../common/events/domain-events';
 import { PrismaService } from '../common/prisma/prisma.service';
 import {
   ageOn,
@@ -78,7 +82,7 @@ export class LegalService {
   ): Promise<LegalStatus> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { birthDate: true, status: true },
+      select: { birthDate: true, status: true, legalVersion: true },
     });
     if (!user) throw new NotFoundException('User not found');
     const version = checkVersion(input.version);
@@ -106,6 +110,15 @@ export class LegalService {
       }),
       this.prisma.legalAcceptance.create({ data: { userId, version, platform, acceptedAt: now } }),
     ]);
+    this.events.emit(DomainEvents.ActivityRecorded, {
+      action: 'account.terms_accepted',
+      actorId: userId,
+      metadata: { platform },
+      changes: {
+        before: { legalVersion: user.legalVersion },
+        after: { legalVersion: version, ...(birthDate && { birthDateGiven: true }) },
+      },
+    } satisfies ActivityRecordedPayload);
     return this.status(userId);
   }
 

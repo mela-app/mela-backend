@@ -66,7 +66,11 @@ describe('CampaignsService', () => {
     },
     pushCampaignOpen: { createMany: jest.fn() },
     announcement: { create: jest.fn(), findMany: jest.fn() },
-    featuredHost: { aggregate: jest.fn(), upsert: jest.fn() },
+    featuredHost: {
+      aggregate: jest.fn(),
+      upsert: jest.fn(),
+      findUnique: jest.fn().mockResolvedValue(null),
+    },
   };
   const pushQueue = { enqueueMany: jest.fn() };
   const events = { emit: jest.fn() };
@@ -111,6 +115,9 @@ describe('CampaignsService', () => {
       campaignId: 'c1',
       actorId: 'staff-1',
       title: 'New feature',
+      changes: expect.objectContaining({
+        after: expect.objectContaining({ title: 'New feature' }),
+      }),
     });
   });
 

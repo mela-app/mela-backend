@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { changesBetween } from '../common/events/audit-changes';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { GuestRequestInitiator, NotificationType, Prisma, StreamVisibility } from '@prisma/client';
 import {
@@ -17,6 +18,7 @@ import {
   StreamStartedPayload,
   UserFollowedPayload,
   ViewerJoinedLivePayload,
+  ActivityRecordedPayload,
 } from '../common/events/domain-events';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RedisService } from '../common/redis/redis.service';
@@ -624,12 +626,22 @@ export class NotificationsService {
   }
 
   async updateSettings(userId: string, dto: UpdateNotificationSettingsDto): Promise<SettingsView> {
+    const before = await this.getSettings(userId);
     const row = await this.prisma.notificationSettings.upsert({
       where: { userId },
       create: { userId, ...DEFAULT_SETTINGS, ...dto },
       update: { ...dto },
     });
-    return settingsView(row);
+    const after = settingsView(row);
+    const changes = changesBetween({ ...before }, { ...after });
+    if (changes) {
+      this.events.emit(DomainEvents.ActivityRecorded, {
+        action: 'account.notification_settings_changed',
+        actorId: userId,
+        changes,
+      } satisfies ActivityRecordedPayload);
+    }
+    return after;
   }
 
   /**

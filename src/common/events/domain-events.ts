@@ -1,3 +1,4 @@
+import type { AuditChanges } from './audit-changes';
 import type {
   AdminPermission,
   AlertScope,
@@ -133,6 +134,9 @@ export const DomainEvents = {
   ScheduledLiveStartingSoon: 'scheduled_live.starting_soon',
   // Someone signed in joined a live as a viewer: their followers may hear (docs/features/notifications.md).
   ViewerJoinedLive: 'stream.viewer_joined',
+  // Something worth keeping in the audit log that nothing else acts on
+  // (docs/features/admin.md, "What's recorded").
+  ActivityRecorded: 'activity.recorded',
 } as const;
 
 export type DomainEventName = (typeof DomainEvents)[keyof typeof DomainEvents];
@@ -171,6 +175,9 @@ export interface StreamEndedPayload {
 export interface StreamLayoutChangedPayload {
   streamId: string;
   layout: StreamLayout;
+  actorId?: string;
+  // What it changed, for the audit log.
+  changes?: AuditChanges;
 }
 
 // Scoped to the one stream a grant was made for (plan §6.9, revised
@@ -187,6 +194,8 @@ export interface ModeratorUpdatedPayload {
   streamId: string;
   userId: string;
   capabilities: ModeratorCapability[];
+  // What it changed, for the audit log.
+  changes?: AuditChanges;
 }
 
 export interface ModeratorRevokedPayload {
@@ -242,6 +251,8 @@ export interface LiveBoardChangedPayload {
   streamId: string;
   actorId: string;
   board: { text: string; x: number; y: number } | null;
+  // What it changed, for the audit log.
+  changes?: AuditChanges;
 }
 
 // Staff paused [userId]'s hosting, because of [streamId]: their live ends,
@@ -270,6 +281,8 @@ export interface HostingRestrictionChangedPayload {
   streamId: string | null;
   actorId: string;
   fields: string[];
+  // What it changed, for the audit log.
+  changes?: AuditChanges;
 }
 
 export interface HostingAppealSentPayload {
@@ -293,6 +306,8 @@ export interface HostingReasonSavedPayload {
   actorId: string;
   title: string;
   change: 'created' | 'updated' | 'archived' | 'restored';
+  // What it changed, for the audit log.
+  changes?: AuditChanges;
 }
 
 export interface StreamStartedPayload {
@@ -367,6 +382,8 @@ export interface GuestRequestAcceptedPayload {
   streamId: string;
   requestId: string;
   userId: string;
+  // Who said yes: the host or a moderator, or the invitee.
+  actorId?: string;
   credentials:
     | {
         provider: typeof VideoProviderKind.AGORA;
@@ -382,6 +399,8 @@ export interface GuestRequestRejectedPayload {
   streamId: string;
   requestId: string;
   userId: string;
+  // Who said no: the host or a moderator, or the invitee.
+  actorId?: string;
 }
 
 // To whichever side did NOT cancel: the host/mods if the VIEWER withdrew
@@ -486,6 +505,8 @@ export interface UserLoggedOutPayload {
 export interface UserProfileUpdatedPayload {
   userId: string;
   fields: string[];
+  // What it changed, for the audit log.
+  changes?: AuditChanges;
 }
 
 export interface UserBlockedPayload {
@@ -523,6 +544,8 @@ export interface CampaignChangedPayload {
   campaignId: string;
   actorId: string;
   title: string;
+  // What it changed, for the audit log.
+  changes?: AuditChanges;
 }
 
 export interface AnnouncementChangedPayload {
@@ -530,6 +553,8 @@ export interface AnnouncementChangedPayload {
   announcementId: string;
   actorId: string;
   title: string;
+  // What it changed, for the audit log.
+  changes?: AuditChanges;
 }
 
 export interface FeaturedHostChangedPayload {
@@ -537,12 +562,16 @@ export interface FeaturedHostChangedPayload {
   // Null: the whole list was reordered.
   userId: string | null;
   actorId: string;
+  // What it changed, for the audit log.
+  changes?: AuditChanges;
 }
 
 export interface UserNoteChangedPayload {
   userId: string;
   noteId: string;
   actorId: string;
+  // What it changed, for the audit log.
+  changes?: AuditChanges;
 }
 
 // Every device of this user is signed out and disconnected.
@@ -553,6 +582,8 @@ export interface UserSessionsRevokedPayload {
 
 export interface AccountCredentialChangedPayload {
   userId: string;
+  // What it changed, for the audit log.
+  changes?: AuditChanges;
 }
 
 export interface AccountPasswordSetPayload extends AccountCredentialChangedPayload {
@@ -627,6 +658,8 @@ export interface VideoProviderSwitchedPayload {
 export interface VideoSettingsChangedPayload {
   actorId: string;
   fields: string[];
+  // What it changed, for the audit log.
+  changes?: AuditChanges;
 }
 
 export interface AppReleaseChangedPayload {
@@ -640,6 +673,8 @@ export interface AppReleaseChangedPayload {
   required: boolean;
   // 'updated' only: which of notes and required changed.
   fields?: string[];
+  // What it changed, for the audit log.
+  changes?: AuditChanges;
 }
 
 export interface BannedPhraseChangedPayload {
@@ -647,6 +682,8 @@ export interface BannedPhraseChangedPayload {
   actorId: string;
   phrase: string;
   severity: BannedPhraseSeverity;
+  // What it changed, for the audit log.
+  changes?: AuditChanges;
 }
 
 // Only emitted when a follow actually existed.
@@ -795,6 +832,23 @@ export interface ScheduledLiveStartingSoonPayload {
 
 // Every join (StreamsService.join), reconnects included - the listener
 // decides whether it's worth telling anyone.
+/**
+ * One entry in the audit log and nothing else: [action] is one of the audit
+ * catalog's actions (src/audit/audit-catalog.ts) - an unknown one is logged
+ * and dropped. The actor's role is worked out as for any entry ([hostId]: a
+ * live's host acts as HOST, anyone else in it as MODERATOR).
+ */
+export interface ActivityRecordedPayload {
+  action: string;
+  actorId: string | null;
+  target?: { type: string; id: string; label?: string | null } | null;
+  streamId?: string | null;
+  hostId?: string;
+  reason?: string | null;
+  metadata?: Record<string, string | number | boolean | null | string[]>;
+  changes?: AuditChanges;
+}
+
 export interface ViewerJoinedLivePayload {
   streamId: string;
   hostId: string;

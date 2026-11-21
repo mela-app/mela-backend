@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { changesBetween } from '../common/events/audit-changes';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StreamGuestStatus, StreamStatus, VideoProviderKind } from '@prisma/client';
 import {
@@ -231,6 +232,7 @@ export class VideoControlService implements OnModuleInit {
     this.events.emit(DomainEvents.VideoSettingsChanged, {
       actorId: staff.id,
       fields,
+      changes: changesBetween(settings, { ...settings, ...input }, fields),
     } satisfies VideoSettingsChangedPayload);
     return this.overview();
   }

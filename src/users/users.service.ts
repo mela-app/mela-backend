@@ -8,6 +8,7 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma, StreamStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { changesBetween } from '../common/events/audit-changes';
 import { DomainEvents, UserProfileUpdatedPayload } from '../common/events/domain-events';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { STORAGE_PROVIDER, StorageProvider } from '../common/storage/storage-provider.interface';
@@ -44,12 +45,23 @@ const NAME_CHANGE_SELECT = {
   displayNameChangedAt: true,
 } as const;
 
+// What the owner can change themselves - as it was, for the audit log.
+const EDITABLE_PROFILE_SELECT = {
+  bio: true,
+  avatarUrl: true,
+  profileVisibility: true,
+  profileSharing: true,
+  shareLiveJoins: true,
+  showActivityStatus: true,
+} as const;
+
 // The owner's own profile: also when each name may change again, and
 // whether followers hear when they join a live.
 const OWN_PROFILE_SELECT = {
   ...PUBLIC_PROFILE_SELECT,
   ...NAME_CHANGE_SELECT,
   shareLiveJoins: true,
+  showActivityStatus: true,
 } as const;
 
 /** Swaps when the names changed for when they may change again (null: now). */
@@ -98,12 +110,14 @@ export class UsersService {
     }
     const isSelf = requesterId === id;
     // Only the owner learns when their names may change again.
-    const { usernameChangedAt, displayNameChangedAt, shareLiveJoins, ...user } = row;
+    const { usernameChangedAt, displayNameChangedAt, shareLiveJoins, showActivityStatus, ...user } =
+      row;
     const ownNameDates = isSelf
       ? (({ usernameChangeableAt, displayNameChangeableAt }) => ({
           usernameChangeableAt,
           displayNameChangeableAt,
           shareLiveJoins,
+          showActivityStatus,
         }))(withNameChangeDates({ usernameChangedAt, displayNameChangedAt }))
       : {};
     const [relationship, liveStream, blockedByOwner] = await Promise.all([
@@ -163,7 +177,7 @@ export class UsersService {
   async updateOwnProfile(id: string, dto: UpdateProfileDto, now = new Date()) {
     const current = await this.prisma.user.findUnique({
       where: { id },
-      select: NAME_CHANGE_SELECT,
+      select: { ...NAME_CHANGE_SELECT, ...EDITABLE_PROFILE_SELECT },
     });
     if (!current) throw new NotFoundException('User not found');
     const { username, displayName, ...rest } = dto;
@@ -204,6 +218,7 @@ export class UsersService {
       this.events.emit(DomainEvents.UserProfileUpdated, {
         userId: id,
         fields,
+        changes: changesBetween(current, updated, fields),
       } satisfies UserProfileUpdatedPayload);
     }
     return withNameChangeDates(updated, now);

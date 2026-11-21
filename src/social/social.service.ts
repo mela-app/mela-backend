@@ -4,12 +4,14 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { changesBetween } from '../common/events/audit-changes';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { UserStatus } from '@prisma/client';
 import {
   DomainEvents,
   UserBlockedPayload,
   UserUnfollowedPayload,
+  ActivityRecordedPayload,
 } from '../common/events/domain-events';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { canViewProfileDetails, ProfileViewer } from './profile-visibility';
@@ -135,12 +137,26 @@ export class SocialService {
       create: { userId, mutedUserId },
       update: {},
     });
+    this.events.emit(DomainEvents.ActivityRecorded, {
+      action: 'social.chat_muted',
+      actorId: userId,
+      target: { type: 'USER', id: mutedUserId },
+    } satisfies ActivityRecordedPayload);
     return { ok: true };
   }
 
   /** Idempotent - unmuting someone you haven't muted is a no-op. */
   async unmuteInChat(userId: string, mutedUserId: string): Promise<{ ok: true }> {
-    await this.prisma.personalChatMute.deleteMany({ where: { userId, mutedUserId } });
+    const { count } = await this.prisma.personalChatMute.deleteMany({
+      where: { userId, mutedUserId },
+    });
+    if (count > 0) {
+      this.events.emit(DomainEvents.ActivityRecorded, {
+        action: 'social.chat_unmuted',
+        actorId: userId,
+        target: { type: 'USER', id: mutedUserId },
+      } satisfies ActivityRecordedPayload);
+    }
     return { ok: true };
   }
 
@@ -212,11 +228,24 @@ export class SocialService {
     followeeId: string,
     notifyOnLive: boolean,
   ): Promise<{ ok: true }> {
+    const before = await this.prisma.follow.findFirst({
+      where: { followerId, followeeId },
+      select: { notifyOnLive: true },
+    });
     const result = await this.prisma.follow.updateMany({
       where: { followerId, followeeId },
       data: { notifyOnLive },
     });
     if (result.count === 0) throw new NotFoundException('Not following this user');
+    const changes = changesBetween(before, { notifyOnLive }, ['notifyOnLive']);
+    if (changes) {
+      this.events.emit(DomainEvents.ActivityRecorded, {
+        action: 'social.live_alerts_changed',
+        actorId: followerId,
+        target: { type: 'USER', id: followeeId },
+        changes,
+      } satisfies ActivityRecordedPayload);
+    }
     return { ok: true };
   }
 

@@ -10,6 +10,7 @@ describe('ModeratorsService', () => {
     user: { findUnique: jest.fn() },
     moderator: {
       findUnique: jest.fn(),
+      findFirst: jest.fn().mockResolvedValue(null),
       findMany: jest.fn(),
       upsert: jest.fn(),
       updateMany: jest.fn(),

@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { AuditChanges, changesBetween, created } from '../common/events/audit-changes';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DomainEvents, HostingReasonSavedPayload } from '../common/events/domain-events';
 import { PrismaService } from '../common/prisma/prisma.service';
@@ -41,7 +42,7 @@ export class HostingReasonsService {
       data: { title: input.title, message: input.message, createdById: staff.id },
       select: { id: true, title: true },
     });
-    this.saved(staff, row, 'created');
+    this.saved(staff, row, 'created', created({ title: input.title, message: input.message }));
     return this.one(row.id);
   }
 
@@ -52,19 +53,19 @@ export class HostingReasonsService {
   ) {
     const before = await this.prisma.hostingRestrictionReason.findUnique({
       where: { id },
-      select: { archived: true },
+      select: { archived: true, title: true, message: true },
     });
     if (!before) throw new NotFoundException('Reason not found');
     const row = await this.prisma.hostingRestrictionReason.update({
       where: { id },
       data: { title: input.title, message: input.message, archived: input.archived },
-      select: { id: true, title: true, archived: true },
+      select: { id: true, title: true, message: true, archived: true },
     });
     let change: HostingReasonSavedPayload['change'] = 'updated';
     if (input.archived !== undefined && input.archived !== before.archived) {
       change = row.archived ? 'archived' : 'restored';
     }
-    this.saved(staff, row, change);
+    this.saved(staff, row, change, changesBetween(before, row, ['title', 'message', 'archived']));
     return this.one(id);
   }
 
@@ -80,12 +81,14 @@ export class HostingReasonsService {
     staff: StaffActor,
     row: { id: string; title: string },
     change: HostingReasonSavedPayload['change'],
+    changes?: AuditChanges,
   ) {
     this.events.emit(DomainEvents.HostingReasonSaved, {
       reasonId: row.id,
       actorId: staff.id,
       title: row.title,
       change,
+      changes,
     } satisfies HostingReasonSavedPayload);
   }
 }

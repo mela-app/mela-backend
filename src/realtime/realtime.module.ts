@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { ChatModule } from '../chat/chat.module';
+import { DirectMessagesModule } from '../direct-messages/direct-messages.module';
 import { PresenceModule } from '../common/presence/presence.module';
 import { ModeratorsModule } from '../moderators/moderators.module';
 import { RecordingPermissionsModule } from '../recording-permissions/recording-permissions.module';
@@ -28,6 +29,8 @@ import { RealtimeGateway } from './realtime.gateway';
     ModeratorsModule,
     RecordingPermissionsModule,
     SocialModule,
+    // Online, last seen and typing in private messages.
+    DirectMessagesModule,
   ],
   providers: [RealtimeGateway],
   // The admin console's alerts reach rooms through it; everything else

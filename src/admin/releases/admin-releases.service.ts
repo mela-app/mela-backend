@@ -9,6 +9,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AppPlatform, Prisma } from '@prisma/client';
 import { compareVersions } from '../../app-releases/app-release.rules';
 import { storeLink } from '../../app-releases/store-link';
+import { AuditChanges, changesBetween, created, removed } from '../../common/events/audit-changes';
 import { AppReleaseChangedPayload, DomainEvents } from '../../common/events/domain-events';
 import { PageQueryDto, pageArgs, toPage } from '../../common/pagination/page-query.dto';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -27,6 +28,16 @@ const RELEASE_SELECT = {
   updatedAt: true,
   publishedBy: { select: { id: true, username: true, displayName: true, avatarUrl: true } },
 } satisfies Prisma.AppReleaseSelect;
+
+// What the audit log keeps of a release.
+const RELEASE_FIELDS = [
+  'platform',
+  'version',
+  'build',
+  'notes',
+  'downloadUrl',
+  'required',
+] as const;
 
 type ReleaseView = Prisma.AppReleaseGetPayload<{ select: typeof RELEASE_SELECT }>;
 
@@ -88,7 +99,7 @@ export class AdminReleasesService {
       },
       select: RELEASE_SELECT,
     });
-    this.announce('published', admin, release);
+    this.announce('published', admin, release, undefined, created(release, RELEASE_FIELDS));
     return release;
   }
 
@@ -107,7 +118,7 @@ export class AdminReleasesService {
       data,
       select: RELEASE_SELECT,
     });
-    this.announce('updated', admin, updated, fields);
+    this.announce('updated', admin, updated, fields, changesBetween(release, updated, fields));
     return updated;
   }
 
@@ -116,7 +127,7 @@ export class AdminReleasesService {
     const release = await this.find(releaseId);
     const { count } = await this.prisma.appRelease.deleteMany({ where: { id: releaseId } });
     if (count === 0) throw new NotFoundException('Release not found');
-    this.announce('withdrawn', admin, release);
+    this.announce('withdrawn', admin, release, undefined, removed(release, RELEASE_FIELDS));
     return { ok: true };
   }
 
@@ -162,6 +173,7 @@ export class AdminReleasesService {
     admin: AdminPrincipal,
     release: ReleaseView,
     fields?: string[],
+    changes?: AuditChanges,
   ) {
     this.events.emit(DomainEvents.AppReleaseChanged, {
       change,
@@ -172,6 +184,7 @@ export class AdminReleasesService {
       build: release.build,
       required: release.required,
       ...(fields ? { fields } : {}),
+      changes,
     } satisfies AppReleaseChangedPayload);
   }
 }

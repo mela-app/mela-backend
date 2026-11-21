@@ -79,6 +79,7 @@ describe('LiveBoardService', () => {
       streamId: STREAM,
       actorId: HOST,
       board: { text: 'Bingo at 8', x: 0.5, y: 0.3 },
+      changes: expect.objectContaining({ after: expect.objectContaining({ text: 'Bingo at 8' }) }),
     });
   });
 

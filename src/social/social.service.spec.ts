@@ -13,6 +13,7 @@ describe('SocialService', () => {
       count: jest.fn(),
       findMany: jest.fn(),
       findUnique: jest.fn(),
+      findFirst: jest.fn().mockResolvedValue(null),
     },
     block: {
       upsert: jest.fn(),

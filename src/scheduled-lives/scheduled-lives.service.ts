@@ -5,12 +5,14 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { created } from '../common/events/audit-changes';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { Prisma, StreamVisibility } from '@prisma/client';
 import {
   DomainEvents,
   HostingRestrictedPayload,
   ScheduledLiveStartingSoonPayload,
+  ActivityRecordedPayload,
 } from '../common/events/domain-events';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { HostingRestrictionsService } from '../hosting-restrictions/hosting-restrictions.service';
@@ -97,6 +99,12 @@ export class ScheduledLivesService {
       },
       select: SCHEDULED_SELECT,
     });
+    this.events.emit(DomainEvents.ActivityRecorded, {
+      action: 'stream.scheduled',
+      actorId: hostId,
+      target: { type: 'SCHEDULED_LIVE', id: row.id, label: row.title },
+      changes: created(row, ['title', 'category', 'visibility', 'startsAt']),
+    } satisfies ActivityRecordedPayload);
     return view(row, false);
   }
 
@@ -162,6 +170,11 @@ export class ScheduledLivesService {
       data: { cancelledAt: new Date() },
     });
     if (count === 0) throw new NotFoundException('That scheduled live is not coming up');
+    this.events.emit(DomainEvents.ActivityRecorded, {
+      action: 'stream.schedule_cancelled',
+      actorId: hostId,
+      target: { type: 'SCHEDULED_LIVE', id },
+    } satisfies ActivityRecordedPayload);
     return { ok: true };
   }
 
@@ -192,6 +205,11 @@ export class ScheduledLivesService {
     const reminderCount = await this.prisma.scheduledLiveReminder.count({
       where: { scheduledLiveId: id },
     });
+    this.events.emit(DomainEvents.ActivityRecorded, {
+      action: on ? 'stream.reminder_set' : 'stream.reminder_removed',
+      actorId: userId,
+      target: { type: 'SCHEDULED_LIVE', id, label: row.title },
+    } satisfies ActivityRecordedPayload);
     return { reminded: on, reminderCount };
   }
 

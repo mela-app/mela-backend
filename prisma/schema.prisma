@@ -107,6 +107,11 @@ model User {
   profileSharing         ProfileSharing    @default(EVERYONE)
   // Followers hear when this person joins someone's live (FOLLOWING_JOINED_LIVE).
   shareLiveJoins         Boolean           @default(true)
+  // Online / last seen in private messages (docs/features/messages.md). Off
+  // hides this person's - and, as on WhatsApp, shows them nobody else's.
+  showActivityStatus     Boolean           @default(true)
+  // When the app was last open on any of this person's devices; null: not since this was added.
+  lastSeenAt             DateTime?
   // When the owner last changed them: a username once in 30 days, a display
   // name once in 7 (docs/features/users.md). Staff fixes don't count.
   usernameChangedAt      DateTime?
@@ -787,6 +792,11 @@ model AuditLog {
   streamId    String?
   reason      String?
   metadata    Json?
+  // What the action changed (docs/features/admin.md, "Before and after"):
+  // the fields that differ on each side; only after for something created,
+  // only before for something removed.
+  before      Json?
+  after       Json?
   ip          String?
   userAgent   String?
   createdAt   DateTime       @default(now())

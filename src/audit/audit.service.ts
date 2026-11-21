@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { AuditActorRole, PlatformRole, Prisma } from '@prisma/client';
 import { toPage, pageArgs } from '../common/pagination/page-query.dto';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { AuditChanges, AuditSnapshot } from '../common/events/audit-changes';
 import { RequestContext, RequestContextStore } from '../common/request-context/request-context';
 import {
   AUDIT_ACTIONS,
@@ -23,11 +24,28 @@ export interface AuditEntry {
   streamId?: string | null;
   reason?: string | null;
   metadata?: Prisma.InputJsonObject;
+  // What it changed: the fields that differ on each side (see AuditChanges).
+  before?: AuditSnapshot;
+  after?: AuditSnapshot;
   // Captured when the event fired, if the write happens later.
   context?: RequestContextStore;
 }
 
+/** [changes] as an entry's before / after - nothing when there are none. */
+export function changesEntry(
+  changes: AuditChanges | null | undefined,
+): Pick<AuditEntry, 'before' | 'after'> {
+  if (!changes) return {};
+  return {
+    ...(changes.before && Object.keys(changes.before).length > 0 && { before: changes.before }),
+    ...(changes.after && Object.keys(changes.after).length > 0 && { after: changes.after }),
+  };
+}
+
 const EXPORT_LIMIT = 10_000;
+// Never kept, whatever an event carries.
+const SECRET_FIELD = /password|secret|token|hash|credential/i;
+const MAX_TEXT = 2000;
 
 const ACTOR_ROLE_LABELS: Record<AuditActorRole, string> = {
   SUPER_ADMIN: 'Super admin',
@@ -71,6 +89,8 @@ export class AuditService {
           streamId: entry.streamId ?? null,
           reason: truncate(entry.reason, 500),
           metadata: entry.metadata,
+          before: keepable(entry.before),
+          after: keepable(entry.after),
           ip: context?.ip ?? null,
           userAgent: context?.userAgent ?? null,
         },
@@ -115,6 +135,8 @@ export class AuditService {
       'IP',
       'User agent',
       'Details',
+      'Before',
+      'After',
     ];
     const lines = rows.map((row) => {
       const view = toView(row);
@@ -133,6 +155,8 @@ export class AuditService {
         row.ip,
         row.userAgent,
         row.metadata ? JSON.stringify(row.metadata) : '',
+        row.before ? JSON.stringify(row.before) : '',
+        row.after ? JSON.stringify(row.after) : '',
       ].map(csvCell);
     });
     return [header.map(csvCell), ...lines].map((cells) => cells.join(',')).join('\r\n');
@@ -221,6 +245,23 @@ function resolveActorRole(
   if (entry.hostId)
     return entry.actorId === entry.hostId ? AuditActorRole.HOST : AuditActorRole.MODERATOR;
   return AuditActorRole.USER;
+}
+
+// Secrets left out and long text cut, so an entry stays small and safe to show.
+function keepable(snapshot: AuditSnapshot | undefined): Prisma.InputJsonObject | undefined {
+  if (!snapshot || Object.keys(snapshot).length === 0) return undefined;
+  return Object.fromEntries(
+    Object.entries(snapshot).map(([key, value]) => [
+      key,
+      SECRET_FIELD.test(key) ? '[hidden]' : trimValue(value),
+    ]),
+  ) as Prisma.InputJsonObject;
+}
+
+function trimValue(value: AuditSnapshot[string]): AuditSnapshot[string] {
+  if (typeof value === 'string') return truncate(value, MAX_TEXT);
+  if (Array.isArray(value)) return value.slice(0, 200) as Prisma.InputJsonArray;
+  return value;
 }
 
 function truncate(value: string | null | undefined, max: number): string | null {

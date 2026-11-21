@@ -52,4 +52,9 @@ export class UpdateProfileDto {
   @IsOptional()
   @IsBoolean()
   shareLiveJoins?: boolean;
+
+  // Whether people you message see when you're online or were last seen.
+  @IsOptional()
+  @IsBoolean()
+  showActivityStatus?: boolean;
 }

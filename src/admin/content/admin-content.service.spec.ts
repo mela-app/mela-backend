@@ -198,6 +198,7 @@ describe('AdminContentService', () => {
         actorId: 'admin-1',
         phrase: 'scam link',
         severity: BannedPhraseSeverity.REJECT,
+        changes: { after: { phrase: 'scam link', severity: BannedPhraseSeverity.REJECT } },
       });
     });
 
