@@ -9,7 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BannedPhraseSeverity, ModeratorCapability, StreamStatus } from '@prisma/client';
 import { BannedPhrasesService } from '../chat/banned-phrases.service';
-import { hasDisallowedLink, parseLinkDomains } from '../chat/link-policy';
+import { AllowedLinks, allowedLinksFrom, hasDisallowedLink } from '../chat/link-policy';
 import { DomainEvents, LiveBoardChangedPayload } from '../common/events/domain-events';
 import { PermissionsService } from '../common/permissions/permissions.service';
 import { PrismaService } from '../common/prisma/prisma.service';
@@ -49,7 +49,7 @@ export function boardOf(stream: {
  */
 @Injectable()
 export class LiveBoardService {
-  private readonly linkDomains: string[];
+  private readonly linkDomains: AllowedLinks;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -59,7 +59,7 @@ export class LiveBoardService {
     private readonly events: EventEmitter2,
     config: ConfigService,
   ) {
-    this.linkDomains = parseLinkDomains(config.get<string>('CHAT_LINK_DOMAINS'));
+    this.linkDomains = allowedLinksFrom((key) => config.get<string>(key));
   }
 
   /** Writes, edits or moves the board - [input.text] left out moves the one there. */

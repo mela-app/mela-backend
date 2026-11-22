@@ -21,7 +21,7 @@ import { BannedPhrasesService } from './banned-phrases.service';
 import { ChatImageType, chatImageKey, chatPreviewText, isChatImageKey } from './chat-images';
 import { ChatTextError, cleanChatText } from './chat-text';
 import { ChatHistoryQueryDto } from './dto/chat-history.dto';
-import { hasDisallowedLink, parseLinkDomains } from './link-policy';
+import { AllowedLinks, allowedLinksFrom, hasDisallowedLink } from './link-policy';
 import {
   ChatMention,
   MentionLookup,
@@ -82,7 +82,7 @@ export type ChatPinResult = { ok: true } | { ok: false; error: 'NOT_FOUND' | 'NO
 /** Live chat: the send pipeline and history. See docs/features/chat.md. */
 @Injectable()
 export class ChatService {
-  private readonly linkDomains: string[];
+  private readonly linkDomains: AllowedLinks;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -97,7 +97,7 @@ export class ChatService {
     config: ConfigService,
     @Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider,
   ) {
-    this.linkDomains = parseLinkDomains(config.get<string>('CHAT_LINK_DOMAINS'));
+    this.linkDomains = allowedLinksFrom((key) => config.get<string>(key));
   }
 
   /**
