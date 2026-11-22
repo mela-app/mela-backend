@@ -15,6 +15,7 @@ import {
 } from '../common/events/domain-events';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { canViewProfileDetails, ProfileViewer } from './profile-visibility';
+import { mayFollow, STAFF_FOLLOW_REFUSAL } from './staff-accounts';
 
 const PROFILE_SUMMARY_SELECT = {
   id: true,
@@ -37,14 +38,22 @@ export class SocialService {
     private readonly events: EventEmitter2,
   ) {}
 
-  /** Idempotent - following someone you already follow just succeeds again. */
+  /**
+   * Idempotent - following someone you already follow just succeeds again.
+   * App users can't follow Mela's staff accounts (staff-accounts.ts).
+   */
   async follow(followerId: string, followeeId: string): Promise<{ ok: true }> {
     if (followerId === followeeId) throw new BadRequestException("You can't follow yourself");
-    const followee = await this.prisma.user.findUnique({
-      where: { id: followeeId },
-      select: { id: true },
+    const people = await this.prisma.user.findMany({
+      where: { id: { in: [followerId, followeeId] } },
+      select: { id: true, platformRole: true },
     });
+    const followee = people.find((person) => person.id === followeeId);
     if (!followee) throw new NotFoundException('User not found');
+    const follower = people.find((person) => person.id === followerId);
+    if (!mayFollow(follower?.platformRole ?? null, followee.platformRole)) {
+      throw new ForbiddenException(STAFF_FOLLOW_REFUSAL);
+    }
     if (await this.isBlockedEitherWay(followerId, followeeId)) {
       throw new ForbiddenException("You can't follow this user");
     }
@@ -250,6 +259,20 @@ export class SocialService {
   }
 
   /** Counts + this viewer's relationship to `profileId` - one query either way. */
+  /** Whether [requesterId] (signed out: undefined) may follow [profileId] - never themselves, nor staff as an app user. */
+  async canFollow(profileId: string, requesterId?: string): Promise<boolean> {
+    if (requesterId === profileId) return false;
+    const people = await this.prisma.user.findMany({
+      where: { id: { in: requesterId ? [profileId, requesterId] : [profileId] } },
+      select: { id: true, platformRole: true },
+    });
+    const profile = people.find((person) => person.id === profileId);
+    const requester = people.find((person) => person.id === requesterId);
+    return (
+      profile !== undefined && mayFollow(requester?.platformRole ?? null, profile.platformRole)
+    );
+  }
+
   async getRelationshipSummary(profileId: string, requesterId?: string) {
     const hasRequester = Boolean(requesterId && requesterId !== profileId);
     const [followerCount, followingCount, relation, isBlocked, isMutedInChat] = await Promise.all([

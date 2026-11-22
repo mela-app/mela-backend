@@ -120,7 +120,7 @@ export class UsersService {
           showActivityStatus,
         }))(withNameChangeDates({ usernameChangedAt, displayNameChangedAt }))
       : {};
-    const [relationship, liveStream, blockedByOwner] = await Promise.all([
+    const [relationship, liveStream, blockedByOwner, canFollow] = await Promise.all([
       this.social.getRelationshipSummary(id, requesterId),
       this.prisma.stream.findFirst({
         where: { hostId: id, status: StreamStatus.LIVE },
@@ -129,6 +129,8 @@ export class UsersService {
       requesterId && !isSelf
         ? this.social.isBlockedByViewer(id, requesterId)
         : Promise.resolve(false),
+      // Staff accounts aren't followed by app users: the app shows no Follow, bell or Message.
+      this.social.canFollow(id, requesterId),
     ]);
     if (blockedByOwner) {
       throw new NotFoundException('User not found');
@@ -153,6 +155,7 @@ export class UsersService {
       followerCount: canViewProfile ? followerCount : null,
       followingCount: canViewProfile ? followingCount : null,
       ...relation,
+      canFollow,
       // Someone this viewer blocked can't be watched either, nor a followers'
       // or friends' live by anyone else (docs/features/streams.md).
       liveStreamId:

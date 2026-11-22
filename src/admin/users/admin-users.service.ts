@@ -359,10 +359,21 @@ export class AdminUsersService {
     if (target.platformRole === PlatformRole.SUPER_ADMIN)
       await this.assertAnotherSuperAdmin(target.id);
 
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { platformRole: role, adminPermissions: granted },
-    });
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: userId },
+        data: { platformRole: role, adminPermissions: granted },
+      }),
+      // Made staff: app users can't follow staff (social/staff-accounts.ts),
+      // so their follows go - and with them live alerts and messaging.
+      ...(target.platformRole === PlatformRole.USER && role !== PlatformRole.USER
+        ? [
+            this.prisma.follow.deleteMany({
+              where: { followeeId: userId, follower: { platformRole: PlatformRole.USER } },
+            }),
+          ]
+        : []),
+    ]);
     this.events.emit(DomainEvents.UserRoleChanged, {
       userId,
       actorId: admin.id,
