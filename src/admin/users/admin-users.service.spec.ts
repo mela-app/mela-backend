@@ -25,6 +25,8 @@ describe('AdminUsersService', () => {
       create: jest.fn(),
     },
     stream: { findFirst: jest.fn() },
+    follow: { deleteMany: jest.fn() },
+    $transaction: jest.fn((ops: unknown[]) => Promise.all(ops)),
     reportCase: { groupBy: jest.fn() },
     report: { count: jest.fn() },
     hostingRestriction: { count: jest.fn() },
@@ -196,6 +198,10 @@ describe('AdminUsersService', () => {
         to: PlatformRole.PLATFORM_MODERATOR,
         permissions: granted,
       });
+      // App users can't follow staff: their follows of the new moderator go.
+      expect(prisma.follow.deleteMany).toHaveBeenCalledWith({
+        where: { followeeId: 'u1', follower: { platformRole: PlatformRole.USER } },
+      });
     });
 
     it('needs to know what a new platform moderator may do', async () => {
@@ -224,6 +230,7 @@ describe('AdminUsersService', () => {
         from: PlatformRole.PLATFORM_MODERATOR,
         to: PlatformRole.USER,
       });
+      expect(prisma.follow.deleteMany).not.toHaveBeenCalled();
     });
 
     it("won't change your own role or demote the last super admin", async () => {

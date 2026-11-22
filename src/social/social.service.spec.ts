@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ProfileVisibility, UserStatus } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { PlatformRole } from '@prisma/client';
 import { SocialService } from './social.service';
 
 describe('SocialService', () => {
@@ -42,13 +43,45 @@ describe('SocialService', () => {
       expect(prisma.follow.upsert).not.toHaveBeenCalled();
     });
 
+    const people = (followee: PlatformRole, follower: PlatformRole = PlatformRole.USER) => [
+      { id: 'u1', platformRole: follower },
+      { id: 'u2', platformRole: followee },
+    ];
+
     it("404s when the followee doesn't exist", async () => {
-      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.user.findMany.mockResolvedValue([{ id: 'u1', platformRole: PlatformRole.USER }]);
       await expect(service().follow('u1', 'ghost')).rejects.toThrow(NotFoundException);
     });
 
+    it('refuses an app user following a staff account - so no live alerts or messages either', async () => {
+      for (const role of [PlatformRole.PLATFORM_MODERATOR, PlatformRole.SUPER_ADMIN]) {
+        prisma.user.findMany.mockResolvedValue(people(role));
+        await expect(service().follow('u1', 'u2')).rejects.toMatchObject({
+          response: { code: 'STAFF_ACCOUNT' },
+        });
+      }
+      expect(prisma.follow.upsert).not.toHaveBeenCalled();
+    });
+
+    it('lets staff follow app users, and each other', async () => {
+      prisma.user.findMany.mockResolvedValue(people(PlatformRole.USER, PlatformRole.SUPER_ADMIN));
+      await expect(service().follow('u1', 'u2')).resolves.toEqual({ ok: true });
+      prisma.user.findMany.mockResolvedValue(
+        people(PlatformRole.SUPER_ADMIN, PlatformRole.PLATFORM_MODERATOR),
+      );
+      await expect(service().follow('u1', 'u2')).resolves.toEqual({ ok: true });
+    });
+
+    it('tells a profile whether it can be followed', async () => {
+      prisma.user.findMany.mockResolvedValue(people(PlatformRole.SUPER_ADMIN));
+      await expect(service().canFollow('u2', 'u1')).resolves.toBe(false);
+      prisma.user.findMany.mockResolvedValue(people(PlatformRole.USER));
+      await expect(service().canFollow('u2', 'u1')).resolves.toBe(true);
+      await expect(service().canFollow('u1', 'u1')).resolves.toBe(false);
+    });
+
     it('upserts (idempotent) and emits user.followed', async () => {
-      prisma.user.findUnique.mockResolvedValue({ id: 'u2' });
+      prisma.user.findMany.mockResolvedValue(people(PlatformRole.USER));
 
       await expect(service().follow('u1', 'u2')).resolves.toEqual({ ok: true });
 
@@ -64,7 +97,7 @@ describe('SocialService', () => {
     });
 
     it('refuses to follow someone blocked either way', async () => {
-      prisma.user.findUnique.mockResolvedValue({ id: 'u2' });
+      prisma.user.findMany.mockResolvedValue(people(PlatformRole.USER));
       prisma.block.findFirst.mockResolvedValueOnce({ id: 'b1' });
 
       await expect(service().follow('u1', 'u2')).rejects.toThrow(ForbiddenException);

@@ -11,7 +11,11 @@ describe('UsersService', () => {
     user: { findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
     stream: { findFirst: jest.fn() },
   };
-  const social = { getRelationshipSummary: jest.fn(), isBlockedByViewer: jest.fn() };
+  const social = {
+    getRelationshipSummary: jest.fn(),
+    isBlockedByViewer: jest.fn(),
+    canFollow: jest.fn(),
+  };
   const storage = { createUploadUrl: jest.fn() };
   const events = { emit: jest.fn() };
 
@@ -45,6 +49,7 @@ describe('UsersService', () => {
     jest.clearAllMocks();
     social.getRelationshipSummary.mockResolvedValue(relationship);
     social.isBlockedByViewer.mockResolvedValue(false);
+    social.canFollow.mockResolvedValue(true);
     prisma.stream.findFirst.mockResolvedValue(null);
   });
 
@@ -70,8 +75,19 @@ describe('UsersService', () => {
         profileSharing: null,
         canViewProfile: true,
         canShare: true,
+        canFollow: true,
         liveStreamId: null,
       });
+    });
+
+    it("says a staff account can't be followed", async () => {
+      prisma.user.findUnique.mockResolvedValue(profileRow);
+      social.canFollow.mockResolvedValue(false);
+
+      await expect(service().findPublicProfile('u1', 'viewer-1')).resolves.toMatchObject({
+        canFollow: false,
+      });
+      expect(social.canFollow).toHaveBeenCalledWith('u1', 'viewer-1');
     });
 
     describe('profile sharing', () => {

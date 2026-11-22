@@ -13,7 +13,7 @@ import { Prisma } from '@prisma/client';
 import { BannedPhrasesService } from '../chat/banned-phrases.service';
 import { ChatImageType } from '../chat/chat-images';
 import { ChatTextError, cleanChatText } from '../chat/chat-text';
-import { hasDisallowedLink, parseLinkDomains } from '../chat/link-policy';
+import { AllowedLinks, allowedLinksFrom, hasDisallowedLink } from '../chat/link-policy';
 import {
   DirectMessageDeletedPayload,
   DirectMessageEditedPayload,
@@ -102,7 +102,7 @@ export interface ConversationHistory {
  */
 @Injectable()
 export class DirectMessagesService {
-  private readonly linkDomains: string[];
+  private readonly linkDomains: AllowedLinks;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -113,7 +113,7 @@ export class DirectMessagesService {
     config: ConfigService,
     @Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider,
   ) {
-    this.linkDomains = parseLinkDomains(config.get<string>('CHAT_LINK_DOMAINS'));
+    this.linkDomains = allowedLinksFrom((key) => config.get<string>(key));
   }
 
   /**
