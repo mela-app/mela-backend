@@ -178,6 +178,8 @@ model User {
   featuredAsHost        FeaturedHost?               @relation("FeaturedHost")
   featuredHostsAdded    FeaturedHost[]              @relation("FeaturedHostAddedBy")
 
+  appCrashes AppCrash[]
+
   @@map("users")
 }
 
@@ -1314,3 +1316,45 @@ model FeaturedHost {
   @@index([position])
   @@map("featured_hosts")
 }
+
+// What went wrong on a phone (docs/features/app-crashes.md): Dart errors the
+// app caught, and - reported on the next launch - the app closing on its own:
+// a Java or native crash, a freeze (ANR) or Android killing it for memory.
+enum AppCrashKind {
+  DART_ERROR
+  JAVA_CRASH
+  NATIVE_CRASH
+  ANR
+  LOW_MEMORY
+  KILLED
+  OTHER
+}
+
+model AppCrash {
+  id          String       @id @default(uuid(7)) @db.Uuid
+  // Signed in when it was reported; null for signed out, or once their account is gone.
+  userId      String?
+  kind        AppCrashKind
+  // Closed the app - a crash, freeze or kill; false for an error the app lived through.
+  fatal       Boolean
+  // The same crash on every phone: kind, message and top of the stack, numbers and addresses left out.
+  signature   String
+  message     String
+  stack       String?
+  // What the person did just before - the screens and live steps the app noted.
+  breadcrumbs String[]
+  platform    String?
+  appVersion  String?
+  appBuild    Int?
+  deviceModel String?
+  osVersion   String?
+  occurredAt  DateTime
+  createdAt   DateTime     @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([signature, occurredAt])
+  @@index([occurredAt])
+  @@map("app_crashes")
+}
+

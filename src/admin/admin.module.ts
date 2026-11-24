@@ -32,6 +32,8 @@ import { AdminMessagesController } from './messages/admin-messages.controller';
 import { AdminMessagesService } from './messages/admin-messages.service';
 import { AdminOverviewController } from './overview/admin-overview.controller';
 import { AdminOverviewService } from './overview/admin-overview.service';
+import { AdminCrashesController } from './crashes/admin-crashes.controller';
+import { AdminCrashesService } from './crashes/admin-crashes.service';
 import { AdminReleasesController } from './releases/admin-releases.controller';
 import { AdminReleasesService } from './releases/admin-releases.service';
 import { AdminReportsController } from './reports/admin-reports.controller';
@@ -81,6 +83,7 @@ import { AdminAnalyticsService } from './analytics/admin-analytics.service';
     AdminMessagesController,
     AdminChatController,
     AdminReleasesController,
+    AdminCrashesController,
     AdminDataController,
     AdminReportsController,
     AdminHostingReasonsController,
@@ -100,6 +103,7 @@ import { AdminAnalyticsService } from './analytics/admin-analytics.service';
     AdminMessagesService,
     AdminChatService,
     AdminReleasesService,
+    AdminCrashesService,
     AdminDataService,
     AdminReportsService,
   ],

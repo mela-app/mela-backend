@@ -35,6 +35,7 @@ export const DATA_SET_KEYS = [
   'auditLog',
   'bannedPhrases',
   'appUpdates',
+  'appCrashes',
 ] as const;
 export type DataSetKey = (typeof DATA_SET_KEYS)[number];
 
@@ -500,6 +501,17 @@ export class AdminDataService {
         ageFilter: null,
         count: () => prisma.appRelease.count(),
         clear: async () => removed(await prisma.appRelease.deleteMany()),
+      },
+      {
+        key: 'appCrashes',
+        group: 'console',
+        label: 'Crash reports',
+        description: 'What went wrong in the app on phones - the Crashes page.',
+        tables: ['app_crashes'],
+        ageFilter: 'created',
+        count: () => prisma.appCrash.count(),
+        clear: async (before) =>
+          removed(await prisma.appCrash.deleteMany({ where: olderThan(before) })),
       },
     ];
   }

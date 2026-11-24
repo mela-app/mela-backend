@@ -42,6 +42,7 @@ describe('AdminDataService', () => {
     auditLog: delegate(),
     bannedPhrase: delegate(),
     appRelease: delegate(),
+    appCrash: delegate(),
     $transaction: jest.fn(),
   };
   const tx = {
