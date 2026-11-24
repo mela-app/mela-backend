@@ -26,6 +26,7 @@ import { GuestsModule } from './guests/guests.module';
 import { AuditModule } from './audit/audit.module';
 import { AdminModule } from './admin/admin.module';
 import { DirectMessagesModule } from './direct-messages/direct-messages.module';
+import { AppCrashesModule } from './app-crashes/app-crashes.module';
 import { AppReleasesModule } from './app-releases/app-releases.module';
 import { HostingRestrictionsModule } from './hosting-restrictions/hosting-restrictions.module';
 import { VideoControlModule } from './video-control/video-control.module';
@@ -74,6 +75,7 @@ import { HealthController } from './health.controller';
     AdminModule,
     DirectMessagesModule,
     AppReleasesModule,
+    AppCrashesModule,
     ReportsModule,
     LegalModule,
     HostingRestrictionsModule,

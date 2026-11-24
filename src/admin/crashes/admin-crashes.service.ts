@@ -1,0 +1,137 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { AppCrashKind, Prisma } from '@prisma/client';
+import { PrismaService } from '../../common/prisma/prisma.service';
+import { pageArgs, toPage } from '../../common/pagination/page-query.dto';
+import { CrashGroupsQueryDto, CrashReportsQueryDto } from './admin-crashes.dto';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** One crash as it happens on many phones: the latest report's words, and how far it reaches. */
+export interface CrashGroup {
+  signature: string;
+  kind: AppCrashKind;
+  fatal: boolean;
+  message: string;
+  count: number;
+  // Signed-in people it happened to; signed-out reports aren't counted here.
+  users: number;
+  firstSeen: Date;
+  lastSeen: Date;
+  versions: string[];
+  devices: string[];
+}
+
+export interface DayCount {
+  day: string;
+  fatal: number;
+  errors: number;
+}
+
+/**
+ * The console's Crashes page (docs/features/app-crashes.md): what's going
+ * wrong in the app, grouped so the most common crash comes first, with each
+ * report's stack, phone and the steps that led to it.
+ */
+@Injectable()
+export class AdminCrashesService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async groups(query: CrashGroupsQueryDto, now: Date = new Date()) {
+    const since = new Date(now.getTime() - query.days * DAY_MS);
+    const where = Prisma.sql`WHERE "occurredAt" >= ${since}
+      ${query.kind ? Prisma.sql`AND kind = ${query.kind}::"AppCrashKind"` : Prisma.empty}
+      ${query.appVersion ? Prisma.sql`AND "appVersion" = ${query.appVersion}` : Prisma.empty}
+      ${query.fatal ? Prisma.sql`AND fatal = true` : Prisma.empty}`;
+    const { skip, take } = pageArgs(query);
+    const [rows, totals, days, versions] = await Promise.all([
+      this.prisma.$queryRaw<CrashGroup[]>`
+        SELECT signature,
+          count(*)::int AS count,
+          count(DISTINCT "userId")::int AS users,
+          min("occurredAt") AS "firstSeen",
+          max("occurredAt") AS "lastSeen",
+          (array_agg(kind ORDER BY "occurredAt" DESC))[1] AS kind,
+          (array_agg(fatal ORDER BY "occurredAt" DESC))[1] AS fatal,
+          (array_agg(message ORDER BY "occurredAt" DESC))[1] AS message,
+          coalesce(array_agg(DISTINCT "appVersion") FILTER (WHERE "appVersion" IS NOT NULL), '{}') AS versions,
+          coalesce((array_agg(DISTINCT "deviceModel") FILTER (WHERE "deviceModel" IS NOT NULL))[1:5], '{}') AS devices
+        FROM app_crashes ${where}
+        GROUP BY signature
+        ORDER BY count DESC, max("occurredAt") DESC
+        LIMIT ${take} OFFSET ${skip}`,
+      this.prisma.$queryRaw<
+        Array<{ groups: number; reports: number; fatal: number; users: number }>
+      >`
+        SELECT count(DISTINCT signature)::int AS groups, count(*)::int AS reports,
+          count(*) FILTER (WHERE fatal)::int AS fatal, count(DISTINCT "userId")::int AS users
+        FROM app_crashes ${where}`,
+      this.days(since, now),
+      this.prisma.appCrash.findMany({
+        where: { occurredAt: { gte: since }, appVersion: { not: null } },
+        distinct: ['appVersion'],
+        select: { appVersion: true },
+      }),
+    ]);
+    const total = totals[0] ?? { groups: 0, reports: 0, fatal: 0, users: 0 };
+    return {
+      ...toPage(rows, total.groups, query),
+      totals: { reports: total.reports, fatal: total.fatal, users: total.users },
+      days,
+      versions: versions.flatMap((row) => row.appVersion ?? []).sort(compareVersionsDesc),
+    };
+  }
+
+  /** One crash's reports, newest first: the full stack, the phone, who, and what they did just before. */
+  async reports(signature: string, query: CrashReportsQueryDto, now: Date = new Date()) {
+    const where = {
+      signature,
+      occurredAt: { gte: new Date(now.getTime() - query.days * DAY_MS) },
+    } satisfies Prisma.AppCrashWhereInput;
+    const [rows, total] = await Promise.all([
+      this.prisma.appCrash.findMany({
+        where,
+        orderBy: { occurredAt: 'desc' },
+        ...pageArgs(query),
+        select: {
+          id: true,
+          kind: true,
+          fatal: true,
+          message: true,
+          stack: true,
+          breadcrumbs: true,
+          platform: true,
+          appVersion: true,
+          appBuild: true,
+          deviceModel: true,
+          osVersion: true,
+          occurredAt: true,
+          user: { select: { id: true, username: true, displayName: true, avatarUrl: true } },
+        },
+      }),
+      this.prisma.appCrash.count({ where }),
+    ]);
+    if (total === 0) throw new NotFoundException('No reports of this crash in that time');
+    return toPage(rows, total, query);
+  }
+
+  // Each day's fatal crashes and other errors, oldest first, zero-filled.
+  private days(since: Date, now: Date): Promise<DayCount[]> {
+    return this.prisma.$queryRaw<DayCount[]>`
+      SELECT to_char(d, 'YYYY-MM-DD') AS day,
+        count(c.id) FILTER (WHERE c.fatal)::int AS fatal,
+        count(c.id) FILTER (WHERE NOT c.fatal)::int AS errors
+      FROM generate_series(date_trunc('day', ${since}::timestamp), date_trunc('day', ${now}::timestamp), interval '1 day') AS d
+      LEFT JOIN app_crashes c ON c."occurredAt" >= d AND c."occurredAt" < d + interval '1 day'
+      GROUP BY d ORDER BY d`;
+  }
+}
+
+function compareVersionsDesc(a: string, b: string): number {
+  const left = a.split('.').map(Number);
+  const right = b.split('.').map(Number);
+  for (let i = 0; i < Math.max(left.length, right.length); i++) {
+    const difference = (right[i] ?? 0) - (left[i] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+}
