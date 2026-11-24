@@ -1,5 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AppCrashKind, Prisma } from '@prisma/client';
+import { ActivityRecordedPayload, DomainEvents } from '../../common/events/domain-events';
+import { AdminPrincipal } from '../admin.guard';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { pageArgs, toPage } from '../../common/pagination/page-query.dto';
 import { CrashGroupsQueryDto, CrashReportsQueryDto } from './admin-crashes.dto';
@@ -34,7 +37,10 @@ export interface DayCount {
  */
 @Injectable()
 export class AdminCrashesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly events: EventEmitter2,
+  ) {}
 
   async groups(query: CrashGroupsQueryDto, now: Date = new Date()) {
     const since = new Date(now.getTime() - query.days * DAY_MS);
@@ -112,6 +118,47 @@ export class AdminCrashesService {
     ]);
     if (total === 0) throw new NotFoundException('No reports of this crash in that time');
     return toPage(rows, total, query);
+  }
+
+  /**
+   * Removes a crash: every report of it, however old (fixed, or noise). If it
+   * happens again it comes back as new.
+   */
+  async removeCrash(admin: AdminPrincipal, signature: string) {
+    const latest = await this.prisma.appCrash.findFirst({
+      where: { signature },
+      orderBy: { occurredAt: 'desc' },
+      select: { kind: true, message: true },
+    });
+    if (!latest) throw new NotFoundException('That crash has no reports');
+    const { count } = await this.prisma.appCrash.deleteMany({ where: { signature } });
+    this.events.emit(DomainEvents.ActivityRecorded, {
+      action: 'crash.deleted',
+      actorId: admin.id,
+      metadata: {
+        signature,
+        kind: latest.kind,
+        message: latest.message.slice(0, 200),
+        removed: count,
+      },
+    } satisfies ActivityRecordedPayload);
+    return { removed: count };
+  }
+
+  /** Removes one report of a crash. */
+  async removeReport(admin: AdminPrincipal, reportId: string) {
+    const report = await this.prisma.appCrash.findUnique({
+      where: { id: reportId },
+      select: { signature: true, kind: true },
+    });
+    if (!report) throw new NotFoundException('Crash report not found');
+    await this.prisma.appCrash.deleteMany({ where: { id: reportId } });
+    this.events.emit(DomainEvents.ActivityRecorded, {
+      action: 'crash.report_deleted',
+      actorId: admin.id,
+      metadata: { reportId, signature: report.signature, kind: report.kind },
+    } satisfies ActivityRecordedPayload);
+    return { removed: 1 };
   }
 
   // Each day's fatal crashes and other errors, oldest first, zero-filled.

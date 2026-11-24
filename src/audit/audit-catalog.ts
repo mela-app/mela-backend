@@ -48,6 +48,8 @@ export const AUDIT_ACTIONS = {
   'admin.seeded': { category: 'ADMIN', label: 'Created the default super admin' },
   'admin.audit_exported': { category: 'ADMIN', label: 'Exported the audit log' },
   'admin.private_messages_viewed': { category: 'ADMIN', label: 'Read private messages' },
+  'crash.deleted': { category: 'ADMIN', label: 'Removed an app crash and its reports' },
+  'crash.report_deleted': { category: 'ADMIN', label: 'Removed an app crash report' },
   'data.cleared': { category: 'ADMIN', label: 'Removed stored data' },
   'data.reset': { category: 'ADMIN', label: 'Reset all data' },
 
