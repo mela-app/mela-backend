@@ -391,6 +391,8 @@ model Stream {
   hostingRestrictions  HostingRestriction[]
   // The scheduled live this one fulfils, when the host started it from one.
   scheduledLive        ScheduledLive?
+  // Private messages it was shared in (DirectMessage.streamId).
+  sharedInMessages     DirectMessage[]
 
   @@index([status])
   @@index([hostId, startedAt])
@@ -845,6 +847,9 @@ model DirectMessage {
   text           String
   // A photo (docs/features/messages.md); null for plain text.
   imageUrl       String?
+  // A live shared to this person (docs/features/share.md) - shown as a card to
+  // join it from; null otherwise. Kept, card and all, after the live ends.
+  streamId       String?
   // The sending app's own id for it, so a resend after a lost answer isn't stored twice.
   clientId       String?
   // When the recipient opened the conversation; null while unread.
@@ -859,10 +864,13 @@ model DirectMessage {
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender       User         @relation("DirectMessagesSent", fields: [senderId], references: [id], onDelete: Cascade)
   recipient    User         @relation("DirectMessagesReceived", fields: [recipientId], references: [id], onDelete: Cascade)
+  // A live removed for good (the Data page) leaves its cards saying so.
+  stream       Stream?      @relation(fields: [streamId], references: [id], onDelete: SetNull)
 
   @@unique([senderId, clientId])
   @@index([conversationId, id])
   @@index([recipientId, readAt])
+  @@index([streamId])
   @@map("direct_messages")
 }
 

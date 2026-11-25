@@ -56,6 +56,16 @@ const MESSAGE_SELECT = {
   recipientId: true,
   text: true,
   imageUrl: true,
+  streamId: true,
+  stream: {
+    select: {
+      id: true,
+      title: true,
+      status: true,
+      thumbnailUrl: true,
+      host: { select: PERSON_SELECT },
+    },
+  },
   clientId: true,
   createdAt: true,
   readAt: true,
@@ -171,6 +181,36 @@ export class DirectMessagesService {
       throw error;
     }
 
+    this.events.emit(DomainEvents.DirectMessageSent, {
+      message,
+      sender,
+      recipient,
+      recipientUnreadCount: await this.unreadTotal(recipientId),
+    } satisfies DirectMessageSentPayload);
+    return message;
+  }
+
+  /**
+   * A live [senderId] shared with [recipientId] (ShareService, docs/features/
+   * share.md), as a message in their conversation: a card to join it from,
+   * even after the push is gone. ShareService has already checked who may be
+   * sent it and how often - friends or not - so none of a typed message's
+   * checks apply. No push of its own: the live invite notification is it.
+   */
+  async shareLive(
+    senderId: string,
+    recipientId: string,
+    streamId: string,
+  ): Promise<DirectMessageSnapshot> {
+    assertNotSelf(senderId, recipientId);
+    const people = await this.prisma.user.findMany({
+      where: { id: { in: [senderId, recipientId] } },
+      select: PERSON_SELECT,
+    });
+    const sender = people.find((person) => person.id === senderId);
+    const recipient = people.find((person) => person.id === recipientId);
+    if (!sender || !recipient) throw new NotFoundException('User not found');
+    const message = await this.store(senderId, recipientId, '', null, undefined, streamId);
     this.events.emit(DomainEvents.DirectMessageSent, {
       message,
       sender,
@@ -335,6 +375,12 @@ export class DirectMessagesService {
     now: Date = new Date(),
   ): Promise<DirectMessageSnapshot> {
     const message = await this.ownMessage(userId, otherId, messageId);
+    if (message.streamId) {
+      throw new BadRequestException({
+        message: "A shared live can't be edited",
+        code: 'NOT_EDITABLE',
+      });
+    }
     if (now.getTime() - message.createdAt.getTime() > DIRECT_MESSAGE_EDIT_WINDOW_MS) {
       throw new BadRequestException({
         message: 'Messages can only be edited for 15 minutes after sending',
@@ -536,6 +582,7 @@ export class DirectMessagesService {
     text: string,
     imageUrl: string | null,
     clientId?: string,
+    streamId?: string,
   ) {
     const pair = pairOf(senderId, recipientId);
     return this.prisma.$transaction(async (tx) => {
@@ -553,6 +600,7 @@ export class DirectMessagesService {
           text,
           clientId,
           ...(imageUrl && { imageUrl }),
+          ...(streamId && { streamId }),
         },
         select: MESSAGE_SELECT,
       });

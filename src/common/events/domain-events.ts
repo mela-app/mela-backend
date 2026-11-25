@@ -14,6 +14,7 @@ import type {
   SessionPlatform,
   StreamEndReason,
   StreamLayout,
+  StreamStatus,
   StreamVisibility,
   VideoProviderKind,
 } from '@prisma/client';
@@ -710,6 +711,10 @@ export interface DirectMessageSnapshot {
   text: string;
   // A photo; null for plain text.
   imageUrl: string | null;
+  // A live shared to the recipient (docs/features/share.md): a card to join it
+  // from. `streamId` stays set while `stream` is null once the live is gone for good.
+  streamId: string | null;
+  stream: DirectMessageSharedLive | null;
   // The sending app's own id for it, so that app can match its pending bubble.
   clientId: string | null;
   createdAt: Date;
@@ -731,6 +736,15 @@ export interface DirectMessagePerson {
 // both people's own rooms - the recipient's inbox, and the sender's other
 // devices - and `message:unread_count` to the recipient: a total, so a missed
 // update never leaves the badge wrong.
+/** A shared live as its card shows it: whose, what, and whether it's still on. */
+export interface DirectMessageSharedLive {
+  id: string;
+  title: string;
+  status: StreamStatus;
+  thumbnailUrl: string | null;
+  host: DirectMessagePerson;
+}
+
 export interface DirectMessageSentPayload {
   message: DirectMessageSnapshot;
   // Both people, so either app can put a new conversation in its inbox without a fetch.
