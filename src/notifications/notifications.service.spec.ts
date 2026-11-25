@@ -681,6 +681,8 @@ describe('NotificationsService', () => {
         readAt: null,
         editedAt: null,
         imageUrl: null,
+        streamId: null as string | null,
+        stream: null,
       },
       sender: { id: 'friend-1', username: 'abebe', displayName: 'Abebe', avatarUrl: null },
       recipient: { id: 'me', username: 'me', displayName: 'Me', avatarUrl: null },
@@ -716,6 +718,16 @@ describe('NotificationsService', () => {
       prisma.notificationSettings.findUnique.mockResolvedValue({ pushDirectMessages: false });
 
       await service().onDirectMessageSent(payload('hi'));
+
+      expect(pushQueue.enqueue).not.toHaveBeenCalled();
+    });
+
+    it("doesn't push a shared live - its live invite already did", async () => {
+      prisma.notificationSettings.findUnique.mockResolvedValue(null);
+      const shared = payload('');
+      shared.message.streamId = 'stream-1';
+
+      await service().onDirectMessageSent(shared);
 
       expect(pushQueue.enqueue).not.toHaveBeenCalled();
     });

@@ -36,6 +36,8 @@ const message = (id: string, senderId: string, recipientId: string, text = 'hell
   recipientId,
   text,
   imageUrl: null as string | null,
+  streamId: null as string | null,
+  stream: null,
   clientId: null,
   createdAt: new Date('2026-10-01T09:00:00Z'),
   readAt: null,
@@ -102,11 +104,13 @@ describe('DirectMessagesService', () => {
           text: string;
           clientId?: string;
           imageUrl?: string;
+          streamId?: string;
         };
       }) =>
         Promise.resolve({
           ...message('m1', data.senderId, data.recipientId, data.text),
           imageUrl: data.imageUrl ?? null,
+          streamId: data.streamId ?? null,
           clientId: data.clientId ?? null,
         }),
     );
@@ -541,6 +545,47 @@ describe('DirectMessagesService', () => {
       await expect(service().erase('dm-1', 'admin-1')).resolves.toBe(false);
       expect(prisma.directMessage.delete).not.toHaveBeenCalled();
       expect(events.emit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('shareLive', () => {
+    it("puts a shared live in the pair's conversation, friends or not, and tells both apps", async () => {
+      social.isFriend.mockResolvedValue(false);
+
+      const shared = await service().shareLive(BEN, ANA, 'stream-1');
+
+      expect(prisma.directMessage.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: {
+            conversationId: 'conversation-1',
+            senderId: BEN,
+            recipientId: ANA,
+            text: '',
+            clientId: undefined,
+            streamId: 'stream-1',
+          },
+        }),
+      );
+      // No typed message's checks: ShareService decided who may be sent it.
+      expect(rateLimit.take).not.toHaveBeenCalled();
+      expect(events.emit).toHaveBeenCalledWith(DomainEvents.DirectMessageSent, {
+        message: shared,
+        sender: ben,
+        recipient: ana,
+        recipientUnreadCount: 3,
+      });
+    });
+
+    it("can't be edited", async () => {
+      prisma.directMessage.findFirst.mockResolvedValue({
+        ...message('dm-3', ANA, BEN, ''),
+        streamId: 'stream-1',
+      });
+
+      expect(await refusal(service().edit(ANA, BEN, 'dm-3', 'hello', new Date()))).toEqual({
+        status: 400,
+        code: 'NOT_EDITABLE',
+      });
     });
   });
 

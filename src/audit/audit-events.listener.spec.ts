@@ -354,6 +354,8 @@ describe('AuditEventsListener', () => {
           recipientId: 'u2',
           text: 'a private thing',
           imageUrl: null,
+          streamId: null,
+          stream: null,
           clientId: null,
           createdAt: new Date(),
           readAt: null,

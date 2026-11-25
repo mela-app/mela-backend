@@ -1106,6 +1106,8 @@ describe('RealtimeGateway', () => {
         readAt: null,
         editedAt: null,
         imageUrl: null,
+        streamId: null,
+        stream: null,
       };
 
       makeGateway().handleDirectMessageSent({

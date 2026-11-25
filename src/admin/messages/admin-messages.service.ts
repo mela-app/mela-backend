@@ -82,6 +82,8 @@ export class AdminMessagesService {
         senderId: true,
         text: true,
         imageUrl: true,
+        streamId: true,
+        stream: { select: { id: true, title: true } },
         createdAt: true,
         readAt: true,
       },

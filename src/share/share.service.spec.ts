@@ -4,6 +4,7 @@ import { DomainEvents } from '../common/events/domain-events';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RateLimitService } from '../common/rate-limit/rate-limit.service';
 import { RedisService } from '../common/redis/redis.service';
+import { DirectMessagesService } from '../direct-messages/direct-messages.service';
 import { SocialService } from '../social/social.service';
 import { ShareService } from './share.service';
 
@@ -14,8 +15,10 @@ describe('ShareService', () => {
   const prisma = { stream: { findUnique: jest.fn() }, user: { findMany: jest.fn() } };
   const social = {
     isFollowing: jest.fn().mockResolvedValue(false),
+    isFriend: jest.fn().mockResolvedValue(false),
     blockedEitherWayUserIds: jest.fn().mockResolvedValue([]),
   };
+  const directMessages = { shareLive: jest.fn().mockResolvedValue({}) };
   const rateLimit = { take: jest.fn().mockResolvedValue(0) };
   const redisClient = {
     smembers: jest.fn().mockResolvedValue([]),
@@ -32,6 +35,7 @@ describe('ShareService', () => {
       rateLimit as unknown as RateLimitService,
       redis,
       events as never,
+      directMessages as unknown as DirectMessagesService,
     );
 
   beforeEach(() => {
@@ -39,6 +43,8 @@ describe('ShareService', () => {
     rateLimit.take.mockResolvedValue(0);
     redisClient.smembers.mockResolvedValue([]);
     social.blockedEitherWayUserIds.mockResolvedValue([]);
+    social.isFriend.mockResolvedValue(false);
+    directMessages.shareLive.mockResolvedValue({});
     // Every id asked about is an active account.
     prisma.user.findMany.mockImplementation(({ where }: { where: { id: { in: string[] } } }) =>
       Promise.resolve(where.id.in.map((id) => ({ id }))),
@@ -67,14 +73,14 @@ describe('ShareService', () => {
   it('never invites yourself, silently', async () => {
     const result = await service().sendInvites(STREAM, SENDER, [SENDER]);
 
-    expect(result).toEqual({ invited: [] });
+    expect(result).toEqual({ invited: [], sentOnce: [] });
     expect(events.emit).not.toHaveBeenCalled();
   });
 
   it('invites anyone, friend or not, and emits stream.invite_sent', async () => {
     const result = await service().sendInvites(STREAM, SENDER, ['f1', 'f2']);
 
-    expect(result).toEqual({ invited: ['f1', 'f2'] });
+    expect(result).toEqual({ invited: ['f1', 'f2'], sentOnce: ['f1', 'f2'] });
     expect(redisClient.sadd).toHaveBeenCalledWith(`invite:${STREAM}:${SENDER}`, 'f1', 'f2');
     expect(events.emit).toHaveBeenCalledWith(DomainEvents.StreamInviteSent, {
       streamId: STREAM,
@@ -97,6 +103,7 @@ describe('ShareService', () => {
 
     await expect(service().sendInvites(STREAM, SENDER, ['f1', 'f2'])).resolves.toEqual({
       invited: ['f1'],
+      sentOnce: ['f1'],
     });
   });
 
@@ -105,6 +112,7 @@ describe('ShareService', () => {
 
     await expect(service().sendInvites(STREAM, SENDER, ['f1', 'f2'])).resolves.toEqual({
       invited: ['f2'],
+      sentOnce: ['f1', 'f2'],
     });
   });
 
@@ -116,7 +124,7 @@ describe('ShareService', () => {
 
     await expect(
       service().sendInvites(STREAM, SENDER, ['b1', 'b2', 'suspended', 'ok']),
-    ).resolves.toEqual({ invited: ['ok'] });
+    ).resolves.toEqual({ invited: ['ok'], sentOnce: ['ok'] });
   });
 
   it('refuses once the per-stream cap is already used up', async () => {
@@ -132,6 +140,65 @@ describe('ShareService', () => {
 
     const result = await service().sendInvites(STREAM, SENDER, ['f1', 'f2']);
 
-    expect(result).toEqual({ invited: ['f1'] });
+    expect(result).toEqual({ invited: ['f1'], sentOnce: ['f1'] });
+  });
+
+  describe('people who follow each other', () => {
+    beforeEach(() =>
+      social.isFriend.mockImplementation(async (_: string, id: string) => id.startsWith('friend')),
+    );
+
+    it('may be sent the same live again and again, outside the cap', async () => {
+      redisClient.smembers.mockResolvedValue(Array.from({ length: 20 }, (_, i) => `already-${i}`));
+
+      await expect(service().sendInvites(STREAM, SENDER, ['friend-1'])).resolves.toEqual({
+        invited: ['friend-1'],
+        sentOnce: [],
+      });
+      await expect(service().sendInvites(STREAM, SENDER, ['friend-1'])).resolves.toEqual({
+        invited: ['friend-1'],
+        sentOnce: [],
+      });
+      expect(redisClient.sadd).not.toHaveBeenCalled();
+    });
+
+    it('still get it when the others are over the cap', async () => {
+      redisClient.smembers.mockResolvedValue(Array.from({ length: 20 }, (_, i) => `already-${i}`));
+
+      await expect(
+        service().sendInvites(STREAM, SENDER, ['friend-1', 'stranger']),
+      ).resolves.toEqual({
+        invited: ['friend-1'],
+        sentOnce: [],
+      });
+    });
+
+    it('while someone who only follows one way gets it once', async () => {
+      redisClient.smembers.mockResolvedValue(['one-way']);
+
+      await expect(service().sendInvites(STREAM, SENDER, ['friend-1', 'one-way'])).resolves.toEqual(
+        {
+          invited: ['friend-1'],
+          sentOnce: ['one-way'],
+        },
+      );
+    });
+  });
+
+  it("puts each live sent in the recipient's private chat", async () => {
+    await service().sendInvites(STREAM, SENDER, ['f1', 'f2']);
+
+    expect(directMessages.shareLive).toHaveBeenCalledWith(SENDER, 'f1', STREAM);
+    expect(directMessages.shareLive).toHaveBeenCalledWith(SENDER, 'f2', STREAM);
+  });
+
+  it("still sends the live when it can't be put in a chat", async () => {
+    directMessages.shareLive.mockRejectedValue(new Error('db down'));
+
+    await expect(service().sendInvites(STREAM, SENDER, ['f1'])).resolves.toEqual({
+      invited: ['f1'],
+      sentOnce: ['f1'],
+    });
+    expect(events.emit).toHaveBeenCalledWith(DomainEvents.StreamInviteSent, expect.anything());
   });
 });

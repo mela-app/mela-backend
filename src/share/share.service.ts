@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -10,10 +11,19 @@ import { DomainEvents, StreamInviteSentPayload } from '../common/events/domain-e
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RateLimit, RateLimitService } from '../common/rate-limit/rate-limit.service';
 import { RedisService } from '../common/redis/redis.service';
+import { DirectMessagesService } from '../direct-messages/direct-messages.service';
 import { SocialService } from '../social/social.service';
 import { canWatchLive } from '../streams/live-audience';
 
 const INVITE_CAP_PER_STREAM = 20;
+
+export interface SendInvitesResult {
+  // Who was sent it now.
+  invited: string[];
+  // Of those asked, the ones who don't follow each other with the sender and
+  // have had this live from them now: not again (the app shows them as sent).
+  sentOnce: string[];
+}
 const INVITE_RATE_LIMIT: RateLimit = { capacity: 5, refillMs: 60_000 };
 // Just bounds the per-stream invite-cap set's lifetime in Redis - a stream
 // this old has long since ended one way or another.
@@ -21,25 +31,30 @@ const INVITE_SET_TTL_SECONDS = 24 * 60 * 60;
 
 /**
  * "Send to friends" from the live screen (plan §6.12) - never a spam vector.
- * Anyone may be sent it, friend or not (client request, 2026-10), but each
- * person only once per live from the same sender, at most
- * {@link INVITE_CAP_PER_STREAM} of them. See docs/features/share.md.
+ * Anyone may be sent it (client request, 2026-10). Two people who follow each
+ * other may send each other a live as often as they like; anyone else gets it
+ * once per live from the same sender, at most {@link INVITE_CAP_PER_STREAM}
+ * such people (client request, 2026-11). Each one sent lands in the
+ * recipient's private chat too, as a card to join from. See docs/features/share.md.
  */
 @Injectable()
 export class ShareService {
+  private readonly logger = new Logger(ShareService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly social: SocialService,
     private readonly rateLimit: RateLimitService,
     private readonly redis: RedisService,
     private readonly events: EventEmitter2,
+    private readonly directMessages: DirectMessagesService,
   ) {}
 
   async sendInvites(
     streamId: string,
     senderId: string,
     userIds: string[],
-  ): Promise<{ invited: string[] }> {
+  ): Promise<SendInvitesResult> {
     const stream = await this.prisma.stream.findUnique({
       where: { id: streamId },
       select: { status: true, hostId: true, visibility: true },
@@ -67,24 +82,15 @@ export class ShareService {
       candidates.map((id) => this.canWatch(stream.hostId, stream.visibility, id)),
     );
     const recipients = candidates.filter((_, index) => canWatch[index]);
-    if (recipients.length === 0) return { invited: [] };
+    if (recipients.length === 0) return { invited: [], sentOnce: [] };
 
-    const capKey = `invite:${streamId}:${senderId}`;
-    const client = this.redis.getClient();
-    const alreadyInvited = new Set(await client.smembers(capKey));
-    const room = INVITE_CAP_PER_STREAM - alreadyInvited.size;
-    if (room <= 0) {
-      throw new ForbiddenException(
-        `You've already invited the max of ${INVITE_CAP_PER_STREAM} people to this live`,
-      );
-    }
-
-    // Once per person per live: someone already sent it isn't sent it again.
-    const toInvite = recipients.filter((id) => !alreadyInvited.has(id)).slice(0, room);
-    if (toInvite.length === 0) return { invited: [] };
-
-    await client.sadd(capKey, ...toInvite);
-    await client.expire(capKey, INVITE_SET_TTL_SECONDS);
+    // Following each other: as often as they like (the sender's pace still applies).
+    const isFriend = await Promise.all(recipients.map((id) => this.social.isFriend(senderId, id)));
+    const friends = recipients.filter((_, index) => isFriend[index]);
+    const others = recipients.filter((_, index) => !isFriend[index]);
+    const once = await this.firstTimeOthers(streamId, senderId, others, friends.length);
+    const toInvite = [...friends, ...once.invited];
+    if (toInvite.length === 0) return { invited: [], sentOnce: once.sentOnce };
 
     this.events.emit(DomainEvents.StreamInviteSent, {
       streamId,
@@ -92,7 +98,49 @@ export class ShareService {
       recipientIds: toInvite,
     } satisfies StreamInviteSentPayload);
 
-    return { invited: toInvite };
+    // In each one's private chat too - a failure there still leaves the notification.
+    await Promise.all(
+      toInvite.map((recipientId) =>
+        this.directMessages.shareLive(senderId, recipientId, streamId).catch((error: unknown) => {
+          this.logger.warn(
+            `Could not put the shared live in ${recipientId}'s chat: ${String(error)}`,
+          );
+        }),
+      ),
+    );
+
+    return { invited: toInvite, sentOnce: once.sentOnce };
+  }
+
+  /**
+   * Of [others] (not following each other with the sender), those not sent
+   * this live by them yet, within the cap - now marked as sent - and which of
+   * them all have had it now. Over the cap with nobody else to send to, it says so.
+   */
+  private async firstTimeOthers(
+    streamId: string,
+    senderId: string,
+    others: string[],
+    friendCount: number,
+  ): Promise<{ invited: string[]; sentOnce: string[] }> {
+    if (others.length === 0) return { invited: [], sentOnce: [] };
+    const capKey = `invite:${streamId}:${senderId}`;
+    const client = this.redis.getClient();
+    const alreadyInvited = new Set(await client.smembers(capKey));
+    const fresh = others.filter((id) => !alreadyInvited.has(id));
+    const room = INVITE_CAP_PER_STREAM - alreadyInvited.size;
+    if (fresh.length > 0 && room <= 0 && friendCount === 0) {
+      throw new ForbiddenException(
+        `You've already sent this live to ${INVITE_CAP_PER_STREAM} people who don't follow you back`,
+      );
+    }
+    const toInvite = fresh.slice(0, Math.max(0, room));
+    if (toInvite.length > 0) {
+      await client.sadd(capKey, ...toInvite);
+      await client.expire(capKey, INVITE_SET_TTL_SECONDS);
+    }
+    const sent = new Set([...alreadyInvited, ...toInvite]);
+    return { invited: toInvite, sentOnce: others.filter((id) => sent.has(id)) };
   }
 
   /** Everyone who blocked, or was blocked by, any of these people. */

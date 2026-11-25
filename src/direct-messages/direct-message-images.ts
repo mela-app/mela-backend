@@ -22,8 +22,13 @@ export function isDirectMessageImageKey(key: string, senderId: string): boolean 
   );
 }
 
-/** A message as one line (a push, the inbox): a photo reads as one. */
-export function directMessagePreview(text: string, imageUrl: string | null): string {
+/** A message as one line (a push, the inbox): a photo or a shared live reads as one. */
+export function directMessagePreview(
+  text: string,
+  imageUrl: string | null,
+  sharedLive: { title: string } | null = null,
+): string {
+  if (sharedLive) return `🔴 Shared a live: ${sharedLive.title}`;
   if (!imageUrl) return text;
   return text ? `📷 ${text}` : '📷 Photo';
 }

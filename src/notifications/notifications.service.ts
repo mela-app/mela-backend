@@ -655,6 +655,8 @@ export class NotificationsService {
   @OnEvent(DomainEvents.DirectMessageSent)
   async onDirectMessageSent(payload: DirectMessageSentPayload): Promise<void> {
     const { message, sender } = payload;
+    // A shared live: its live invite notification already pushed.
+    if (message.streamId) return;
     const settings = await this.prisma.notificationSettings.findUnique({
       where: { userId: message.recipientId },
       select: { pushDirectMessages: true },
