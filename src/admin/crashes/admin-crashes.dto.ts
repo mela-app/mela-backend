@@ -28,6 +28,34 @@ export class CrashGroupsQueryDto extends PageQueryDto {
   fatal?: boolean;
 }
 
+/** An export: the page's filters, or one crash ([signature]). */
+export class CrashExportQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(90)
+  days: number = 7;
+
+  @IsOptional()
+  @IsIn(Object.values(AppCrashKind))
+  kind?: AppCrashKind;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{1,4}(\.\d{1,4}){0,3}$/)
+  appVersion?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  fatal?: boolean;
+
+  @IsOptional()
+  @Matches(/^[0-9a-f]{16}$/)
+  signature?: string;
+}
+
 export class CrashReportsQueryDto extends PageQueryDto {
   @IsOptional()
   @Type(() => Number)

@@ -50,6 +50,7 @@ export const AUDIT_ACTIONS = {
   'admin.private_messages_viewed': { category: 'ADMIN', label: 'Read private messages' },
   'crash.deleted': { category: 'ADMIN', label: 'Removed an app crash and its reports' },
   'crash.report_deleted': { category: 'ADMIN', label: 'Removed an app crash report' },
+  'crash.exported': { category: 'ADMIN', label: 'Exported app crash reports' },
   'data.cleared': { category: 'ADMIN', label: 'Removed stored data' },
   'data.reset': { category: 'ADMIN', label: 'Reset all data' },
 
