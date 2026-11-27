@@ -5,9 +5,17 @@ import { ActivityRecordedPayload, DomainEvents } from '../../common/events/domai
 import { AdminPrincipal } from '../admin.guard';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { pageArgs, toPage } from '../../common/pagination/page-query.dto';
-import { CrashGroupsQueryDto, CrashReportsQueryDto } from './admin-crashes.dto';
+import {
+  CrashExportQueryDto,
+  CrashGroupsQueryDto,
+  CrashReportsQueryDto,
+} from './admin-crashes.dto';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+// An export: the most common crashes, each with its newest reports - enough to
+// see what's wrong without a file too big to hand on.
+const EXPORT_GROUPS = 50;
+const EXPORT_REPORTS_PER_GROUP = 5;
 
 /** One crash as it happens on many phones: the latest report's words, and how far it reaches. */
 export interface CrashGroup {
@@ -159,6 +167,88 @@ export class AdminCrashesService {
       metadata: { reportId, signature: report.signature, kind: report.kind },
     } satisfies ActivityRecordedPayload);
     return { removed: 1 };
+  }
+
+  /**
+   * Crashes to hand to whoever fixes them (docs/features/app-crashes.md,
+   * "Exporting"): the most common first, each with its newest reports' stack,
+   * breadcrumbs, phone and app version - and nobody's account: a report says
+   * only whether someone was signed in. Recorded in the audit log.
+   */
+  async export(admin: AdminPrincipal, query: CrashExportQueryDto, now: Date = new Date()) {
+    const since = new Date(now.getTime() - query.days * DAY_MS);
+    const page = await this.groups(
+      Object.assign(new CrashGroupsQueryDto(), {
+        days: query.days,
+        kind: query.kind,
+        appVersion: query.appVersion,
+        fatal: query.fatal,
+        page: 1,
+        pageSize: 100,
+      }),
+      now,
+    );
+    const chosen = (
+      query.signature
+        ? page.items.filter((group) => group.signature === query.signature)
+        : page.items
+    ).slice(0, EXPORT_GROUPS);
+    const groups = await Promise.all(
+      chosen.map(async (group) => ({
+        ...group,
+        reports: await this.prisma.appCrash.findMany({
+          where: {
+            signature: group.signature,
+            occurredAt: { gte: since },
+            ...(query.appVersion && { appVersion: query.appVersion }),
+          },
+          orderBy: { occurredAt: 'desc' },
+          take: EXPORT_REPORTS_PER_GROUP,
+          select: {
+            id: true,
+            kind: true,
+            fatal: true,
+            message: true,
+            stack: true,
+            breadcrumbs: true,
+            platform: true,
+            appVersion: true,
+            appBuild: true,
+            deviceModel: true,
+            osVersion: true,
+            occurredAt: true,
+            userId: true,
+          },
+        }),
+      })),
+    );
+    this.events.emit(DomainEvents.ActivityRecorded, {
+      action: 'crash.exported',
+      actorId: admin.id,
+      metadata: {
+        days: query.days,
+        kind: query.kind ?? null,
+        appVersion: query.appVersion ?? null,
+        fatal: query.fatal ?? false,
+        signature: query.signature ?? null,
+        crashes: groups.length,
+      },
+    } satisfies ActivityRecordedPayload);
+    return {
+      generatedAt: now,
+      filters: {
+        days: query.days,
+        kind: query.kind ?? null,
+        appVersion: query.appVersion ?? null,
+        fatal: query.fatal ?? false,
+        signature: query.signature ?? null,
+      },
+      totals: { ...page.totals, crashes: page.total },
+      groups: groups.map(({ reports, ...group }) => ({
+        ...group,
+        reports: reports.map(({ userId, ...report }) => ({ ...report, signedIn: userId !== null })),
+      })),
+    };
   }
 
   // Each day's fatal crashes and other errors, oldest first, zero-filled.

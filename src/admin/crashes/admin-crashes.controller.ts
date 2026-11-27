@@ -18,7 +18,11 @@ import {
   CurrentAdmin,
   RequirePermission,
 } from '../admin.guard';
-import { CrashGroupsQueryDto, CrashReportsQueryDto } from './admin-crashes.dto';
+import {
+  CrashExportQueryDto,
+  CrashGroupsQueryDto,
+  CrashReportsQueryDto,
+} from './admin-crashes.dto';
 import { AdminCrashesService } from './admin-crashes.service';
 
 // A crash's signature (crashSignature): 16 hex characters.
@@ -40,6 +44,12 @@ export class AdminCrashesController {
   @Get()
   groups(@Query() query: CrashGroupsQueryDto) {
     return this.crashes.groups(query);
+  }
+
+  // Before ':signature', which would take "export" for one.
+  @Get('export')
+  export(@CurrentAdmin() admin: AdminPrincipal, @Query() query: CrashExportQueryDto) {
+    return this.crashes.export(admin, query);
   }
 
   @Get(':signature')
